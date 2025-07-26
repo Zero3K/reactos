@@ -102,10 +102,29 @@
 #pragma warning(disable : 4995)
 #include <ntifs.h>
 #include <ntddscsi.h>
-#include <scsi.h>
 #include <ntddcdrm.h>
 #include <ntddcdvd.h>
 #include "ntdddisk.h"
+
+// SCSI operation codes needed by UDFS driver (extracted from scsi.h)
+#define SCSIOP_FORMAT_UNIT              0x04
+#define SCSIOP_WRITE6                   0x0A
+#define SCSIOP_ERASE                    0x19
+#define SCSIOP_WRITE                    0x2A
+#define SCSIOP_WRITE_VERIFY             0x2E
+#define SCSIOP_SYNCHRONIZE_CACHE        0x35
+#define SCSIOP_RESERVE_TRACK_RZONE      0x53
+#define SCSIOP_CLOSE_TRACK_SESSION      0x5B
+#define SCSIOP_BLANK                    0xA1
+#define SCSIOP_SET_READ_AHEAD           0xA7
+#define SCSIOP_WRITE12                  0xAA
+#define SCSIOP_SEND_VOLUME_TAG          0xB6
+
+// Minimal CDB (Command Descriptor Block) definition needed by UDFS driver
+typedef union _CDB {
+  ULONG AsUlong[4];
+  UCHAR AsByte[16];
+} CDB, *PCDB;
 #include <pseh/pseh2.h>
 
 #include "nodetype.h"
