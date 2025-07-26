@@ -51,21 +51,22 @@ UDFFastIoCheckIfPossible(
     )
 {
     BOOLEAN             ReturnedStatus = FALSE;
-    PtrUDFFCB           Fcb = NULL;
-    PtrUDFCCB           Ccb = NULL;
+    TYPE_OF_OPEN        TypeOfOpen;
+    PFCB                Fcb;
     LARGE_INTEGER       IoLength;
 
-    // Obtain a pointer to the FCB and CCB for the file stream.
-    Ccb = (PtrUDFCCB)(FileObject->FsContext2);
-    ASSERT(Ccb);
-    Fcb = Ccb->Fcb;
-    ASSERT(Fcb);
+    // Decode the type of file object we're being asked to process and
+    // make sure that is is only a user file open.
+
+    TypeOfOpen = UDFFastDecodeFileObject(FileObject, &Fcb);
+
+    ASSERT_FCB(Fcb);
 
     // Validate that this is a fast-IO request to a regular file.
     // The UDF FSD for example, will not allow fast-IO requests
     // to volume objects, or to directories.
-    if ((Fcb->NodeIdentifier.NodeType == UDF_NODE_TYPE_VCB) ||
-         (Fcb->FCBFlags & UDF_FCB_DIRECTORY)) {
+    if ((Fcb == Fcb->Vcb->VolumeDasdFcb) ||
+         (Fcb->FcbState & UDF_FCB_DIRECTORY)) {
         // This is not allowed.
         IoStatus->Status = STATUS_INVALID_PARAMETER;
         MmPrint(("    UDFFastIoCheckIfPossible() TRUE, Failed\n"));
@@ -73,7 +74,7 @@ UDFFastIoCheckIfPossible(
     }
 /*
     // back pressure for very smart and fast system cache ;)
-    if(Fcb->Vcb->VerifyCtx.ItemCount >= UDF_MAX_VERIFY_CACHE) {
+    if (Fcb->Vcb->VerifyCtx.ItemCount >= UDF_MAX_VERIFY_CACHE) {
         AdPrint(("    Verify queue overflow -> UDFFastIoCheckIfPossible() = FALSE\n"));
         return FALSE;
     }
@@ -93,21 +94,30 @@ UDFFastIoCheckIfPossible(
         // locks on the file stream. If we do not use the FSRTL package
         // for byte-range locking support, then we must substitute our
         // own checks over here.
-        ReturnedStatus = FsRtlFastCheckLockForRead(&(Fcb->NTRequiredFCB->FileLock),
+        if (Fcb->FileLock == NULL ||
+            FsRtlFastCheckLockForRead(Fcb->FileLock,
                               FileOffset, &IoLength, LockKey, FileObject,
-                              PsGetCurrentProcess());
+                              PsGetCurrentProcess())) {
+
+            ReturnedStatus = TRUE;
+        }
     } else {
-//        if(Fcb->Vcb->VCBFlags );
         // This is a write request. Invoke the FSRTL byte-range lock package
         // to see whether the write should be allowed to proceed.
-        ReturnedStatus = FsRtlFastCheckLockForWrite(&(Fcb->NTRequiredFCB->FileLock),
+        // Also check for a write-protected volume here.
+        if (Fcb->FileLock == NULL ||
+            (!FlagOn(Fcb->Vcb->VcbState, VCB_STATE_MEDIA_WRITE_PROTECT | VCB_STATE_VOLUME_READ_ONLY) &&
+            FsRtlFastCheckLockForWrite(Fcb->FileLock,
                               FileOffset, &IoLength, LockKey, FileObject,
-                              PsGetCurrentProcess());
+                                PsGetCurrentProcess()))) {
+
+            ReturnedStatus = TRUE;
+        }
     }
 
     MmPrint(("    UDFFastIoCheckIfPossible() %s\n", ReturnedStatus ? "TRUE" : "FALSE"));
-    return(ReturnedStatus);
-//    return FALSE;
+
+    return ReturnedStatus;
 
 } // end UDFFastIoCheckIfPossible()
 
@@ -116,22 +126,23 @@ UDFFastIoCheckIfPossible(
 FAST_IO_POSSIBLE
 NTAPI
 UDFIsFastIoPossible(
-    IN PtrUDFFCB Fcb
+    IN PFCB Fcb
     )
 {
-    if( !(Fcb->Vcb->VCBFlags & UDF_VCB_FLAGS_VOLUME_MOUNTED) /*||
+    if (Fcb->Vcb->VcbCondition != VcbMounted /*||
         !FsRtlOplockIsFastIoPossible(&(Fcb->Oplock))*/ ) {
         UDFPrint(("    FastIoIsNotPossible\n"));
         return FastIoIsNotPossible;
     }
 /*
     // back pressure for very smart and fast system cache ;)
-    if(Fcb->Vcb->VerifyCtx.ItemCount >= UDF_MAX_VERIFY_CACHE) {
+    if (Fcb->Vcb->VerifyCtx.ItemCount >= UDF_MAX_VERIFY_CACHE) {
         AdPrint(("    Verify queue overflow -> UDFIsFastIoPossible() = FastIoIsNotPossible\n"));
         return FastIoIsNotPossible;
     }
 */
-    if(FsRtlAreThereCurrentFileLocks(&(Fcb->NTRequiredFCB->FileLock)) ) {
+    if ((Fcb->FileLock != NULL) &&
+        FsRtlAreThereCurrentFileLocks(Fcb->FileLock)) {
         UDFPrint(("    FastIoIsQuestionable\n"));
         return FastIoIsQuestionable;
     }
@@ -165,35 +176,40 @@ UDFFastIoQueryBasicInfo(
     )
 {
     BOOLEAN          ReturnedStatus = FALSE;     // fast i/o failed/not allowed
+    TYPE_OF_OPEN TypeOfOpen;
     NTSTATUS         RC = STATUS_SUCCESS;
-    PtrUDFIrpContext PtrIrpContext = NULL;
+    PIRP_CONTEXT IrpContext = NULL;
     LONG             Length = sizeof(FILE_BASIC_INFORMATION);
-    PtrUDFFCB        Fcb;
-    PtrUDFCCB        Ccb;
-    PtrUDFNTRequiredFCB NtReqFcb = NULL;
+    PFCB             Fcb;
     BOOLEAN          MainResourceAcquired = FALSE;
 
     FsRtlEnterFileSystem();
 
     UDFPrint(("UDFFastIo  \n"));
+
+    // Decode the file object to find the type of open and the data
+    // structures.
+
+    TypeOfOpen = UDFFastDecodeFileObject(FileObject, &Fcb);
+
+    ASSERT_FCB(Fcb);
+
+
     // if the file is already opended we can satisfy this request
     // immediately 'cause all the data we need must be cached
     _SEH2_TRY {
 
         _SEH2_TRY {
 
-            // Get the FCB and CCB pointers.
-            Ccb = (PtrUDFCCB)(FileObject->FsContext2);
-            ASSERT(Ccb);
-            Fcb = Ccb->Fcb;
-            ASSERT(Fcb);
-            NtReqFcb = Fcb->NTRequiredFCB;
-            //Fcb->Vcb->VCBFlags |= UDF_VCB_SKIP_EJECT_CHECK;
+            if (Fcb == NULL || Fcb == Fcb->Vcb->VolumeDasdFcb) {
+                // This is not allowed.
+                try_return(RC = STATUS_INVALID_PARAMETER);
+            }
 
-            if (!(Fcb->FCBFlags & UDF_FCB_PAGE_FILE)) {
+            if (!(Fcb->FcbState & UDF_FCB_PAGE_FILE)) {
                 // Acquire the MainResource shared.
-                UDF_CHECK_PAGING_IO_RESOURCE(NtReqFcb);
-                if (!UDFAcquireResourceShared(&(NtReqFcb->MainResource), Wait)) {
+                UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+                if (!UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbResource, Wait)) {
                     try_return(RC = STATUS_CANT_WAIT);
                 }
                 MainResourceAcquired = TRUE;
@@ -202,22 +218,25 @@ UDFFastIoQueryBasicInfo(
             ReturnedStatus =
                 ((RC = UDFGetBasicInformation(FileObject, Fcb, Buffer, &Length)) == STATUS_SUCCESS);
 
-        } _SEH2_EXCEPT(UDFExceptionFilter(PtrIrpContext, _SEH2_GetExceptionInformation())) {
+        } _SEH2_EXCEPT(UDFExceptionFilter(IrpContext, _SEH2_GetExceptionInformation())) {
 
-            RC = UDFExceptionHandler(PtrIrpContext, NULL);
+            RC = UDFProcessException(IrpContext, NULL);
 
             UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
 
         } _SEH2_END;
 try_exit: NOTHING;
     } _SEH2_FINALLY {
+
         if (MainResourceAcquired) {
-            UDF_CHECK_PAGING_IO_RESOURCE(NtReqFcb);
-            UDFReleaseResource(&(NtReqFcb->MainResource));
+            UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+            UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
             MainResourceAcquired = FALSE;
         }
+
         IoStatus->Status = RC;
-        if(ReturnedStatus) {
+
+        if (ReturnedStatus) {
             IoStatus->Information = sizeof(FILE_BASIC_INFORMATION);
         } else {
             IoStatus->Information = 0;
@@ -226,7 +245,7 @@ try_exit: NOTHING;
 
     FsRtlExitFileSystem();
 
-    return(ReturnedStatus);
+    return ReturnedStatus;
 } // end UDFFastIoQueryBasicInfo()
 
 
@@ -255,61 +274,66 @@ UDFFastIoQueryStdInfo(
     IN PDEVICE_OBJECT               DeviceObject)
 {
     BOOLEAN          ReturnedStatus = FALSE;     // fast i/o failed/not allowed
+    TYPE_OF_OPEN TypeOfOpen;
     NTSTATUS         RC = STATUS_SUCCESS;
-    PtrUDFIrpContext PtrIrpContext = NULL;
+    PIRP_CONTEXT IrpContext = NULL;
     LONG             Length = sizeof(FILE_STANDARD_INFORMATION);
-    PtrUDFFCB        Fcb;
-    PtrUDFCCB        Ccb;
-//    PtrUDFNTRequiredFCB NtReqFcb = NULL;
-//    BOOLEAN          MainResourceAcquired = FALSE;
+    PFCB             Fcb;
+    BOOLEAN          MainResourceAcquired = FALSE;
 
     FsRtlEnterFileSystem();
 
     UDFPrint(("UDFFastIo  \n"));
+
+    // Decode the file object to find the type of open and the data
+    // structures.
+
+    TypeOfOpen = UDFFastDecodeFileObject(FileObject, &Fcb);
+
+    ASSERT_FCB(Fcb);
+
     // if the file is already opended we can satisfy this request
     // immediately 'cause all the data we need must be cached
     _SEH2_TRY {
 
         _SEH2_TRY {
 
-            // Get the FCB and CCB pointers.
-            Ccb = (PtrUDFCCB)(FileObject->FsContext2);
-            ASSERT(Ccb);
-            Fcb = Ccb->Fcb;
-            ASSERT(Fcb);
-//            NtReqFcb = Fcb->NTRequiredFCB;
-            //Fcb->Vcb->VCBFlags |= UDF_VCB_SKIP_EJECT_CHECK;
+            if (Fcb == NULL || Fcb == Fcb->Vcb->VolumeDasdFcb) {
+                // This is not allowed.
+                try_return(RC = STATUS_INVALID_PARAMETER);
+            }
 
-/*
-            if (!(Fcb->FCBFlags & UDF_FCB_PAGE_FILE)) {
+            if (!(Fcb->FcbState & UDF_FCB_PAGE_FILE)) {
                 // Acquire the MainResource shared.
-                UDF_CHECK_PAGING_IO_RESOURCE(NtReqFcb);
-                if (!UDFAcquireResourceShared(&(NtReqFcb->MainResource), Wait)) {
+                UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+                if (!UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbResource, Wait)) {
                     try_return(RC = STATUS_CANT_WAIT);
                 }
                 MainResourceAcquired = TRUE;
             }
-*/
+
             ReturnedStatus =
                 ((RC = UDFGetStandardInformation(Fcb, Buffer, &Length)) == STATUS_SUCCESS);
 
-        } _SEH2_EXCEPT(UDFExceptionFilter(PtrIrpContext, _SEH2_GetExceptionInformation())) {
+        } _SEH2_EXCEPT(UDFExceptionFilter(IrpContext, _SEH2_GetExceptionInformation())) {
 
-            RC = UDFExceptionHandler(PtrIrpContext, NULL);
+            RC = UDFProcessException(IrpContext, NULL);
 
             UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
 
         } _SEH2_END;
-//try_exit: NOTHING;
+try_exit: NOTHING;
     } _SEH2_FINALLY {
-/*
+
         if (MainResourceAcquired) {
-            UDFReleaseResource(&(NtReqFcb->MainResource));
+            UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+            UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
             MainResourceAcquired = FALSE;
         }
-*/
+
         IoStatus->Status = RC;
-        if(ReturnedStatus) {
+
+        if (ReturnedStatus) {
             IoStatus->Information = sizeof(FILE_STANDARD_INFORMATION);
         } else {
             IoStatus->Information = 0;
@@ -318,54 +342,44 @@ UDFFastIoQueryStdInfo(
 
     FsRtlExitFileSystem();
 
-    return(ReturnedStatus);
+    return ReturnedStatus;
 } // end UDFFastIoQueryStdInfo()
 
-
-/*************************************************************************
-*
-* Function: UDFFastIoAcqCreateSec()
-*
-* Description:
-*   Not really a fast-io operation. Used by the VMM to acquire FSD resources
-*   before processing a file map (create section object) request.
-*
-* Expected Interrupt Level (for execution) :
-*
-*  IRQL_PASSIVE_LEVEL
-*
-* Return Value: None (we must be prepared to handle VMM initiated calls)
-*
-*************************************************************************/
-VOID
+NTSTATUS
 NTAPI
-UDFFastIoAcqCreateSec(
-    IN PFILE_OBJECT FileObject
+UDFFilterCallbackAcquireForCreateSection(
+    IN PFS_FILTER_CALLBACK_DATA CallbackData,
+    IN PVOID *CompletionContext
     )
 {
-    PtrUDFNTRequiredFCB NtReqFcb = (PtrUDFNTRequiredFCB)(FileObject->FsContext);
+    UNREFERENCED_PARAMETER(CompletionContext);	
+
+    NT_ASSERT(CallbackData->Operation == FS_FILTER_ACQUIRE_FOR_SECTION_SYNCHRONIZATION);
+    NT_ASSERT(CallbackData->SizeOfFsFilterCallbackData == sizeof(FS_FILTER_CALLBACK_DATA));
 
     MmPrint(("  AcqForCreateSection()\n"));
+
+    PFCB Fcb = (PFCB)CallbackData->FileObject->FsContext;
+
     // Acquire the MainResource exclusively for the file stream
-    if(!ExIsResourceAcquiredExclusiveLite(&(NtReqFcb->MainResource)) ||
-       !ExIsResourceAcquiredExclusiveLite(&(NtReqFcb->PagingIoResource)) ) {
-        UDF_CHECK_PAGING_IO_RESOURCE(NtReqFcb);
+    UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbResource, TRUE);
+
+    // Return the appropriate status based on the type of synchronization and whether anyone
+    // has write access to this file.
+
+    if (CallbackData->Parameters.AcquireForSectionSynchronization.SyncType != SyncTypeCreateSection) {
+
+        return STATUS_FSFILTER_OP_COMPLETED_SUCCESSFULLY;
+
+    } else if (Fcb->ShareAccess.Writers == 0) {
+
+        return STATUS_FILE_LOCKED_WITH_ONLY_READERS;
+
     } else {
-        MmPrint(("    already acquired\n"));
+
+        return STATUS_FILE_LOCKED_WITH_WRITERS;
     }
-    UDFAcquireResourceExclusive(&(NtReqFcb->MainResource), TRUE);
-
-    // Although this is typically not required, the UDF FSD will
-    // also acquire the PagingIoResource exclusively at this time
-    // to conform with the resource acquisition described in the set
-    // file information routine. Once again though, we will probably
-    // not need to do this.
-    UDFAcquireResourceExclusive(&(NtReqFcb->PagingIoResource), TRUE);
-    NtReqFcb->AcqSectionCount++;
-
-    return;
-} // end UDFFastIoAcqCreateSec()
-
+}
 
 /*************************************************************************
 *
@@ -387,16 +401,12 @@ NTAPI
 UDFFastIoRelCreateSec(
     IN PFILE_OBJECT FileObject)
 {
-    PtrUDFNTRequiredFCB NtReqFcb = (PtrUDFNTRequiredFCB)(FileObject->FsContext);
+    PFCB Fcb = (PFCB)(FileObject->FsContext);
 
     MmPrint(("  RelFromCreateSection()\n"));
 
-    NtReqFcb->AcqSectionCount--;
-    // Release the PagingIoResource for the file stream
-    UDFReleaseResource(&(NtReqFcb->PagingIoResource));
-
     // Release the MainResource for the file stream
-    UDFReleaseResource(&(NtReqFcb->MainResource));
+    UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
 
     return;
 } // end UDFFastIoRelCreateSec()
@@ -427,20 +437,20 @@ BOOLEAN NTAPI UDFAcqLazyWrite(
     // The context is whatever we passed to the Cache Manager when invoking
     // the CcInitializeCacheMaps() function. In the case of the UDF FSD
     // implementation, this context is a pointer to the NT_REQ_FCB structure.
-    PtrUDFNTRequiredFCB NtReqFcb = (PtrUDFNTRequiredFCB)Context;
+    PFCB Fcb = (PFCB)Context;
 
     MmPrint(("  UDFAcqLazyWrite()\n"));
 
-    // Acquire the PagingIoResource in the NT_REQ_FCB exclusively. Then, set the
+    // Acquire the MainResource in the NT_REQ_FCB exclusively. Then, set the
     // lazy-writer thread id in the NT_REQ_FCB structure for identification
     // when an actual write request is received by the FSD.
     // Note: The lazy-writer typically always supplies WAIT set to TRUE.
-    if (!UDFAcquireResourceExclusive(&(NtReqFcb->PagingIoResource), Wait))
+    if (!UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbResource, Wait))
         return FALSE;
 
     // Now, set the lazy-writer thread id.
-    ASSERT(!(NtReqFcb->LazyWriterThreadID));
-    NtReqFcb->LazyWriterThreadID = HandleToUlong(PsGetCurrentThreadId());
+    ASSERT(!(Fcb->LazyWriteThread));
+    Fcb->LazyWriteThread = PsGetCurrentThread();
 
     ASSERT(IoGetTopLevelIrp() == NULL);
     IoSetTopLevelIrp((PIRP)FSRTL_CACHE_TOP_LEVEL_IRP);
@@ -475,17 +485,17 @@ UDFRelLazyWrite(
     // The context is whatever we passed to the Cache Manager when invoking
     // the CcInitializeCacheMaps() function. In the case of the UDF FSD
     // implementation, this context is a pointer to the NT_REQ_FCB structure.
-    PtrUDFNTRequiredFCB NtReqFcb = (PtrUDFNTRequiredFCB)Context;
+    PFCB Fcb = (PFCB)Context;
 
     MmPrint(("  UDFRelLazyWrite()\n"));
 
     // Remove the current thread-id from the NT_REQ_FCB
     // and release the MainResource.
-    ASSERT((NtReqFcb->LazyWriterThreadID) == HandleToUlong(PsGetCurrentThreadId()));
-    NtReqFcb->LazyWriterThreadID = 0;
+    ASSERT(Fcb->LazyWriteThread == PsGetCurrentThread());
+    Fcb->LazyWriteThread = 0;
 
     // Release the acquired resource.
-    UDFReleaseResource(&(NtReqFcb->PagingIoResource));
+    UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
 
     IoSetTopLevelIrp( NULL );
     return;
@@ -519,21 +529,20 @@ UDFAcqReadAhead(
     // The context is whatever we passed to the Cache Manager when invoking
     // the CcInitializeCacheMaps() function. In the case of the UDF FSD
     // implementation, this context is a pointer to the NT_REQ_FCB structure.
-#define NtReqFcb ((PtrUDFNTRequiredFCB)Context)
+    PFCB Fcb = (PFCB)Context;
 
     MmPrint(("  AcqForReadAhead()\n"));
 
     // Acquire the MainResource in the NT_REQ_FCB shared.
     // Note: The read-ahead thread typically always supplies WAIT set to TRUE.
-    UDF_CHECK_PAGING_IO_RESOURCE(NtReqFcb);
-    if (!UDFAcquireResourceShared(&(NtReqFcb->MainResource), Wait))
+    UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+    if (!UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbResource, Wait))
         return FALSE;
 
     ASSERT(IoGetTopLevelIrp() == NULL);
     IoSetTopLevelIrp((PIRP)FSRTL_CACHE_TOP_LEVEL_IRP);
 
     return TRUE;
-#undef NtReqFcb
 
 } // end UDFAcqReadAhead()
 
@@ -561,25 +570,20 @@ UDFRelReadAhead(
     // The context is whatever we passed to the Cache Manager when invoking
     // the CcInitializeCacheMaps() function. In the case of the UDF FSD
     // implementation, this context is a pointer to the NT_REQ_FCB structure.
-#define NtReqFcb ((PtrUDFNTRequiredFCB)Context)
+    PFCB Fcb = (PFCB)Context;
 
     MmPrint(("  RelFromReadAhead()\n"));
 
     // Release the acquired resource.
-    UDF_CHECK_PAGING_IO_RESOURCE(NtReqFcb);
-    UDFReleaseResource(&(NtReqFcb->MainResource));
+    UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+    UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
 
     // Of course, the FSD should undo whatever else seems appropriate at this
     // time.
     IoSetTopLevelIrp( NULL );
 
     return;
-#undef NtReqFcb
 } // end UDFRelReadAhead()
-
-/* the remaining are only valid under NT Version 4.0 and later */
-#if(_WIN32_WINNT >= 0x0400)
-
 
 /*************************************************************************
 *
@@ -606,35 +610,39 @@ UDFFastIoQueryNetInfo(
     IN PDEVICE_OBJECT                               DeviceObject)
 {
     BOOLEAN          ReturnedStatus = FALSE;     // fast i/o failed/not allowed
+    TYPE_OF_OPEN TypeOfOpen;
     NTSTATUS         RC = STATUS_SUCCESS;
-    PtrUDFIrpContext PtrIrpContext = NULL;
+    PIRP_CONTEXT IrpContext = NULL;
     LONG             Length = sizeof(FILE_NETWORK_OPEN_INFORMATION);
-    PtrUDFFCB        Fcb;
-    PtrUDFCCB        Ccb;
-    PtrUDFNTRequiredFCB NtReqFcb = NULL;
+    PFCB             Fcb;
     BOOLEAN          MainResourceAcquired = FALSE;
 
     FsRtlEnterFileSystem();
 
     UDFPrint(("UDFFastIo  \n"));
+
+    // Decode the type of file object we're being asked to process and
+    // make sure that is is only a user file open.
+
+    TypeOfOpen = UDFFastDecodeFileObject(FileObject, &Fcb);
+
+    ASSERT_FCB(Fcb);
+
     // if the file is already opended we can satisfy this request
     // immediately 'cause all the data we need must be cached
     _SEH2_TRY {
 
         _SEH2_TRY {
 
-            // Get the FCB and CCB pointers.
-            Ccb = (PtrUDFCCB)(FileObject->FsContext2);
-            ASSERT(Ccb);
-            Fcb = Ccb->Fcb;
-            ASSERT(Fcb);
-            NtReqFcb = Fcb->NTRequiredFCB;
-            //Fcb->Vcb->VCBFlags |= UDF_VCB_SKIP_EJECT_CHECK;
+            if (Fcb == NULL || Fcb == Fcb->Vcb->VolumeDasdFcb) {
+                // This is not allowed.
+                try_return(RC = STATUS_INVALID_PARAMETER);
+            }
 
-            if (!(Fcb->FCBFlags & UDF_FCB_PAGE_FILE)) {
+            if (!(Fcb->FcbState & UDF_FCB_PAGE_FILE)) {
                 // Acquire the MainResource shared.
-                UDF_CHECK_PAGING_IO_RESOURCE(NtReqFcb);
-                if (!UDFAcquireResourceShared(&(NtReqFcb->MainResource), Wait)) {
+                UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+                if (!UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbResource, Wait)) {
                     try_return(RC = STATUS_CANT_WAIT);
                 }
                 MainResourceAcquired = TRUE;
@@ -643,22 +651,25 @@ UDFFastIoQueryNetInfo(
             ReturnedStatus =
                 ((RC = UDFGetNetworkInformation(Fcb, Buffer, &Length)) == STATUS_SUCCESS);
 
-        } _SEH2_EXCEPT(UDFExceptionFilter(PtrIrpContext, _SEH2_GetExceptionInformation())) {
+        } _SEH2_EXCEPT(UDFExceptionFilter(IrpContext, _SEH2_GetExceptionInformation())) {
 
-            RC = UDFExceptionHandler(PtrIrpContext, NULL);
+            RC = UDFProcessException(IrpContext, NULL);
 
             UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
 
         } _SEH2_END;
 try_exit: NOTHING;
     } _SEH2_FINALLY {
+
         if (MainResourceAcquired) {
-            UDF_CHECK_PAGING_IO_RESOURCE(NtReqFcb);
-            UDFReleaseResource(&(NtReqFcb->MainResource));
+            UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+            UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
             MainResourceAcquired = FALSE;
         }
+
         IoStatus->Status = RC;
-        if(ReturnedStatus) {
+
+        if (ReturnedStatus) {
             IoStatus->Information = sizeof(FILE_NETWORK_OPEN_INFORMATION);
         } else {
             IoStatus->Information = 0;
@@ -697,7 +708,7 @@ IN PDEVICE_OBJECT           DeviceObject)
 {
     BOOLEAN ReturnedStatus = FALSE;     // fast i/o failed/not allowed
     NTSTATUS RC = STATUS_SUCCESS;
-    PtrUDFIrpContext PtrIrpContext = NULL;
+    PtrUDFIrpContext IrpContext = NULL;
 
     FsRtlEnterFileSystem();
 
@@ -710,9 +721,9 @@ IN PDEVICE_OBJECT           DeviceObject)
             NOTHING;
 
 
-        } __except (UDFExceptionFilter(PtrIrpContext, GetExceptionInformation())) {
+        } __except (UDFExceptionFilter(IrpContext, GetExceptionInformation())) {
 
-            RC = UDFExceptionHandler(PtrIrpContext, NULL);
+            RC = UDFExceptionHandler(IrpContext, NULL);
 
             UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
 
@@ -753,7 +764,7 @@ IN PDEVICE_OBJECT               DeviceObject)
 {
     BOOLEAN             ReturnedStatus = FALSE;     // fast i/o failed/not allowed
     NTSTATUS                RC = STATUS_SUCCESS;
-   PtrUDFIrpContext PtrIrpContext = NULL;
+   PtrUDFIrpContext IrpContext = NULL;
 
     FsRtlEnterFileSystem();
 
@@ -765,9 +776,9 @@ IN PDEVICE_OBJECT               DeviceObject)
             // stub here.
             NOTHING;
 
-        } __except (UDFExceptionFilter(PtrIrpContext, GetExceptionInformation())) {
+        } __except (UDFExceptionFilter(IrpContext, GetExceptionInformation())) {
 
-            RC = UDFExceptionHandler(PtrIrpContext, NULL);
+            RC = UDFExceptionHandler(IrpContext, NULL);
 
             UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
 
@@ -812,7 +823,7 @@ UDFFastIoPrepareMdlWrite(
 {
     BOOLEAN              ReturnedStatus = FALSE; // fast i/o failed/not allowed
     NTSTATUS             RC = STATUS_SUCCESS;
-   PtrUDFIrpContext PtrIrpContext = NULL;
+   PtrUDFIrpContext IrpContext = NULL;
 
     FsRtlEnterFileSystem();
 
@@ -824,9 +835,9 @@ UDFFastIoPrepareMdlWrite(
             // stub here.
             NOTHING;
 
-        } __except (UDFExceptionFilter(PtrIrpContext, GetExceptionInformation())) {
+        } __except (UDFExceptionFilter(IrpContext, GetExceptionInformation())) {
 
-            RC = UDFExceptionHandler(PtrIrpContext, NULL);
+            RC = UDFExceptionHandler(IrpContext, NULL);
 
             UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
 
@@ -868,7 +879,7 @@ IN PDEVICE_OBJECT               DeviceObject)
 {
     BOOLEAN             ReturnedStatus = FALSE;     // fast i/o failed/not allowed
     NTSTATUS                RC = STATUS_SUCCESS;
-   PtrUDFIrpContext PtrIrpContext = NULL;
+   PtrUDFIrpContext IrpContext = NULL;
 
     FsRtlEnterFileSystem();
 
@@ -880,9 +891,9 @@ IN PDEVICE_OBJECT               DeviceObject)
             // stub here.
             NOTHING;
 
-        } __except (UDFExceptionFilter(PtrIrpContext, GetExceptionInformation())) {
+        } __except (UDFExceptionFilter(IrpContext, GetExceptionInformation())) {
 
-            RC = UDFExceptionHandler(PtrIrpContext, NULL);
+            RC = UDFExceptionHandler(IrpContext, NULL);
 
             UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
 
@@ -929,7 +940,7 @@ UDFFastIoAcqModWrite(
 
     MmPrint(("  AcqModW %I64x\n", EndingOffset->QuadPart));
 
-#define NtReqFcb ((PtrUDFNTRequiredFCB)(FileObject->FsContext))
+    PFCB Fcb = (PFCB)FileObject->FsContext;
 
     // We must determine which resource(s) we would like to
     // acquire at this time. We know that a write is imminent;
@@ -951,22 +962,21 @@ UDFFastIoAcqModWrite(
     // the resource that we acquired (single return value). This pointer
     // will be returned back to we in the release call (below).
 
-    if(UDFAcquireResourceShared(&(NtReqFcb->PagingIoResource), FALSE)) {
-        if(EndingOffset->QuadPart <= NtReqFcb->CommonFCBHeader.ValidDataLength.QuadPart) {
-            UDFReleaseResource(&(NtReqFcb->PagingIoResource));
+    if (UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbPagingIoResource, FALSE)) {
+
+        if (EndingOffset->QuadPart <= Fcb->Header.ValidDataLength.QuadPart) {
+
+            UDFReleaseResource(&Fcb->FcbNonpaged->FcbPagingIoResource);
             RC = STATUS_CANT_WAIT;
         } else {
-            NtReqFcb->AcqFlushCount++;
-            (*ResourceToRelease) = &(NtReqFcb->PagingIoResource);
+
+            *ResourceToRelease = &Fcb->FcbNonpaged->FcbPagingIoResource;
             MmPrint(("    AcqModW OK\n"));
         }
+
     } else {
         RC = STATUS_CANT_WAIT;
     }
-
-#undef NtReqFcb
-
-    FsRtlExitFileSystem();
 
     return RC;
 } // end UDFFastIoAcqModWrite()
@@ -994,11 +1004,9 @@ UDFFastIoRelModWrite(
     IN PERESOURCE     ResourceToRelease,
     IN PDEVICE_OBJECT DeviceObject)
 {
-    FsRtlEnterFileSystem();
-
     MmPrint(("  RelModW\n"));
 
-#define NtReqFcb ((PtrUDFNTRequiredFCB)(FileObject->FsContext))
+    PFCB Fcb = (PFCB)FileObject->FsContext;
 
     // The MPW has complete the write for modified pages and therefore
     // wants us to release pre-acquired resource(s).
@@ -1006,13 +1014,8 @@ UDFFastIoRelModWrite(
     // We must undo here whatever it is that we did in the
     // UDFFastIoAcqModWrite() call above.
 
-    NtReqFcb->AcqFlushCount--;
-    ASSERT(ResourceToRelease == &(NtReqFcb->PagingIoResource));
+    ASSERT(ResourceToRelease == &Fcb->FcbNonpaged->FcbPagingIoResource);
     UDFReleaseResource(ResourceToRelease);
-
-#undef NtReqFcb
-
-    FsRtlExitFileSystem();
 
     return(STATUS_SUCCESS);
 } // end UDFFastIoRelModWrite()
@@ -1037,30 +1040,34 @@ UDFFastIoRelModWrite(
 NTSTATUS
 NTAPI
 UDFFastIoAcqCcFlush(
-    IN PFILE_OBJECT         FileObject,
-    IN PDEVICE_OBJECT       DeviceObject)
+    IN PFILE_OBJECT FileObject,
+    IN PDEVICE_OBJECT DeviceObject
+    )
 {
-//    NTSTATUS                RC = STATUS_SUCCESS;
 
-    FsRtlEnterFileSystem();
+    // Once again, the hack for making this look like
+    // a recursive call if needed. We cannot let ourselves
+    // verify under something that has resources held.
+    //
+    // This value is good.  We should never try to acquire
+    // the file this way underneath of the cache.
 
-    MmPrint(("  AcqCcFlush\n"));
+    NT_ASSERT(IoGetTopLevelIrp() != (PIRP)FSRTL_CACHE_TOP_LEVEL_IRP);
+    
+    if (IoGetTopLevelIrp() == NULL) {
+        
+        IoSetTopLevelIrp((PIRP)FSRTL_CACHE_TOP_LEVEL_IRP);
+    }
 
     // Acquire appropriate resources that will allow correct synchronization
     // with a flush call (and avoid deadlock).
 
-#define NtReqFcb ((PtrUDFNTRequiredFCB)(FileObject->FsContext))
+    PFCB Fcb = (PFCB)FileObject->FsContext;
 
-//    UDFAcquireResourceExclusive(&(NtReqFcb->MainResource), TRUE);
-    UDFAcquireResourceExclusive(&(NtReqFcb->PagingIoResource), TRUE);
-//    ASSERT(!(NtReqFcb->AcqFlushCount));
-    NtReqFcb->AcqFlushCount++;
+    UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbResource, TRUE);
+    UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbPagingIoResource, TRUE);
 
-#undef NtReqFcb
-
-    FsRtlExitFileSystem();
-
-    return(STATUS_SUCCESS);
+    return STATUS_SUCCESS;
 
 } // end UDFFastIoAcqCcFlush()
 
@@ -1087,110 +1094,19 @@ UDFFastIoRelCcFlush(
     IN PDEVICE_OBJECT       DeviceObject
     )
 {
-//    NTSTATUS                RC = STATUS_SUCCESS;
+    //  Clear up our hint.
+    
+    if (IoGetTopLevelIrp() == (PIRP)FSRTL_CACHE_TOP_LEVEL_IRP) {
 
-    FsRtlEnterFileSystem();
-
-    MmPrint(("  RelCcFlush\n"));
-
-#define NtReqFcb ((PtrUDFNTRequiredFCB)(FileObject->FsContext))
+        IoSetTopLevelIrp(NULL);
+    }
 
     // Release resources acquired in UDFFastIoAcqCcFlush() above.
+    PFCB Fcb = (PFCB)FileObject->FsContext;
 
-    NtReqFcb->AcqFlushCount--;
-    UDFReleaseResource(&(NtReqFcb->PagingIoResource));
-//    UDFReleaseResource(&(NtReqFcb->MainResource));
+    UDFReleaseResource(&Fcb->FcbNonpaged->FcbPagingIoResource);
+    UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
 
-#undef NtReqFcb
-
-    FsRtlExitFileSystem();
-
-    return(STATUS_SUCCESS);
+    return STATUS_SUCCESS;
 
 } // end UDFFastIoRelCcFlush()
-
-
-/*BOOLEAN
-UDFFastIoDeviceControl (
-    IN PFILE_OBJECT FileObject,
-    IN BOOLEAN Wait,
-    IN PVOID InputBuffer OPTIONAL,
-    IN ULONG InputBufferLength,
-    OUT PVOID OutputBuffer OPTIONAL,
-    IN ULONG OutputBufferLength,
-    IN ULONG IoControlCode,
-    OUT PIO_STATUS_BLOCK IoStatus,
-    IN PDEVICE_OBJECT DeviceObject
-    )
-{
-    switch(IoControlCode) {
-    case FSCTL_ALLOW_EXTENDED_DASD_IO: {
-        IoStatus->Information = 0;
-        IoStatus->Status = STATUS_SUCCESS;
-        break;
-    }
-    case FSCTL_IS_VOLUME_MOUNTED: {
-        PtrUDFFCB Fcb;
-        PtrUDFCCB Ccb;
-
-        Ccb = (PtrUDFCCB)(FileObject->FsContext2);
-        Fcb = Ccb->Fcb;
-
-        if(Fcb &&
-           !(Fcb->Vcb->VCBFlags & UDF_VCB_FLAGS_RAW_DISK) &&
-           !(Fcb->Vcb->VCBFlags & UDF_VCB_FLAGS_VOLUME_LOCKED) ) {
-            return FALSE;
-        }
-
-        IoStatus->Information = 0;
-        IoStatus->Status = STATUS_SUCCESS;
-
-        break;
-    }
-    default:
-        return FALSE;
-    }
-    return TRUE;
-}*/
-
-#endif  //_WIN32_WINNT >= 0x0400
-
-BOOLEAN
-NTAPI
-UDFFastIoCopyWrite (
-    IN PFILE_OBJECT FileObject,
-    IN PLARGE_INTEGER FileOffset,
-    IN ULONG Length,
-    IN BOOLEAN Wait,
-    IN ULONG LockKey,
-    IN PVOID Buffer,
-    OUT PIO_STATUS_BLOCK IoStatus,
-    IN PDEVICE_OBJECT DeviceObject
-    )
-{
-    PtrUDFFCB           Fcb = NULL;
-    PtrUDFCCB           Ccb = NULL;
-
-    // Obtain a pointer to the FCB and CCB for the file stream.
-    Ccb = (PtrUDFCCB)(FileObject->FsContext2);
-    ASSERT(Ccb);
-    Fcb = Ccb->Fcb;
-    ASSERT(Fcb);
-
-    // back pressure for very smart and fast system cache ;)
-    if(Fcb->Vcb->VerifyCtx.QueuedCount ||
-       Fcb->Vcb->VerifyCtx.ItemCount >= UDF_MAX_VERIFY_CACHE) {
-        AdPrint(("    Verify queue overflow -> UDFFastIoCopyWrite() = FALSE\n"));
-        return FALSE;
-    }
-    if(Fcb->NTRequiredFCB->SectionObject.DataSectionObject &&
-       Length >= 0x10000 &&
-       FileOffset->LowPart &&
-       !(FileOffset->LowPart & 0x00ffffff)) {
-
-        MmPrint(("    no FastIo 16Mb\n"));
-        return FALSE;
-    }
-    return FsRtlCopyWrite(FileObject, FileOffset, Length, Wait, LockKey, Buffer, IoStatus, DeviceObject);
-
-} // end UDFFastIoCopyWrite()

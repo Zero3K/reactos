@@ -18,9 +18,10 @@
 // define the file specific bug-check id
 #define         UDF_BUG_CHECK_ID                UDF_FILE_MISC
 
-#include            <stdio.h>
+//  The following constant is the maximum number of ExWorkerThreads that we
+//  will allow to be servicing a particular target device at any one time.
 
-//CCHAR   DefLetter[] = {""};
+#define FSP_PER_DEVICE_THRESHOLD         (2)
 
 /*
 
@@ -40,108 +41,96 @@
 NTSTATUS
 UDFInitializeZones(VOID)
 {
-    NTSTATUS            RC = STATUS_SUCCESS;
-    uint32              SizeOfZone = UDFGlobalData.DefaultZoneSizeInNumStructs;
-    uint32              SizeOfObjectNameZone = 0;
-    uint32              SizeOfCCBZone = 0;
-//    uint32              SizeOfFCBZone = 0;
-    uint32              SizeOfIrpContextZone = 0;
-//    uint32              SizeOfFileInfoZone = 0;
+    NTSTATUS RC = STATUS_UNSUCCESSFUL;
 
     _SEH2_TRY {
-
-        // initialize the spinlock protecting the zones
-        KeInitializeSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock));
 
         // determine memory requirements
         switch (MmQuerySystemSize()) {
         case MmMediumSystem:
-            SizeOfObjectNameZone = (4 * SizeOfZone * UDFQuadAlign(sizeof(UDFObjectName))) + sizeof(ZONE_SEGMENT_HEADER);
-            SizeOfCCBZone = (4 * SizeOfZone * UDFQuadAlign(sizeof(UDFCCB))) + sizeof(ZONE_SEGMENT_HEADER);
-            SizeOfIrpContextZone = (4 * SizeOfZone * UDFQuadAlign(sizeof(UDFIrpContext))) + sizeof(ZONE_SEGMENT_HEADER);
-            UDFGlobalData.MaxDelayedCloseCount = 24;
-            UDFGlobalData.MinDelayedCloseCount = 6;
-            UDFGlobalData.MaxDirDelayedCloseCount = 8;
-            UDFGlobalData.MinDirDelayedCloseCount = 2;
-            UDFGlobalData.WCacheMaxFrames = 8*4;
-            UDFGlobalData.WCacheMaxBlocks = 16*64;
-            UDFGlobalData.WCacheBlocksPerFrameSh = 8;
-            UDFGlobalData.WCacheFramesToKeepFree = 4;
+            UdfData.MaxDelayedCloseCount = 32;
+            UdfData.MinDelayedCloseCount = 8;
+            UdfData.WCacheMaxFrames = 8*4;
+            UdfData.WCacheMaxBlocks = 16*64;
+            UdfData.WCacheBlocksPerFrameSh = 8;
+            UdfData.WCacheFramesToKeepFree = 4;
             break;
         case MmLargeSystem:
-            SizeOfObjectNameZone = (8 * SizeOfZone * UDFQuadAlign(sizeof(UDFObjectName))) + sizeof(ZONE_SEGMENT_HEADER);
-            SizeOfCCBZone = (8 * SizeOfZone * UDFQuadAlign(sizeof(UDFCCB))) + sizeof(ZONE_SEGMENT_HEADER);
-            SizeOfIrpContextZone = (8 * SizeOfZone * UDFQuadAlign(sizeof(UDFIrpContext))) + sizeof(ZONE_SEGMENT_HEADER);
-            UDFGlobalData.MaxDelayedCloseCount = 72;
-            UDFGlobalData.MinDelayedCloseCount = 18;
-            UDFGlobalData.MaxDirDelayedCloseCount = 24;
-            UDFGlobalData.MinDirDelayedCloseCount = 6;
-            UDFGlobalData.WCacheMaxFrames = 2*16*4;
-            UDFGlobalData.WCacheMaxBlocks = 2*16*64;
-            UDFGlobalData.WCacheBlocksPerFrameSh = 8;
-            UDFGlobalData.WCacheFramesToKeepFree = 8;
+            UdfData.MaxDelayedCloseCount = 72;
+            UdfData.MinDelayedCloseCount = 18;
+            UdfData.WCacheMaxFrames = 2*16*4;
+            UdfData.WCacheMaxBlocks = 2*16*64;
+            UdfData.WCacheBlocksPerFrameSh = 8;
+            UdfData.WCacheFramesToKeepFree = 8;
             break;
         case MmSmallSystem:
         default:
-            SizeOfObjectNameZone = (2 * SizeOfZone * UDFQuadAlign(sizeof(UDFObjectName))) + sizeof(ZONE_SEGMENT_HEADER);
-            SizeOfCCBZone = (2 * SizeOfZone * UDFQuadAlign(sizeof(UDFCCB))) + sizeof(ZONE_SEGMENT_HEADER);
-            SizeOfIrpContextZone = (2 * SizeOfZone * UDFQuadAlign(sizeof(UDFIrpContext))) + sizeof(ZONE_SEGMENT_HEADER);
-            UDFGlobalData.MaxDelayedCloseCount = 8;
-            UDFGlobalData.MinDelayedCloseCount = 2;
-            UDFGlobalData.MaxDirDelayedCloseCount = 6;
-            UDFGlobalData.MinDirDelayedCloseCount = 1;
-            UDFGlobalData.WCacheMaxFrames = 8*4/2;
-            UDFGlobalData.WCacheMaxBlocks = 16*64/2;
-            UDFGlobalData.WCacheBlocksPerFrameSh = 8;
-            UDFGlobalData.WCacheFramesToKeepFree = 2;
+            UdfData.MaxDelayedCloseCount = 10;
+            UdfData.MinDelayedCloseCount = 2;
+            UdfData.WCacheMaxFrames = 8*4/2;
+            UdfData.WCacheMaxBlocks = 16*64/2;
+            UdfData.WCacheBlocksPerFrameSh = 8;
+            UdfData.WCacheFramesToKeepFree = 2;
         }
 
-        // typical NT methodology (at least until *someone* exposed the "difference" between a server and workstation ;-)
-        if (MmIsThisAnNtAsSystem()) {
-            SizeOfObjectNameZone *= UDF_NTAS_MULTIPLE;
-            SizeOfCCBZone *= UDF_NTAS_MULTIPLE;
-            SizeOfIrpContextZone *= UDF_NTAS_MULTIPLE;
-        }
+        ExInitializeNPagedLookasideList(&UdfData.IrpContextLookasideList,
+                                        NULL,
+                                        NULL,
+                                        POOL_NX_ALLOCATION | POOL_RAISE_IF_ALLOCATION_FAILURE,
+                                        sizeof(IRP_CONTEXT),
+                                        TAG_IRP_CONTEXT,
+                                        0);
 
-        // allocate memory for each of the zones and initialize the zones ...
-        if (!(UDFGlobalData.ObjectNameZone = DbgAllocatePool(NonPagedPool, SizeOfObjectNameZone))) {
-            RC = STATUS_INSUFFICIENT_RESOURCES;
-            try_return(RC);
-        }
+        // TODO: move to Paged?
+        ExInitializeNPagedLookasideList(&UdfData.ObjectNameLookasideList,
+                                        NULL,
+                                        NULL,
+                                        POOL_NX_ALLOCATION | POOL_RAISE_IF_ALLOCATION_FAILURE,
+                                        sizeof(UDFObjectName),
+                                        TAG_OBJECT_NAME,
+                                        0);
 
-        if (!(UDFGlobalData.CCBZone = DbgAllocatePool(NonPagedPool, SizeOfCCBZone))) {
-            RC = STATUS_INSUFFICIENT_RESOURCES;
-            try_return(RC);
-        }
+        ExInitializeNPagedLookasideList(&UdfData.NonPagedFcbLookasideList,
+                                        NULL,
+                                        NULL,
+                                        POOL_NX_ALLOCATION | POOL_RAISE_IF_ALLOCATION_FAILURE,
+                                        sizeof(FCB),
+                                        TAG_FCB_NONPAGED,
+                                        0);
 
-        if (!(UDFGlobalData.IrpContextZone = DbgAllocatePool(NonPagedPool, SizeOfIrpContextZone))) {
-            RC = STATUS_INSUFFICIENT_RESOURCES;
-            try_return(RC);
-        }
+        ExInitializeNPagedLookasideList(&UdfData.UDFNonPagedFcbLookasideList,
+                                        NULL,
+                                        NULL,
+                                        POOL_NX_ALLOCATION | POOL_RAISE_IF_ALLOCATION_FAILURE,
+                                        sizeof(FCB_NONPAGED),
+                                        TAG_FCB_NONPAGED,
+                                        0);
 
-        // initialize each of the zone headers ...
-        if (!NT_SUCCESS(RC = ExInitializeZone(&(UDFGlobalData.ObjectNameZoneHeader),
-                    UDFQuadAlign(sizeof(UDFObjectName)),
-                    UDFGlobalData.ObjectNameZone, SizeOfObjectNameZone))) {
-            // failed the initialization, leave ...
-            try_return(RC);
-        }
+        ExInitializePagedLookasideList(&UdfData.UDFFcbIndexLookasideList,
+                                       NULL,
+                                       NULL,
+                                       POOL_NX_ALLOCATION | POOL_RAISE_IF_ALLOCATION_FAILURE,
+                                       sizeof(FCB), //TODO:
+                                       TAG_FCB_NONPAGED,
+                                       0);
 
-        if (!NT_SUCCESS(RC = ExInitializeZone(&(UDFGlobalData.CCBZoneHeader),
-                    UDFQuadAlign(sizeof(UDFCCB)),
-                    UDFGlobalData.CCBZone,
-                    SizeOfCCBZone))) {
-            // failed the initialization, leave ...
-            try_return(RC);
-        }
+        ExInitializePagedLookasideList(&UdfData.UDFFcbDataLookasideList,
+                                       NULL,
+                                       NULL,
+                                       POOL_NX_ALLOCATION | POOL_RAISE_IF_ALLOCATION_FAILURE,
+                                       sizeof(FCB), //TODO:
+                                       TAG_FCB_NONPAGED,
+                                       0);
 
-        if (!NT_SUCCESS(RC = ExInitializeZone(&(UDFGlobalData.IrpContextZoneHeader),
-                    UDFQuadAlign(sizeof(UDFIrpContext)),
-                    UDFGlobalData.IrpContextZone,
-                    SizeOfIrpContextZone))) {
-            // failed the initialization, leave ...
-            try_return(RC);
-        }
+        ExInitializePagedLookasideList(&UdfData.CcbLookasideList,
+                                        NULL,
+                                        NULL,
+                                        POOL_NX_ALLOCATION | POOL_RAISE_IF_ALLOCATION_FAILURE,
+                                        sizeof(CCB),
+                                        TAG_CCB,
+                                        0);
+
+        try_return(RC = STATUS_SUCCESS);
 
 try_exit:   NOTHING;
 
@@ -151,7 +140,7 @@ try_exit:   NOTHING;
             UDFDestroyZones();
         } else {
             // mark the fact that we have allocated zones ...
-            UDFSetFlag(UDFGlobalData.UDFFlags, UDF_DATA_FLAGS_ZONES_INITIALIZED);
+            SetFlag(UdfData.Flags, UDF_DATA_FLAGS_ZONES_INITIALIZED);
         }
     } _SEH2_END;
 
@@ -176,30 +165,11 @@ try_exit:   NOTHING;
 *************************************************************************/
 VOID UDFDestroyZones(VOID)
 {
-//    BrutePoint();
+    ExDeleteNPagedLookasideList(&UdfData.IrpContextLookasideList);
+    ExDeleteNPagedLookasideList(&UdfData.ObjectNameLookasideList);
+    ExDeleteNPagedLookasideList(&UdfData.NonPagedFcbLookasideList);
 
-    _SEH2_TRY {
-        // free up each of the pools
-        if(UDFGlobalData.ObjectNameZone) {
-            DbgFreePool(UDFGlobalData.ObjectNameZone);
-            UDFGlobalData.ObjectNameZone = NULL;
-        }
-        if(UDFGlobalData.CCBZone) {
-            DbgFreePool(UDFGlobalData.CCBZone);
-            UDFGlobalData.CCBZone = NULL;
-        }
-        if(UDFGlobalData.IrpContextZone) {
-            DbgFreePool(UDFGlobalData.IrpContextZone);
-            UDFGlobalData.IrpContextZone = NULL;
-        }
-
-//try_exit: NOTHING;
-
-    } _SEH2_FINALLY {
-        UDFGlobalData.UDFFlags &= ~UDF_DATA_FLAGS_ZONES_INITIALIZED;
-    } _SEH2_END;
-
-    return;
+    ExDeletePagedLookasideList(&UdfData.CcbLookasideList);
 }
 
 
@@ -228,7 +198,7 @@ __fastcall
 UDFIsIrpTopLevel(
     PIRP            Irp)            // the IRP sent to our dispatch routine
 {
-    if(!IoGetTopLevelIrp()) {
+    if (!IoGetTopLevelIrp()) {
         // OK, so we can set ourselves to become the "top level" component
         IoSetTopLevelIrp(Irp);
         return TRUE;
@@ -263,7 +233,7 @@ UDFIsIrpTopLevel(
 *************************************************************************/
 long
 UDFExceptionFilter(
-    PtrUDFIrpContext    PtrIrpContext,
+    PIRP_CONTEXT IrpContext,
     PEXCEPTION_POINTERS PtrExceptionPointers
     )
 {
@@ -282,7 +252,7 @@ UDFExceptionFilter(
     }
 #ifdef _X86_
     UDFPrint(("Exception context:\n"));
-    if(PtrExceptionPointers->ContextRecord->ContextFlags & CONTEXT_INTEGER) {
+    if (PtrExceptionPointers->ContextRecord->ContextFlags & CONTEXT_INTEGER) {
         UDFPrint(("EAX=%8.8x   ",PtrExceptionPointers->ContextRecord->Eax));
         UDFPrint(("EBX=%8.8x   ",PtrExceptionPointers->ContextRecord->Ebx));
         UDFPrint(("ECX=%8.8x   ",PtrExceptionPointers->ContextRecord->Ecx));
@@ -291,7 +261,7 @@ UDFExceptionFilter(
         UDFPrint(("ESI=%8.8x   ",PtrExceptionPointers->ContextRecord->Esi));
         UDFPrint(("EDI=%8.8x   ",PtrExceptionPointers->ContextRecord->Edi));
     }
-    if(PtrExceptionPointers->ContextRecord->ContextFlags & CONTEXT_CONTROL) {
+    if (PtrExceptionPointers->ContextRecord->ContextFlags & CONTEXT_CONTROL) {
         UDFPrint(("EBP=%8.8x   ",PtrExceptionPointers->ContextRecord->Esp));
         UDFPrint(("ESP=%8.8x\n",PtrExceptionPointers->ContextRecord->Ebp));
 
@@ -309,16 +279,15 @@ UDFExceptionFilter(
         ExceptionCode = PtrExceptionPointers->ExceptionRecord->ExceptionInformation[2];
     }
 
-    if (PtrIrpContext) {
-        PtrIrpContext->SavedExceptionCode = ExceptionCode;
-        UDFSetFlag(PtrIrpContext->IrpContextFlags, UDF_IRP_CONTEXT_EXCEPTION);
+    if (IrpContext) {
+        IrpContext->ExceptionStatus = ExceptionCode;
     }
 
     // check if we should propagate this exception or not
     if (!(FsRtlIsNtstatusExpected(ExceptionCode))) {
 
         // better free up the IrpContext now ...
-        if (PtrIrpContext) {
+        if (IrpContext) {
             UDFPrint(("    UDF Driver internal error\n"));
             BrutePoint();
         } else {
@@ -355,8 +324,8 @@ UDFExceptionFilter(
 *
 *************************************************************************/
 NTSTATUS
-UDFExceptionHandler(
-    PtrUDFIrpContext PtrIrpContext,
+UDFProcessException(
+    PIRP_CONTEXT IrpContext,
     PIRP             Irp
     )
 {
@@ -372,16 +341,16 @@ UDFExceptionHandler(
 
     if (!Irp) {
         UDFPrint(("  !Irp, return\n"));
-        ASSERT(!PtrIrpContext);
+        ASSERT(!IrpContext);
         return ExceptionCode;
     }
     // If it was a queued close (or something like this) then we need not
     // completing it because of MUST_SUCCEED requirement.
 
-    if (PtrIrpContext) {
-        ExceptionCode = PtrIrpContext->SavedExceptionCode;
+    if (IrpContext) {
+        ExceptionCode = IrpContext->ExceptionStatus;
         // Free irp context here
-//        UDFReleaseIrpContext(PtrIrpContext);
+//        UDFReleaseIrpContext(IrpContext);
     } else {
         UDFPrint(("  complete Irp and return\n"));
         // must be insufficient resources ...?
@@ -409,7 +378,7 @@ UDFExceptionHandler(
     if (ExceptionCode == STATUS_VERIFY_REQUIRED) {
         if (KeGetCurrentIrql() >= APC_LEVEL) {
             UDFPrint(("  use UDFPostRequest()\n"));
-            ExceptionCode = UDFPostRequest( PtrIrpContext, Irp );
+            ExceptionCode = UDFPostRequest(IrpContext, Irp);
         }
     }
 
@@ -455,7 +424,7 @@ UDFExceptionHandler(
                     // complete the IRP
                     IoCompleteRequest(Irp, IO_NO_INCREMENT);
 
-                    UDFReleaseIrpContext(PtrIrpContext);
+                    UDFCleanupIrpContext(IrpContext);
 
                     return ExceptionCode;
                 }
@@ -465,7 +434,7 @@ UDFExceptionHandler(
             //  UDFPerformVerify() will do the right thing with the Irp.
             //  If we return STATUS_CANT_WAIT then the current thread
             //  can retry the request.
-            return UDFPerformVerify( PtrIrpContext, Irp, Device );
+            return UDFPerformVerify( IrpContext, Irp, Device );
         }
 
         //
@@ -473,16 +442,13 @@ UDFExceptionHandler(
         //  they have been disabled for this request.
         //
 
-        if (FlagOn( PtrIrpContext->IrpContextFlags, UDF_IRP_CONTEXT_FLAG_DISABLE_POPUPS )) {
+        if (FlagOn(IrpContext->Flags, IRP_CONTEXT_FLAG_DISABLE_POPUPS)) {
 
             UDFPrint(("  DISABLE_POPUPS, complete Irp and return\n"));
-            Irp->IoStatus.Status = ExceptionCode;
-            Irp->IoStatus.Information = 0;
-            // complete the IRP
-            IoCompleteRequest(Irp, IO_NO_INCREMENT);
 
-            UDFReleaseIrpContext(PtrIrpContext);
+            UDFCompleteRequest(IrpContext, Irp, ExceptionCode);
             return ExceptionCode;
+
         } else {
 
             //  Generate a pop-up
@@ -512,7 +478,7 @@ UDFExceptionHandler(
                     // complete the IRP
                     IoCompleteRequest(Irp, IO_NO_INCREMENT);
 
-                    UDFReleaseIrpContext(PtrIrpContext);
+                    UDFCleanupIrpContext(IrpContext);
 
                     return ExceptionCode;
                 }
@@ -533,7 +499,7 @@ UDFExceptionHandler(
             //  The Irp will be completed by Io or resubmitted.  In either
             //  case we must clean up the IrpContext here.
 
-            UDFReleaseIrpContext(PtrIrpContext);
+            UDFCleanupIrpContext(IrpContext);
             return STATUS_PENDING;
         }
     }
@@ -548,7 +514,7 @@ UDFExceptionHandler(
         // complete the IRP
         IoCompleteRequest(Irp, IO_NO_INCREMENT);
 
-        UDFReleaseIrpContext(PtrIrpContext);
+        UDFCleanupIrpContext(IrpContext);
     }
 
     UDFPrint(("  return from exception handler with code %x\n", ExceptionCode));
@@ -610,44 +576,22 @@ UDFLogEvent(
 PtrUDFObjectName
 UDFAllocateObjectName(VOID)
 {
-    PtrUDFObjectName            PtrObjectName = NULL;
-    BOOLEAN                     AllocatedFromZone = TRUE;
-    KIRQL                       CurrentIrql;
+    PtrUDFObjectName NewObjectName = NULL;
 
-    // first, __try to allocate out of the zone
-    KeAcquireSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), &CurrentIrql);
-    if (!ExIsFullZone(&(UDFGlobalData.ObjectNameZoneHeader))) {
-        // we have enough memory
-        PtrObjectName = (PtrUDFObjectName)ExAllocateFromZone(&(UDFGlobalData.ObjectNameZoneHeader));
+    NewObjectName = (PtrUDFObjectName)ExAllocateFromNPagedLookasideList(&UdfData.ObjectNameLookasideList);
 
-        // release the spinlock
-        KeReleaseSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), CurrentIrql);
-    } else {
-        // release the spinlock
-        KeReleaseSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), CurrentIrql);
-
-        // if we failed to obtain from the zone, get it directly from the VMM
-        PtrObjectName = (PtrUDFObjectName)MyAllocatePool__(NonPagedPool, UDFQuadAlign(sizeof(UDFObjectName)));
-        AllocatedFromZone = FALSE;
-    }
-
-    if (!PtrObjectName) {
+    if (!NewObjectName) {
         return NULL;
     }
 
     // zero out the allocated memory block
-    RtlZeroMemory(PtrObjectName, UDFQuadAlign(sizeof(UDFObjectName)));
+    RtlZeroMemory(NewObjectName, sizeof(UDFObjectName));
 
     // set up some fields ...
-    PtrObjectName->NodeIdentifier.NodeType  = UDF_NODE_TYPE_OBJECT_NAME;
-    PtrObjectName->NodeIdentifier.NodeSize  = UDFQuadAlign(sizeof(UDFObjectName));
+    NewObjectName->NodeIdentifier.NodeTypeCode = UDF_NODE_TYPE_OBJECT_NAME;
+    NewObjectName->NodeIdentifier.NodeByteSize = sizeof(UDFObjectName);
 
-
-    if (!AllocatedFromZone) {
-        UDFSetFlag(PtrObjectName->ObjectNameFlags, UDF_OBJ_NAME_NOT_FROM_ZONE);
-    }
-
-    return(PtrObjectName);
+    return NewObjectName;
 } // end UDFAllocateObjectName()
 
 
@@ -666,23 +610,12 @@ UDFAllocateObjectName(VOID)
 *
 *************************************************************************/
 VOID
-__fastcall
 UDFReleaseObjectName(
-    PtrUDFObjectName PtrObjectName)
+    PtrUDFObjectName ObjectName)
 {
-    KIRQL            CurrentIrql;
+    ASSERT(ObjectName);
 
-    ASSERT(PtrObjectName);
-
-    // give back memory either to the zone or to the VMM
-    if (!(PtrObjectName->ObjectNameFlags & UDF_OBJ_NAME_NOT_FROM_ZONE)) {
-        // back to the zone
-        KeAcquireSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), &CurrentIrql);
-        ExFreeToZone(&(UDFGlobalData.ObjectNameZoneHeader), PtrObjectName);
-        KeReleaseSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), CurrentIrql);
-    } else {
-        MyFreePool__(PtrObjectName);
-    }
+    ExFreeToNPagedLookasideList(&UdfData.ObjectNameLookasideList, ObjectName);
 
     return;
 } // end UDFReleaseObjectName()
@@ -690,7 +623,7 @@ UDFReleaseObjectName(
 
 /*************************************************************************
 *
-* Function: UDFAllocateCCB()
+* Function: UDFCreateCcb()
 *
 * Description:
 *   Allocate a new CCB structure to represent an open on-disk object.
@@ -703,50 +636,26 @@ UDFReleaseObjectName(
 * Return Value: A pointer to the CCB structure OR NULL.
 *
 *************************************************************************/
-PtrUDFCCB
-UDFAllocateCCB(VOID)
+PCCB
+UDFCreateCcb()
 {
-    PtrUDFCCB                   Ccb = NULL;
-    BOOLEAN                     AllocatedFromZone = TRUE;
-    KIRQL                       CurrentIrql;
+    PCCB NewCcb = NULL;
 
-    // first, __try to allocate out of the zone
-    KeAcquireSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), &CurrentIrql);
-    if (!ExIsFullZone(&(UDFGlobalData.CCBZoneHeader))) {
-        // we have enough memory
-        Ccb = (PtrUDFCCB)ExAllocateFromZone(&(UDFGlobalData.CCBZoneHeader));
+    NewCcb = (PCCB)ExAllocateFromPagedLookasideList(&UdfData.CcbLookasideList);
 
-        // release the spinlock
-        KeReleaseSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), CurrentIrql);
-    } else {
-        // release the spinlock
-        KeReleaseSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), CurrentIrql);
-
-        // if we failed to obtain from the zone, get it directly from the VMM
-        Ccb = (PtrUDFCCB)MyAllocatePool__(NonPagedPool, UDFQuadAlign(sizeof(UDFCCB)));
-        AllocatedFromZone = FALSE;
-//        UDFPrint(("    CCB allocated @%x\n",Ccb));
-    }
-
-    if (!Ccb) {
+    if (!NewCcb) {
         return NULL;
     }
 
     // zero out the allocated memory block
-    RtlZeroMemory(Ccb, UDFQuadAlign(sizeof(UDFCCB)));
+    RtlZeroMemory(NewCcb, sizeof(CCB));
 
     // set up some fields ...
-    Ccb->NodeIdentifier.NodeType = UDF_NODE_TYPE_CCB;
-    Ccb->NodeIdentifier.NodeSize = UDFQuadAlign(sizeof(UDFCCB));
+    NewCcb->NodeIdentifier.NodeTypeCode = UDF_NODE_TYPE_CCB;
+    NewCcb->NodeIdentifier.NodeByteSize = sizeof(CCB);
 
-
-    if (!AllocatedFromZone) {
-        UDFSetFlag(Ccb->CCBFlags, UDF_CCB_NOT_FROM_ZONE);
-    }
-
-    UDFPrint(("UDFAllocateCCB: %x\n", Ccb));
-    return(Ccb);
-} // end UDFAllocateCCB()
+    return NewCcb;
+} // end UDFCreateCcb()
 
 
 /*************************************************************************
@@ -764,27 +673,14 @@ UDFAllocateCCB(VOID)
 *
 *************************************************************************/
 VOID
-__fastcall
 UDFReleaseCCB(
-    PtrUDFCCB Ccb
+    PCCB Ccb
     )
 {
-    KIRQL   CurrentIrql;
-
     ASSERT(Ccb);
 
-    UDFPrint(("UDFReleaseCCB: %x\n", Ccb));
-    // give back memory either to the zone or to the VMM
-    if(!(Ccb->CCBFlags & UDF_CCB_NOT_FROM_ZONE)) {
-        // back to the zone
-        KeAcquireSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), &CurrentIrql);
-        ExFreeToZone(&(UDFGlobalData.CCBZoneHeader), Ccb);
-        KeReleaseSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), CurrentIrql);
-    } else {
-        MyFreePool__(Ccb);
-    }
+    ExFreeToPagedLookasideList(&UdfData.CcbLookasideList, Ccb);
 
-    return;
 } // end UDFReleaseCCB()
 
 /*
@@ -801,16 +697,16 @@ UDFReleaseCCB(
 
 */
 VOID
-__fastcall
-UDFCleanUpCCB(
-    PtrUDFCCB Ccb)
+UDFDeleteCcb(
+    PCCB Ccb
+)
 {
-//    ASSERT(Ccb);
-    if(!Ccb) return; // probably, we havn't allocated it...
-    ASSERT(Ccb->NodeIdentifier.NodeType == UDF_NODE_TYPE_CCB);
+    ASSERT(Ccb);
+    if (!Ccb) return; // probably, we havn't allocated it...
+    ASSERT(Ccb->NodeIdentifier.NodeTypeCode == UDF_NODE_TYPE_CCB);
 
     _SEH2_TRY {
-        if(Ccb->Fcb) {
+        if (Ccb->Fcb) {
             UDFTouch(&(Ccb->Fcb->CcbListResource));
             UDFAcquireResourceExclusive(&(Ccb->Fcb->CcbListResource),TRUE);
             RemoveEntryList(&(Ccb->NextCCB));
@@ -837,136 +733,7 @@ UDFCleanUpCCB(
 
 /*************************************************************************
 *
-* Function: UDFAllocateFCB()
-*
-* Description:
-*   Allocate a new FCB structure to represent an open on-disk object.
-*   Also initialize the FCB structure to NULL.
-*
-* Expected Interrupt Level (for execution) :
-*
-*  IRQL_PASSIVE_LEVEL
-*
-* Return Value: A pointer to the FCB structure OR NULL.
-*
-*************************************************************************/
-PtrUDFFCB
-UDFAllocateFCB(VOID)
-{
-    PtrUDFFCB                   Fcb = NULL;
-
-    Fcb = (PtrUDFFCB)MyAllocatePool__(UDF_FCB_MT, UDFQuadAlign(sizeof(UDFFCB)));
-
-    if (!Fcb) {
-        return NULL;
-    }
-
-    // zero out the allocated memory block
-    RtlZeroMemory(Fcb, UDFQuadAlign(sizeof(UDFFCB)));
-
-    // set up some fields ...
-    Fcb->NodeIdentifier.NodeType = UDF_NODE_TYPE_FCB;
-    Fcb->NodeIdentifier.NodeSize = UDFQuadAlign(sizeof(UDFFCB));
-
-    UDFPrint(("UDFAllocateFCB: %x\n", Fcb));
-    return(Fcb);
-} // end UDFAllocateFCB()
-
-
-/*************************************************************************
-*
-* Function: UDFReleaseFCB()
-*
-* Description:
-*   Deallocate a previously allocated structure.
-*
-* Expected Interrupt Level (for execution) :
-*
-*  IRQL_PASSIVE_LEVEL
-*
-* Return Value: None
-*
-*************************************************************************/
-/*VOID
-UDFReleaseFCB(
-    PtrUDFFCB Fcb
-    )
-{
-    ASSERT(Fcb);
-
-    MyFreePool__(Fcb);
-
-    return;
-}*/
-
-/*************************************************************************
-*
-*
-*************************************************************************/
-VOID
-__fastcall
-UDFCleanUpFCB(
-    PtrUDFFCB Fcb
-    )
-{
-    UDFPrint(("UDFCleanUpFCB: %x\n", Fcb));
-    if(!Fcb) return;
-
-    ASSERT(Fcb->NodeIdentifier.NodeType == UDF_NODE_TYPE_FCB);
-
-    _SEH2_TRY {
-        // Deinitialize FCBName field
-        if (Fcb->FCBName) {
-            if(Fcb->FCBName->ObjectName.Buffer) {
-                MyFreePool__(Fcb->FCBName->ObjectName.Buffer);
-                Fcb->FCBName->ObjectName.Buffer = NULL;
-#ifdef UDF_DBG
-                Fcb->FCBName->ObjectName.Length =
-                Fcb->FCBName->ObjectName.MaximumLength = 0;
-#endif
-            }
-#ifdef UDF_DBG
-            else {
-                UDFPrint(("UDF: Fcb has invalid FCBName Buffer\n"));
-                BrutePoint();
-            }
-#endif
-            UDFReleaseObjectName(Fcb->FCBName);
-            Fcb->FCBName = NULL;
-        }
-#ifdef UDF_DBG
-        else {
-            UDFPrint(("UDF: Fcb has invalid FCBName field\n"));
-            BrutePoint();
-        }
-#endif
-
-
-        // begin transaction {
-        UDFTouch(&(Fcb->Vcb->FcbListResource));
-        UDFAcquireResourceExclusive(&(Fcb->Vcb->FcbListResource), TRUE);
-        // Remove this FCB from list of all FCB in VCB
-        RemoveEntryList(&(Fcb->NextFCB));
-        UDFReleaseResource(&(Fcb->Vcb->FcbListResource));
-        // } end transaction
-
-        if(Fcb->FCBFlags & UDF_FCB_INITIALIZED_CCB_LIST_RESOURCE)
-            UDFDeleteResource(&(Fcb->CcbListResource));
-
-        // Free memory
-        UDFReleaseFCB(Fcb);
-    } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-} // end UDFCleanUpFCB()
-
-#ifdef UDF_DBG
-ULONG IrpContextCounter = 0;
-#endif //UDF_DBG
-
-/*************************************************************************
-*
-* Function: UDFAllocateIrpContext()
+* Function: UDFCreateIrpContext()
 *
 * Description:
 *   The UDF FSD creates an IRP context for each request received. This
@@ -981,96 +748,124 @@ ULONG IrpContextCounter = 0;
 * Return Value: A pointer to the IrpContext structure OR NULL.
 *
 *************************************************************************/
-PtrUDFIrpContext
-UDFAllocateIrpContext(
+PIRP_CONTEXT
+UDFCreateIrpContext(
     PIRP           Irp,
     PDEVICE_OBJECT PtrTargetDeviceObject
     )
 {
-    PtrUDFIrpContext            PtrIrpContext = NULL;
-    BOOLEAN                     AllocatedFromZone = TRUE;
-    KIRQL                       CurrentIrql;
-    PIO_STACK_LOCATION          IrpSp = NULL;
+    ASSERT(Irp);
 
-    // first, __try to allocate out of the zone
-    KeAcquireSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), &CurrentIrql);
-    if (!ExIsFullZone(&(UDFGlobalData.IrpContextZoneHeader))) {
-        // we have enough memory
-        PtrIrpContext = (PtrUDFIrpContext)ExAllocateFromZone(&(UDFGlobalData.IrpContextZoneHeader));
+    PIRP_CONTEXT NewIrpContext = NULL;
+    PIO_STACK_LOCATION IrpSp = IoGetCurrentIrpStackLocation(Irp);
 
-        // release the spinlock
-        KeReleaseSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), CurrentIrql);
-    } else {
-        // release the spinlock
-        KeReleaseSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), CurrentIrql);
+    //  The only operations a filesystem device object should ever receive
+    //  are create/teardown of fsdo handles and operations which do not
+    //  occur in the context of fileobjects (i.e., mount).
 
-        // if we failed to obtain from the zone, get it directly from the VMM
-        PtrIrpContext = (PtrUDFIrpContext)MyAllocatePool__(NonPagedPool, UDFQuadAlign(sizeof(UDFIrpContext)));
-        AllocatedFromZone = FALSE;
+    if (UdfDeviceIsFsdo(IrpSp->DeviceObject)) {
+
+        if (IrpSp->FileObject != NULL &&
+            IrpSp->MajorFunction != IRP_MJ_CREATE &&
+            IrpSp->MajorFunction != IRP_MJ_CLEANUP &&
+            IrpSp->MajorFunction != IRP_MJ_CLOSE) {
+
+            ExRaiseStatus(STATUS_INVALID_DEVICE_REQUEST);
+        }
+
+        NT_ASSERT( IrpSp->FileObject != NULL ||
+
+                (IrpSp->MajorFunction == IRP_MJ_FILE_SYSTEM_CONTROL &&
+                 IrpSp->MinorFunction == IRP_MN_USER_FS_REQUEST &&
+                 IrpSp->Parameters.FileSystemControl.FsControlCode == FSCTL_INVALIDATE_VOLUMES) ||
+
+                (IrpSp->MajorFunction == IRP_MJ_FILE_SYSTEM_CONTROL &&
+                 IrpSp->MinorFunction == IRP_MN_MOUNT_VOLUME ) ||
+
+                IrpSp->MajorFunction == IRP_MJ_SHUTDOWN );
     }
 
-    // if we could not obtain the required memory, bug-check.
-    //  Do NOT do this in your commercial driver, instead handle    the error gracefully ...
-    if (!PtrIrpContext) {
+    NewIrpContext = (PIRP_CONTEXT)ExAllocateFromNPagedLookasideList(&UdfData.IrpContextLookasideList);
+
+    if (NewIrpContext == NULL) {
         return NULL;
     }
 
-#ifdef UDF_DBG
-    IrpContextCounter++;
-#endif //UDF_DBG
-
     // zero out the allocated memory block
-    RtlZeroMemory(PtrIrpContext, UDFQuadAlign(sizeof(UDFIrpContext)));
+    RtlZeroMemory(NewIrpContext, sizeof(IRP_CONTEXT));
 
-    // set up some fields ...
-    PtrIrpContext->NodeIdentifier.NodeType  = UDF_NODE_TYPE_IRP_CONTEXT;
-    PtrIrpContext->NodeIdentifier.NodeSize  = UDFQuadAlign(sizeof(UDFIrpContext));
+    // Set the proper node type code and node byte size
+    NewIrpContext->NodeIdentifier.NodeTypeCode = UDF_NODE_TYPE_IRP_CONTEXT;
+    NewIrpContext->NodeIdentifier.NodeByteSize = sizeof(IRP_CONTEXT);
 
+    // Set the originating Irp field
+    NewIrpContext->Irp = Irp;
 
-    PtrIrpContext->Irp = Irp;
-    PtrIrpContext->TargetDeviceObject = PtrTargetDeviceObject;
+    NewIrpContext->RealDevice = PtrTargetDeviceObject;
 
-    // copy over some fields from the IRP and set appropriate flag values
-    if (Irp) {
-        IrpSp = IoGetCurrentIrpStackLocation(Irp);
-        ASSERT(IrpSp);
+    // TODO: fix
+    if (false && IrpSp->FileObject != NULL) {
 
-        PtrIrpContext->MajorFunction = IrpSp->MajorFunction;
-        PtrIrpContext->MinorFunction = IrpSp->MinorFunction;
+        PFILE_OBJECT FileObject = IrpSp->FileObject;
 
-        // Often, a FSD cannot honor a request for asynchronous processing
-        // of certain critical requests. For example, a "close" request on
-        // a file object can typically never be deferred. Therefore, do not
-        // be surprised if sometimes our FSD (just like all other FSD
-        // implementations on the Windows NT system) has to override the flag
-        // below.
-        if (IrpSp->FileObject == NULL) {
-            PtrIrpContext->IrpContextFlags |= UDF_IRP_CONTEXT_CAN_BLOCK;
-        } else {
-            if (IoIsOperationSynchronous(Irp)) {
-                PtrIrpContext->IrpContextFlags |= UDF_IRP_CONTEXT_CAN_BLOCK;
-            }
+        ASSERT(FileObject->DeviceObject == PtrTargetDeviceObject);
+        NewIrpContext->RealDevice = FileObject->DeviceObject;
+
+        //
+        //  See if the request is Write Through. Look for both FileObjects opened
+        //  as write through, and non-cached requests with the SL_WRITE_THROUGH flag set.
+        //
+        //  The latter can only originate from kernel components. (Note - NtWriteFile()
+        //  does redundantly set the SL_W_T flag for all requests it issues on write
+        //  through file objects)
+        //
+
+        if (IsFileWriteThrough( FileObject, NewIrpContext->Vcb ) ||
+            ( (IrpSp->MajorFunction == IRP_MJ_WRITE) &&
+              BooleanFlagOn( Irp->Flags, IRP_NOCACHE) &&
+              BooleanFlagOn( IrpSp->Flags, SL_WRITE_THROUGH))) {
+
+            SetFlag(NewIrpContext->Flags, IRP_CONTEXT_FLAG_WRITE_THROUGH);
         }
     }
 
-    if (!AllocatedFromZone) {
-        UDFSetFlag(PtrIrpContext->IrpContextFlags, UDF_IRP_CONTEXT_NOT_FROM_ZONE);
+    if (!UdfDeviceIsFsdo(IrpSp->DeviceObject)) {
+
+        NewIrpContext->Vcb = (PVCB)IrpSp->DeviceObject->DeviceExtension;
+    }
+
+    //  Major/Minor Function codes
+    NewIrpContext->MajorFunction = IrpSp->MajorFunction;
+    NewIrpContext->MinorFunction = IrpSp->MinorFunction;
+
+    // Often, a FSD cannot honor a request for asynchronous processing
+    // of certain critical requests. For example, a "close" request on
+    // a file object can typically never be deferred. Therefore, do not
+    // be surprised if sometimes our FSD (just like all other FSD
+    // implementations on the Windows NT system) has to override the flag
+    // below.
+    if (IrpSp->FileObject == NULL) {
+        NewIrpContext->Flags |= IRP_CONTEXT_FLAG_WAIT;
+    } else {
+        if (IoIsOperationSynchronous(Irp)) {
+            NewIrpContext->Flags |= IRP_CONTEXT_FLAG_WAIT;
+        }
     }
 
     // Are we top-level ? This information is used by the dispatching code
     // later (and also by the FSD dispatch routine)
     if (IoGetTopLevelIrp() != Irp) {
         // We are not top-level. Note this fact in the context structure
-        UDFSetFlag(PtrIrpContext->IrpContextFlags, UDF_IRP_CONTEXT_NOT_TOP_LEVEL);
+        SetFlag(NewIrpContext->Flags, UDF_IRP_CONTEXT_NOT_TOP_LEVEL);
     }
 
-    return(PtrIrpContext);
-} // end UDFAllocateIrpContext()
+    return NewIrpContext;
+} // end UDFCreateIrpContext()
 
 
 /*************************************************************************
 *
-* Function: UDFReleaseIrpContext()
+* Function: UDFCleanupIrpContext()
 *
 * Description:
 *   Deallocate a previously allocated structure.
@@ -1083,31 +878,91 @@ UDFAllocateIrpContext(
 *
 *************************************************************************/
 VOID
-UDFReleaseIrpContext(
-    PtrUDFIrpContext    PtrIrpContext)
+UDFCleanupIrpContext(
+    _In_ PIRP_CONTEXT IrpContext,
+    _In_ BOOLEAN Post
+    )
 {
-    if(!PtrIrpContext) return;
-//    ASSERT(PtrIrpContext);
+    ASSERT(IrpContext);
 
-#ifdef UDF_DBG
-    IrpContextCounter--;
-#endif //UDF_DBG
+    if (!FlagOn(IrpContext->Flags, IRP_CONTEXT_FLAG_ON_STACK)) {
 
-    // give back memory either to the zone or to the VMM
-    if (!(PtrIrpContext->IrpContextFlags & UDF_IRP_CONTEXT_NOT_FROM_ZONE)) {
-        // back to the zone
-        KIRQL                           CurrentIrql;
+        ExFreeToNPagedLookasideList(&UdfData.IrpContextLookasideList, IrpContext);
+    }
+} // end UDFCleanupIrpContext()
 
-        KeAcquireSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), &CurrentIrql);
-        ExFreeToZone(&(UDFGlobalData.IrpContextZoneHeader), PtrIrpContext);
-        KeReleaseSpinLock(&(UDFGlobalData.ZoneAllocationSpinLock), CurrentIrql);
-    } else {
-        MyFreePool__(PtrIrpContext);
+_When_(RaiseOnError || return, _At_(Fcb->FileLock, _Post_notnull_))
+_When_(RaiseOnError, _At_(IrpContext, _Pre_notnull_))
+BOOLEAN
+UDFCreateFileLock (
+    _In_opt_ PIRP_CONTEXT IrpContext,
+    _Inout_ PFCB Fcb,
+    _In_ BOOLEAN RaiseOnError
+    )
+
+/*++
+
+Routine Description:
+
+    This routine is called when we want to attach a file lock structure to the
+    given Fcb.  It is possible the file lock is already attached.
+
+    This routine is sometimes called from the fast path and sometimes in the
+    Irp-based path.  We don't want to raise in the fast path, just return FALSE.
+
+Arguments:
+
+    Fcb - This is the Fcb to create the file lock for.
+
+    RaiseOnError - If TRUE, we will raise on an allocation failure.  Otherwise we
+        return FALSE on an allocation failure.
+
+Return Value:
+
+    BOOLEAN - TRUE if the Fcb has a filelock, FALSE otherwise.
+
+--*/
+
+{
+    BOOLEAN Result = TRUE;
+    PFILE_LOCK FileLock;
+
+    PAGED_CODE();
+
+    ASSERT(RaiseOnError == FALSE);
+
+    //  Lock the Fcb and check if there is really any work to do.
+
+    //TODO: impl
+    //UDFLockFcb( IrpContext, Fcb );
+
+    if (Fcb->FileLock != NULL) {
+
+        //TODO: impl
+        //UDFUnlockFcb( IrpContext, Fcb );
+        return TRUE;
     }
 
-    return;
-} // end UDFReleaseIrpContext()
+    Fcb->FileLock = FileLock = FsRtlAllocateFileLock(NULL, NULL);
 
+    //TODO: impl
+    //UDFUnlockFcb( IrpContext, Fcb );
+
+    //  Return or raise as appropriate.
+    if (FileLock == NULL) {
+         
+        if (RaiseOnError) {
+
+            NT_ASSERT(ARGUMENT_PRESENT(IrpContext));
+
+            UDFRaiseStatus(IrpContext, STATUS_INSUFFICIENT_RESOURCES);
+        }
+
+        Result = FALSE;
+    }
+
+    return Result;
+}
 
 /*************************************************************************
 *
@@ -1126,7 +981,7 @@ UDFReleaseIrpContext(
 *************************************************************************/
 NTSTATUS
 UDFPostRequest(
-    IN PtrUDFIrpContext PtrIrpContext,
+    IN PIRP_CONTEXT IrpContext,
     IN PIRP             Irp
     )
 {
@@ -1136,22 +991,11 @@ UDFPostRequest(
 
 //    IrpSp = IoGetCurrentIrpStackLocation(Irp);
 
-/*
-    if(Vcb->StopOverflowQueue) {
-        if(Irp) {
-            Irp->IoStatus.Status = STATUS_WRONG_VOLUME;
-            Irp->IoStatus.Information = 0;
-            IoCompleteRequest(Irp, IO_DISK_INCREMENT);
-        }
-        UDFReleaseIrpContext(PtrIrpContext);
-        return STATUS_WRONG_VOLUME;
-    }
-*/
     // mark the IRP pending if this is not double post
-    if(Irp)
+    if (Irp)
         IoMarkIrpPending(Irp);
 
-    Vcb = (PVCB)(PtrIrpContext->TargetDeviceObject->DeviceExtension);
+    Vcb = (PVCB)(IrpContext->RealDevice->DeviceExtension);
     KeAcquireSpinLock(&(Vcb->OverflowQueueSpinLock), &SavedIrql);
 
     if ( Vcb->PostedRequestCount > FSP_PER_DEVICE_THRESHOLD) {
@@ -1161,7 +1005,7 @@ UDFPostRequest(
         //  Note: we just reuse LIST_ITEM field inside WorkQueueItem, this
         //  doesn't matter to regular processing of WorkItems.
         InsertTailList( &(Vcb->OverflowQueue),
-                        &(PtrIrpContext->WorkQueueItem.List) );
+                        &(IrpContext->WorkQueueItem.List) );
         Vcb->OverflowQueueCount++;
         KeReleaseSpinLock( &(Vcb->OverflowQueueSpinLock), SavedIrql );
 
@@ -1174,11 +1018,9 @@ UDFPostRequest(
         KeReleaseSpinLock( &(Vcb->OverflowQueueSpinLock), SavedIrql );
 
         // queue up the request
-        ExInitializeWorkItem(&(PtrIrpContext->WorkQueueItem), UDFCommonDispatch, PtrIrpContext);
+        ExInitializeWorkItem(&(IrpContext->WorkQueueItem), UDFFspDispatch, IrpContext);
 
-        ExQueueWorkItem(&(PtrIrpContext->WorkQueueItem), CriticalWorkQueue);
-    //    ExQueueWorkItem(&(PtrIrpContext->WorkQueueItem), DelayedWorkQueue);
-
+        ExQueueWorkItem(&(IrpContext->WorkQueueItem), CriticalWorkQueue);
     }
 
     // return status pending
@@ -1188,7 +1030,7 @@ UDFPostRequest(
 
 /*************************************************************************
 *
-* Function: UDFCommonDispatch()
+* Function: UDFFspDispatch()
 *
 * Description:
 *   The common dispatch routine invoked in the context of a system worker
@@ -1205,12 +1047,12 @@ UDFPostRequest(
 *************************************************************************/
 VOID
 NTAPI
-UDFCommonDispatch(
+UDFFspDispatch(
     IN PVOID Context   // actually is a pointer to IRPContext structure
     )
 {
     NTSTATUS         RC = STATUS_SUCCESS;
-    PtrUDFIrpContext PtrIrpContext = NULL;
+    PIRP_CONTEXT IrpContext = NULL;
     PIRP             Irp = NULL;
     PVCB             Vcb;
     KIRQL            SavedIrql;
@@ -1218,19 +1060,19 @@ UDFCommonDispatch(
     BOOLEAN          SpinLock = FALSE;
 
     // The context must be a pointer to an IrpContext structure
-    PtrIrpContext = (PtrUDFIrpContext)Context;
+    IrpContext = (PIRP_CONTEXT)Context;
 
     // Assert that the Context is legitimate
-    if ( !PtrIrpContext ||
-         (PtrIrpContext->NodeIdentifier.NodeType != UDF_NODE_TYPE_IRP_CONTEXT) ||
-         (PtrIrpContext->NodeIdentifier.NodeSize != UDFQuadAlign(sizeof(UDFIrpContext))) /*||
-        !(PtrIrpContext->Irp)*/) {
+    if ( !IrpContext ||
+         (IrpContext->NodeIdentifier.NodeTypeCode != UDF_NODE_TYPE_IRP_CONTEXT) ||
+         (IrpContext->NodeIdentifier.NodeByteSize != sizeof(IRP_CONTEXT)) /*||
+        !(IrpContext->Irp)*/) {
         UDFPrint(("    Invalid Context\n"));
         BrutePoint();
         return;
     }
 
-    Vcb = (PVCB)(PtrIrpContext->TargetDeviceObject->DeviceExtension);
+    Vcb = (PVCB)(IrpContext->RealDevice->DeviceExtension);
     ASSERT(Vcb);
 
     UDFPrint(("  *** Thr: %x  ThCnt: %x  QCnt: %x  Started!\n", PsGetCurrentThread(), Vcb->PostedRequestCount, Vcb->OverflowQueueCount));
@@ -1242,10 +1084,10 @@ UDFCommonDispatch(
 
         //  Get a pointer to the IRP structure
         // in some cases we can get Zero pointer to Irp
-        Irp = PtrIrpContext->Irp;
+        Irp = IrpContext->Irp;
         // Now, check if the FSD was top level when the IRP was originally invoked
         // and set the thread context (for the worker thread) appropriately
-        if (PtrIrpContext->IrpContextFlags & UDF_IRP_CONTEXT_NOT_TOP_LEVEL) {
+        if (IrpContext->Flags & UDF_IRP_CONTEXT_NOT_TOP_LEVEL) {
             // The FSD is not top level for the original request
             // Set a constant value in TLS to reflect this fact
             IoSetTopLevelIrp((PIRP)FSRTL_FSP_TOP_LEVEL_IRP);
@@ -1256,7 +1098,7 @@ UDFCommonDispatch(
         // Since the FSD routine will now be invoked in the context of this worker
         // thread, we should inform the FSD that it is perfectly OK to block in
         // the context of this thread
-        PtrIrpContext->IrpContextFlags |= UDF_IRP_CONTEXT_CAN_BLOCK;
+        IrpContext->Flags |= IRP_CONTEXT_FLAG_WAIT;
 
         _SEH2_TRY {
 
@@ -1264,92 +1106,64 @@ UDFCommonDispatch(
             // either in the IrpContext (copied from the IRP), or directly from the
             //  IRP itself (we will need a pointer to the stack location to do that),
             //  Then, switch based on the value on the Major Function code
-            UDFPrint(("  *** MJ: %x, Thr: %x\n", PtrIrpContext->MajorFunction, PsGetCurrentThread()));
-            switch (PtrIrpContext->MajorFunction) {
+            UDFPrint(("  *** MJ: %x, Thr: %x\n", IrpContext->MajorFunction, PsGetCurrentThread()));
+            switch (IrpContext->MajorFunction) {
             case IRP_MJ_CREATE:
                 // Invoke the common create routine
-                RC = UDFCommonCreate(PtrIrpContext, Irp);
+                RC = UDFCommonCreate(IrpContext, Irp);
                 break;
             case IRP_MJ_READ:
                 // Invoke the common read routine
-                RC = UDFCommonRead(PtrIrpContext, Irp);
+                RC = UDFCommonRead(IrpContext, Irp);
                 break;
-#ifndef UDF_READ_ONLY_BUILD
             case IRP_MJ_WRITE:
                 // Invoke the common write routine
-                RC = UDFCommonWrite(PtrIrpContext, Irp);
+                RC = UDFCommonWrite(IrpContext, Irp);
                 break;
-#endif //UDF_READ_ONLY_BUILD
             case IRP_MJ_CLEANUP:
                 // Invoke the common cleanup routine
-                RC = UDFCommonCleanup(PtrIrpContext, Irp);
+                RC = UDFCommonCleanup(IrpContext, Irp);
                 break;
             case IRP_MJ_CLOSE:
                 // Invoke the common close routine
-                RC = UDFCommonClose(PtrIrpContext, Irp);
+                RC = UDFCommonClose(IrpContext, Irp, TRUE);
                 break;
             case IRP_MJ_DIRECTORY_CONTROL:
                 // Invoke the common directory control routine
-                RC = UDFCommonDirControl(PtrIrpContext, Irp);
+                RC = UDFCommonDirControl(IrpContext, Irp);
                 break;
             case IRP_MJ_QUERY_INFORMATION:
-#ifndef UDF_READ_ONLY_BUILD
+                // Invoke the common query information routine
+                RC = UDFCommonQueryInfo(IrpContext, Irp);
+                break;
             case IRP_MJ_SET_INFORMATION:
-#endif //UDF_READ_ONLY_BUILD
-                // Invoke the common query/set information routine
-                RC = UDFCommonFileInfo(PtrIrpContext, Irp);
+                // Invoke the common set information routine
+                RC = UDFCommonSetInfo(IrpContext, Irp);
                 break;
             case IRP_MJ_QUERY_VOLUME_INFORMATION:
                 // Invoke the common query volume routine
-                RC = UDFCommonQueryVolInfo(PtrIrpContext, Irp);
+                RC = UDFCommonQueryVolInfo(IrpContext, Irp);
                 break;
-#ifndef UDF_READ_ONLY_BUILD
             case IRP_MJ_SET_VOLUME_INFORMATION:
-                // Invoke the common query volume routine
-                RC = UDFCommonSetVolInfo(PtrIrpContext, Irp);
+                // Invoke the common set volume routine
+                RC = UDFCommonSetVolInfo(IrpContext, Irp);
                 break;
-#endif //UDF_READ_ONLY_BUILD
-#ifdef UDF_HANDLE_EAS
-/*            case IRP_MJ_QUERY_EA:
-                // Invoke the common query EAs routine
-                RC = UDFCommonGetExtendedAttr(PtrIrpContext, Irp);
-                break;
-            case IRP_MJ_SET_EA:
-                // Invoke the common set EAs routine
-                RC = UDFCommonSetExtendedAttr(PtrIrpContext, Irp);
-                break;*/
-#endif // UDF_HANDLE_EAS
-#ifdef UDF_ENABLE_SECURITY
-            case IRP_MJ_QUERY_SECURITY:
-                // Invoke the common query Security routine
-                RC = UDFCommonGetSecurity(PtrIrpContext, Irp);
-                break;
-#ifndef UDF_READ_ONLY_BUILD
-            case IRP_MJ_SET_SECURITY:
-                // Invoke the common set Security routine
-                RC = UDFCommonSetSecurity(PtrIrpContext, Irp);
-                break;
-#endif //UDF_READ_ONLY_BUILD
-#endif // UDF_ENABLE_SECURITY
             // Continue with the remaining possible dispatch routines below ...
             default:
-                UDFPrint(("  unhandled *** MJ: %x, Thr: %x\n", PtrIrpContext->MajorFunction, PsGetCurrentThread()));
-                // This is the case where we have an invalid major function
-                Irp->IoStatus.Status = STATUS_INVALID_DEVICE_REQUEST;
-                Irp->IoStatus.Information = 0;
 
-                IoCompleteRequest(Irp, IO_NO_INCREMENT);
-                // Free up the Irp Context
-                UDFReleaseIrpContext(PtrIrpContext);
+                UDFPrint(("  unhandled *** MJ: %x, Thr: %x\n", IrpContext->MajorFunction, PsGetCurrentThread()));
+
+                RC = STATUS_INVALID_DEVICE_REQUEST;
+                UDFCompleteRequest( IrpContext, Irp, RC );
                 break;
             }
 
-            // Note: PtrIrpContext is invalid here
+            // Note: IrpContext is invalid here
             UDFPrint(("  *** Thr: %x  Done!\n", PsGetCurrentThread()));
 
-        } _SEH2_EXCEPT(UDFExceptionFilter(PtrIrpContext, _SEH2_GetExceptionInformation())) {
+        } _SEH2_EXCEPT(UDFExceptionFilter(IrpContext, _SEH2_GetExceptionInformation())) {
 
-            RC = UDFExceptionHandler(PtrIrpContext, Irp);
+            RC = UDFProcessException(IrpContext, Irp);
 
             UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
         }  _SEH2_END;
@@ -1362,14 +1176,14 @@ UDFCommonDispatch(
 
         //  If there are any entries on this volume's overflow queue, service
         //  them.
-        if(!Vcb) {
+        if (!Vcb) {
             BrutePoint();
             break;
         }
 
         KeAcquireSpinLock(&(Vcb->OverflowQueueSpinLock), &SavedIrql);
         SpinLock = TRUE;
-        if(!Vcb->OverflowQueueCount)
+        if (!Vcb->OverflowQueueCount)
             break;
 
         Vcb->OverflowQueueCount--;
@@ -1377,12 +1191,12 @@ UDFCommonDispatch(
         KeReleaseSpinLock(&(Vcb->OverflowQueueSpinLock), SavedIrql);
         SpinLock = FALSE;
 
-        PtrIrpContext = CONTAINING_RECORD( Entry,
-                                        UDFIrpContext,
-                                        WorkQueueItem.List );
+        IrpContext = CONTAINING_RECORD(Entry,
+                                          IRP_CONTEXT,
+                                          WorkQueueItem.List);
     }
 
-    if(!SpinLock)
+    if (!SpinLock)
         KeAcquireSpinLock(&(Vcb->OverflowQueueSpinLock), &SavedIrql);
     Vcb->PostedRequestCount--;
     KeReleaseSpinLock(&(Vcb->OverflowQueueSpinLock), SavedIrql);
@@ -1390,365 +1204,7 @@ UDFCommonDispatch(
     UDFPrint(("  *** Thr: %x  ThCnt: %x  QCnt: %x  Terminated!\n", PsGetCurrentThread(), Vcb->PostedRequestCount, Vcb->OverflowQueueCount));
 
     return;
-} // end UDFCommonDispatch()
-
-
-/*************************************************************************
-*
-* Function: UDFInitializeVCB()
-*
-* Description:
-*   Perform the initialization for a VCB structure.
-*
-* Expected Interrupt Level (for execution) :
-*
-*   IRQL PASSIVE_LEVEL
-*
-* Return Value: status
-*
-*************************************************************************/
-NTSTATUS
-UDFInitializeVCB(
-    IN PDEVICE_OBJECT PtrVolumeDeviceObject,
-    IN PDEVICE_OBJECT PtrTargetDeviceObject,
-    IN PVPB           PtrVPB
-    )
-{
-    NTSTATUS RC = STATUS_SUCCESS;
-    PVCB     Vcb = NULL;
-    SHORT    i;
-
-    BOOLEAN VCBResourceInit     = FALSE;
-    BOOLEAN BitMapResource1Init = FALSE;
-    BOOLEAN FcbListResourceInit = FALSE;
-    BOOLEAN FileIdResourceInit  = FALSE;
-    BOOLEAN DlocResourceInit    = FALSE;
-    BOOLEAN DlocResource2Init   = FALSE;
-    BOOLEAN FlushResourceInit   = FALSE;
-    BOOLEAN PreallocResourceInit= FALSE;
-    BOOLEAN IoResourceInit      = FALSE;
-
-    Vcb = (PVCB)(PtrVolumeDeviceObject->DeviceExtension);
-
-    _SEH2_TRY {
-    // Zero it out (typically this has already been done by the I/O
-    // Manager but it does not hurt to do it again)!
-    RtlZeroMemory(Vcb, sizeof(VCB));
-
-    // Initialize the signature fields
-    Vcb->NodeIdentifier.NodeType = UDF_NODE_TYPE_VCB;
-    Vcb->NodeIdentifier.NodeSize = sizeof(VCB);
-
-    // Initialize the ERESOURCE object.
-    RC = UDFInitializeResourceLite(&(Vcb->VCBResource));
-    if(!NT_SUCCESS(RC))
-        try_return(RC);
-    VCBResourceInit = TRUE;
-
-    RC = UDFInitializeResourceLite(&(Vcb->BitMapResource1));
-    if(!NT_SUCCESS(RC))
-        try_return(RC);
-    BitMapResource1Init = TRUE;
-
-    RC = UDFInitializeResourceLite(&(Vcb->FcbListResource));
-    if(!NT_SUCCESS(RC))
-        try_return(RC);
-    FcbListResourceInit = TRUE;
-
-    RC = UDFInitializeResourceLite(&(Vcb->FileIdResource));
-    if(!NT_SUCCESS(RC))
-        try_return(RC);
-    FileIdResourceInit = TRUE;
-
-    RC = UDFInitializeResourceLite(&(Vcb->DlocResource));
-    if(!NT_SUCCESS(RC))
-        try_return(RC);
-    DlocResourceInit = TRUE;
-
-    RC = UDFInitializeResourceLite(&(Vcb->DlocResource2));
-    if(!NT_SUCCESS(RC))
-        try_return(RC);
-    DlocResource2Init = TRUE;
-
-    RC = UDFInitializeResourceLite(&(Vcb->FlushResource));
-    if(!NT_SUCCESS(RC))
-        try_return(RC);
-    FlushResourceInit = TRUE;
-
-    RC = UDFInitializeResourceLite(&(Vcb->PreallocResource));
-    if(!NT_SUCCESS(RC))
-        try_return(RC);
-    PreallocResourceInit = TRUE;
-
-    RC = UDFInitializeResourceLite(&(Vcb->IoResource));
-    if(!NT_SUCCESS(RC))
-        try_return(RC);
-    IoResourceInit = TRUE;
-
-//    RC = UDFInitializeResourceLite(&(Vcb->DelayedCloseResource));
-//    ASSERT(NT_SUCCESS(RC));
-
-    // Allocate buffer for statistics
-    Vcb->Statistics = (PFILE_SYSTEM_STATISTICS)MyAllocatePool__(NonPagedPool, sizeof(FILE_SYSTEM_STATISTICS) * KeNumberProcessors );
-    if(!Vcb->Statistics)
-        try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
-    RtlZeroMemory( Vcb->Statistics, sizeof(FILE_SYSTEM_STATISTICS) * KeNumberProcessors );
-    for (i=0; i < (KeNumberProcessors); i++) {
-        Vcb->Statistics[i].Common.FileSystemType = FILESYSTEM_STATISTICS_TYPE_NTFS;
-        Vcb->Statistics[i].Common.Version = 1;
-        Vcb->Statistics[i].Common.SizeOfCompleteStructure =
-            sizeof(FILE_SYSTEM_STATISTICS);
-    }
-
-    // We know the target device object.
-    // Note that this is not neccessarily a pointer to the actual
-    // physical/virtual device on which the logical volume should
-    // be mounted. This is actually a pointer to either the actual
-    // (real) device or to any device object that may have been
-    // attached to it. Any IRPs that we send down should be sent to this
-    // device object. However, the "real" physical/virtual device object
-    // on which we perform our mount operation can be determined from the
-    // RealDevice field in the VPB sent to us.
-    Vcb->TargetDeviceObject = PtrTargetDeviceObject;
-
-    // We also have a pointer to the newly created device object representing
-    // this logical volume (remember that this VCB structure is simply an
-    // extension of the created device object).
-    Vcb->VCBDeviceObject = PtrVolumeDeviceObject;
-
-    // We also have the VPB pointer. This was obtained from the
-    // Parameters.MountVolume.Vpb field in the current I/O stack location
-    // for the mount IRP.
-    Vcb->Vpb = PtrVPB;
-    // Target Vcb field in Vcb onto itself. This required for check in
-    // open/lock/unlock volume dispatch poits
-    Vcb->Vcb=Vcb;
-
-    //  Set the removable media flag based on the real device's
-    //  characteristics
-    if (PtrVPB->RealDevice->Characteristics & FILE_REMOVABLE_MEDIA) {
-        Vcb->VCBFlags |= UDF_VCB_FLAGS_REMOVABLE_MEDIA;
-    }
-
-    // Initialize the list anchor (head) for some lists in this VCB.
-    InitializeListHead(&(Vcb->NextFCB));
-    InitializeListHead(&(Vcb->NextNotifyIRP));
-    InitializeListHead(&(Vcb->VolumeOpenListHead));
-
-    //  Initialize the overflow queue for the volume
-    Vcb->OverflowQueueCount = 0;
-    InitializeListHead(&(Vcb->OverflowQueue));
-
-    Vcb->PostedRequestCount = 0;
-    KeInitializeSpinLock(&(Vcb->OverflowQueueSpinLock));
-
-    // Initialize the notify IRP list mutex
-    FsRtlNotifyInitializeSync(&(Vcb->NotifyIRPMutex));
-
-    // Intilize NtRequiredFCB for this VCB
-    Vcb->NTRequiredFCB = (PtrUDFNTRequiredFCB)MyAllocatePool__(NonPagedPool, UDFQuadAlign(sizeof(UDFNTRequiredFCB)));
-    if(!Vcb->NTRequiredFCB)
-        try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
-    RtlZeroMemory(Vcb->NTRequiredFCB, UDFQuadAlign(sizeof(UDFNTRequiredFCB)));
-
-    // Set the initial file size values appropriately. Note that our FSD may
-    // wish to guess at the initial amount of information we would like to
-    // read from the disk until we have really determined that this a valid
-    // logical volume (on disk) that we wish to mount.
-    // Vcb->FileSize = Vcb->AllocationSize = ??
-
-    // We do not want to bother with valid data length callbacks
-    // from the Cache Manager for the file stream opened for volume metadata
-    // information
-    Vcb->NTRequiredFCB->CommonFCBHeader.ValidDataLength.QuadPart = 0x7FFFFFFFFFFFFFFFULL;
-
-    Vcb->VolumeLockPID = -1;
-
-    Vcb->VCBOpenCount = 1;
-
-    Vcb->WCacheMaxBlocks        = UDFGlobalData.WCacheMaxBlocks;
-    Vcb->WCacheMaxFrames        = UDFGlobalData.WCacheMaxFrames;
-    Vcb->WCacheBlocksPerFrameSh = UDFGlobalData.WCacheBlocksPerFrameSh;
-    Vcb->WCacheFramesToKeepFree = UDFGlobalData.WCacheFramesToKeepFree;
-
-    // Create a stream file object for this volume.
-    //Vcb->PtrStreamFileObject = IoCreateStreamFileObject(NULL,
-    //                                            Vcb->Vpb->RealDevice);
-    //ASSERT(Vcb->PtrStreamFileObject);
-
-    // Initialize some important fields in the newly created file object.
-    //Vcb->PtrStreamFileObject->FsContext = (PVOID)Vcb;
-    //Vcb->PtrStreamFileObject->FsContext2 = NULL;
-    //Vcb->PtrStreamFileObject->SectionObjectPointer = &(Vcb->SectionObject);
-
-    //Vcb->PtrStreamFileObject->Vpb = PtrVPB;
-
-    // Link this chap onto the global linked list of all VCB structures.
-    // We consider that GlobalDataResource was acquired in past
-    UDFAcquireResourceExclusive(&(UDFGlobalData.GlobalDataResource), TRUE);
-    InsertTailList(&(UDFGlobalData.VCBQueue), &(Vcb->NextVCB));
-
-    Vcb->TargetDevName.Buffer = (PWCHAR)MyAllocatePool__(NonPagedPool, sizeof(MOUNTDEV_NAME));
-    if(!Vcb->TargetDevName.Buffer)
-        try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
-
-    RC = UDFPhSendIOCTL(IOCTL_CDRW_GET_DEVICE_NAME /*IOCTL_MOUNTDEV_QUERY_DEVICE_NAME*/, Vcb->TargetDeviceObject,
-                    NULL,0,
-                    (PVOID)(Vcb->TargetDevName.Buffer),sizeof(MOUNTDEV_NAME),
-                    FALSE, NULL);
-    if(!NT_SUCCESS(RC)) {
-
-        if(RC == STATUS_BUFFER_OVERFLOW) {
-            if(!MyReallocPool__((PCHAR)(Vcb->TargetDevName.Buffer), sizeof(MOUNTDEV_NAME),
-                             (PCHAR*)&(Vcb->TargetDevName.Buffer), Vcb->TargetDevName.Buffer[0]+sizeof(MOUNTDEV_NAME)) ) {
-                goto Kill_DevName_buffer;
-            }
-
-            RC = UDFPhSendIOCTL(IOCTL_CDRW_GET_DEVICE_NAME /*IOCTL_MOUNTDEV_QUERY_DEVICE_NAME*/, Vcb->TargetDeviceObject,
-                            NULL,0,
-                            (PVOID)(Vcb->TargetDevName.Buffer), Vcb->TargetDevName.Buffer[0]+sizeof(MOUNTDEV_NAME),
-                            FALSE, NULL);
-            if(!NT_SUCCESS(RC))
-                goto Kill_DevName_buffer;
-
-        } else {
-Kill_DevName_buffer:
-            if(!MyReallocPool__((PCHAR)Vcb->TargetDevName.Buffer, sizeof(MOUNTDEV_NAME),
-                                (PCHAR*)&(Vcb->TargetDevName.Buffer), sizeof(REG_NAMELESS_DEV)))
-                try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
-            RtlCopyMemory(Vcb->TargetDevName.Buffer, REG_NAMELESS_DEV, sizeof(REG_NAMELESS_DEV));
-            Vcb->TargetDevName.Length = sizeof(REG_NAMELESS_DEV)-sizeof(WCHAR);
-            Vcb->TargetDevName.MaximumLength = sizeof(REG_NAMELESS_DEV);
-            goto read_reg;
-        }
-    }
-
-    Vcb->TargetDevName.MaximumLength =
-    (Vcb->TargetDevName.Length = Vcb->TargetDevName.Buffer[0]) + sizeof(WCHAR);
-    RtlMoveMemory((PVOID)(Vcb->TargetDevName.Buffer), (PVOID)(Vcb->TargetDevName.Buffer+1), Vcb->TargetDevName.Buffer[0]);
-    Vcb->TargetDevName.Buffer[i = (SHORT)(Vcb->TargetDevName.Length/sizeof(WCHAR))] = 0;
-
-    for(;i>=0;i--) {
-        if(Vcb->TargetDevName.Buffer[i] == L'\\') {
-
-            Vcb->TargetDevName.Length -= i*sizeof(WCHAR);
-            RtlMoveMemory((PVOID)(Vcb->TargetDevName.Buffer), (PVOID)(Vcb->TargetDevName.Buffer+i), Vcb->TargetDevName.Length);
-            Vcb->TargetDevName.Buffer[Vcb->TargetDevName.Length/sizeof(WCHAR)] = 0;
-            break;
-        }
-    }
-
-    UDFPrint(("  TargetDevName: %S\n", Vcb->TargetDevName.Buffer));
-
-    // Initialize caching for the stream file object.
-    //CcInitializeCacheMap(Vcb->PtrStreamFileObject, (PCC_FILE_SIZES)(&(Vcb->AllocationSize)),
-    //                            TRUE,       // We will use pinned access.
-    //                            &(UDFGlobalData.CacheMgrCallBacks), Vcb);
-
-read_reg:
-
-    UDFReleaseResource(&(UDFGlobalData.GlobalDataResource));
-
-    // Mark the fact that this VCB structure is initialized.
-    Vcb->VCBFlags |= UDF_VCB_FLAGS_VCB_INITIALIZED;
-
-    RC = STATUS_SUCCESS;
-
-try_exit:   NOTHING;
-
-    } _SEH2_FINALLY {
-
-        if(!NT_SUCCESS(RC)) {
-            if(Vcb->TargetDevName.Buffer)
-                MyFreePool__(Vcb->TargetDevName.Buffer);
-            if(Vcb->NTRequiredFCB)
-                MyFreePool__(Vcb->NTRequiredFCB);
-            if(Vcb->Statistics)
-                MyFreePool__(Vcb->Statistics);
-
-            if(VCBResourceInit)
-                UDFDeleteResource(&(Vcb->VCBResource));
-            if(BitMapResource1Init)
-                UDFDeleteResource(&(Vcb->BitMapResource1));
-            if(FcbListResourceInit)
-                UDFDeleteResource(&(Vcb->FcbListResource));
-            if(FileIdResourceInit)
-                UDFDeleteResource(&(Vcb->FileIdResource));
-            if(DlocResourceInit)
-                UDFDeleteResource(&(Vcb->DlocResource));
-            if(DlocResource2Init)
-                UDFDeleteResource(&(Vcb->DlocResource2));
-            if(FlushResourceInit)
-                UDFDeleteResource(&(Vcb->FlushResource));
-            if(PreallocResourceInit)
-                UDFDeleteResource(&(Vcb->PreallocResource));
-            if(IoResourceInit)
-                UDFDeleteResource(&(Vcb->IoResource));
-        }
-    } _SEH2_END;
-
-    return RC;
-} // end UDFInitializeVCB()
-
-UDFFSD_MEDIA_TYPE
-UDFGetMediaClass(
-    PVCB Vcb
-    )
-{
-    switch(Vcb->FsDeviceType) {
-    case FILE_DEVICE_CD_ROM_FILE_SYSTEM:
-        if(Vcb->VCBFlags & (UDF_VCB_FLAGS_VOLUME_READ_ONLY |
-                            UDF_VCB_FLAGS_MEDIA_READ_ONLY))
-            return MediaCdrom;
-        if(Vcb->CDR_Mode)
-            return MediaCdr;
-        if((Vcb->MediaType >= MediaType_UnknownSize_CDR) &&
-           (Vcb->MediaType < MediaType_UnknownSize_CDRW)) {
-            return MediaCdr;
-        }
-        if((Vcb->MediaType >= MediaType_UnknownSize_CDRW) &&
-           (Vcb->MediaType < MediaType_UnknownSize_Unknown)) {
-            return MediaCdrw;
-        }
-        if(Vcb->MediaClassEx == CdMediaClass_CDR) {
-            return MediaCdr;
-        }
-        if(Vcb->MediaClassEx == CdMediaClass_DVDR ||
-           Vcb->MediaClassEx == CdMediaClass_DVDpR ||
-           Vcb->MediaClassEx == CdMediaClass_HD_DVDR ||
-           Vcb->MediaClassEx == CdMediaClass_BDR) {
-            return MediaDvdr;
-        }
-        if(Vcb->MediaClassEx == CdMediaClass_CDRW) {
-            return MediaCdrw;
-        }
-        if(Vcb->MediaClassEx == CdMediaClass_DVDRW ||
-           Vcb->MediaClassEx == CdMediaClass_DVDpRW ||
-           Vcb->MediaClassEx == CdMediaClass_DVDRAM ||
-           Vcb->MediaClassEx == CdMediaClass_HD_DVDRW ||
-           Vcb->MediaClassEx == CdMediaClass_HD_DVDRAM ||
-           Vcb->MediaClassEx == CdMediaClass_BDRE) {
-            return MediaDvdrw;
-        }
-        //
-        if(Vcb->MediaClassEx == CdMediaClass_CDROM ||
-           Vcb->MediaClassEx == CdMediaClass_DVDROM ||
-           Vcb->MediaClassEx == CdMediaClass_HD_DVDROM ||
-           Vcb->MediaClassEx == CdMediaClass_BDROM) {
-            return MediaCdrom;
-        }
-        return MediaCdrom;
-#ifdef UDF_HDD_SUPPORT
-    case FILE_DEVICE_DISK_FILE_SYSTEM:
-        if(Vcb->TargetDeviceObject->Characteristics & FILE_FLOPPY_DISKETTE)
-            return MediaFloppy;
-        if(Vcb->TargetDeviceObject->Characteristics & FILE_REMOVABLE_MEDIA)
-            return MediaZip;
-        return MediaHdd;
-#endif //UDF_HDD_SUPPORT
-    }
-    return MediaUnknown;
-} // end UDFGetMediaClass()
+} // end UDFFspDispatch()
 
 typedef ULONG
 (*ptrUDFGetParameter)(
@@ -1769,7 +1225,7 @@ UDFUpdateCompatOption(
 {
     ptrUDFGetParameter UDFGetParameter = UseCfg ? UDFGetCfgParameter : UDFGetRegParameter;
 
-    if(UDFGetParameter(Vcb, Name, Update ? ((Vcb->CompatFlags & Flag) ? TRUE : FALSE) : Default)) {
+    if (UDFGetParameter(Vcb, Name, Update ? ((Vcb->CompatFlags & Flag) ? TRUE : FALSE) : Default)) {
         Vcb->CompatFlags |= Flag;
     } else {
         Vcb->CompatFlags &= ~Flag;
@@ -1786,84 +1242,64 @@ UDFReadRegKeys(
     ULONG mult = 1;
     ptrUDFGetParameter UDFGetParameter = UseCfg ? UDFGetCfgParameter : UDFGetRegParameter;
 
-    Vcb->DefaultRegName = UDFMediaClassName[(ULONG)UDFGetMediaClass(Vcb)].ClassName;
+    Vcb->DefaultRegName = REG_DEFAULT_UNKNOWN;
 
     // Should we use Extended FE by default ?
     Vcb->UseExtendedFE = (UCHAR)UDFGetParameter(Vcb, REG_USEEXTENDEDFE_NAME,
         Update ? Vcb->UseExtendedFE : FALSE);
-    if(Vcb->UseExtendedFE != TRUE) Vcb->UseExtendedFE = FALSE;
     // What type of AllocDescs should we use
     Vcb->DefaultAllocMode = (USHORT)UDFGetParameter(Vcb, REG_DEFALLOCMODE_NAME,
         Update ? Vcb->DefaultAllocMode : ICB_FLAG_AD_SHORT);
-    if(Vcb->DefaultAllocMode > ICB_FLAG_AD_LONG) Vcb->DefaultAllocMode = ICB_FLAG_AD_SHORT;
-    // Default UID & GID to be set on newly created files
-    Vcb->DefaultUID = UDFGetParameter(Vcb, UDF_DEFAULT_UID_NAME, Update ? Vcb->DefaultUID : -1);
-    Vcb->DefaultGID = UDFGetParameter(Vcb, UDF_DEFAULT_GID_NAME, Update ? Vcb->DefaultGID : -1);
+    if (Vcb->DefaultAllocMode > ICB_FLAG_AD_LONG) Vcb->DefaultAllocMode = ICB_FLAG_AD_SHORT;
+
     // FE allocation charge for plain Dirs
     Vcb->FECharge = UDFGetParameter(Vcb, UDF_FE_CHARGE_NAME, Update ? Vcb->FECharge : 0);
-    if(!Vcb->FECharge)
+    if (!Vcb->FECharge)
         Vcb->FECharge = UDF_DEFAULT_FE_CHARGE;
     // FE allocation charge for Stream Dirs (SDir)
     Vcb->FEChargeSDir = UDFGetParameter(Vcb, UDF_FE_CHARGE_SDIR_NAME,
         Update ? Vcb->FEChargeSDir : 0);
-    if(!Vcb->FEChargeSDir)
+    if (!Vcb->FEChargeSDir)
         Vcb->FEChargeSDir = UDF_DEFAULT_FE_CHARGE_SDIR;
     // How many Deleted entries should contain Directory to make us
     // start packing it.
     Vcb->PackDirThreshold = UDFGetParameter(Vcb, UDF_DIR_PACK_THRESHOLD_NAME,
         Update ? Vcb->PackDirThreshold : 0);
-    if(Vcb->PackDirThreshold == 0xffffffff)
+    if (Vcb->PackDirThreshold == 0xffffffff)
         Vcb->PackDirThreshold = UDF_DEFAULT_DIR_PACK_THRESHOLD;
-    // The binary exponent for the number of Pages to be read-ahead'ed
-    // This information would be sent to System Cache Manager
-    if(!Update) {
-        Vcb->SystemCacheGran = (1 << UDFGetParameter(Vcb, UDF_READAHEAD_GRAN_NAME, 0)) * PAGE_SIZE;
-        if(!Vcb->SystemCacheGran)
-            Vcb->SystemCacheGran = UDF_DEFAULT_READAHEAD_GRAN;
-    }
+
     // Timeouts for FreeSpaceBitMap & TheWholeDirTree flushes
     Vcb->BM_FlushPriod = UDFGetParameter(Vcb, UDF_BM_FLUSH_PERIOD_NAME,
         Update ? Vcb->BM_FlushPriod : 0);
-    if(!Vcb->BM_FlushPriod) {
+    if (!Vcb->BM_FlushPriod) {
         Vcb->BM_FlushPriod = UDF_DEFAULT_BM_FLUSH_TIMEOUT;
     } else
-    if(Vcb->BM_FlushPriod == (ULONG)-1) {
+    if (Vcb->BM_FlushPriod == (ULONG)-1) {
         Vcb->BM_FlushPriod = 0;
     }
     Vcb->Tree_FlushPriod = UDFGetParameter(Vcb, UDF_TREE_FLUSH_PERIOD_NAME,
         Update ? Vcb->Tree_FlushPriod : 0);
-    if(!Vcb->Tree_FlushPriod) {
+    if (!Vcb->Tree_FlushPriod) {
         Vcb->Tree_FlushPriod = UDF_DEFAULT_TREE_FLUSH_TIMEOUT;
     } else
-    if(Vcb->Tree_FlushPriod == (ULONG)-1) {
+    if (Vcb->Tree_FlushPriod == (ULONG)-1) {
         Vcb->Tree_FlushPriod = 0;
     }
     Vcb->SkipCountLimit = UDFGetParameter(Vcb, UDF_NO_UPDATE_PERIOD_NAME,
         Update ? Vcb->SkipCountLimit : 0);
-    if(!Vcb->SkipCountLimit)
+    if (!Vcb->SkipCountLimit)
         Vcb->SkipCountLimit = -1;
 
-    Vcb->SkipEjectCountLimit = UDFGetParameter(Vcb, UDF_NO_EJECT_PERIOD_NAME,
-        Update ? Vcb->SkipEjectCountLimit : 3);
-
-    if(!Update) {
-        // How many threads are allowed to sodomize Disc simultaneously on each CPU
-        Vcb->ThreadsPerCpu = UDFGetParameter(Vcb, UDF_FSP_THREAD_PER_CPU_NAME,
-            Update ? Vcb->ThreadsPerCpu : 2);
-        if(Vcb->ThreadsPerCpu < 2)
-            Vcb->ThreadsPerCpu = UDF_DEFAULT_FSP_THREAD_PER_CPU;
-    }
     // The mimimum FileSize increment when we'll decide not to allocate
     // on-disk space.
     Vcb->SparseThreshold = UDFGetParameter(Vcb, UDF_SPARSE_THRESHOLD_NAME,
         Update ? Vcb->SparseThreshold : 0);
-    if(!Vcb->SparseThreshold)
+    if (!Vcb->SparseThreshold)
         Vcb->SparseThreshold = UDF_DEFAULT_SPARSE_THRESHOLD;
     // This option is used to VERIFY all the data written. It decreases performance
     Vcb->VerifyOnWrite = UDFGetParameter(Vcb, UDF_VERIFY_ON_WRITE_NAME,
         Update ? Vcb->VerifyOnWrite : FALSE) ? TRUE : FALSE;
 
-#ifndef UDF_READ_ONLY_BUILD
     // Should we update AttrFileTime on Attr changes
     UDFUpdateCompatOption(Vcb, Update, UseCfg, UDF_UPDATE_TIMES_ATTR, UDF_VCB_IC_UPDATE_ATTR_TIME, FALSE);
     // Should we update ModifyFileTime on Writes changes
@@ -1881,7 +1317,6 @@ UDFReadRegKeys(
     UDFUpdateCompatOption(Vcb, Update, UseCfg, UDF_ALLOW_WRITE_IN_RO_DIR, UDF_VCB_IC_WRITE_IN_RO_DIR, TRUE);
     // Should we allow user to change Access Time for unchanged Directory
     UDFUpdateCompatOption(Vcb, Update, UseCfg, UDF_ALLOW_UPDATE_TIMES_ACCS_UCHG_DIR, UDF_VCB_IC_UPDATE_UCHG_DIR_ACCESS_TIME, FALSE);
-#endif //UDF_READ_ONLY_BUILD
     // Should we record Allocation Descriptors in W2k-compatible form
     UDFUpdateCompatOption(Vcb, Update, UseCfg, UDF_W2K_COMPAT_ALLOC_DESCS, UDF_VCB_IC_W2K_COMPAT_ALLOC_DESCS, TRUE);
     // Should we read LONG_ADs with invalid PartitionReferenceNumber (generated by Nero Instant Burner)
@@ -1894,90 +1329,54 @@ UDFReadRegKeys(
     // Should we handle or ignore SOFT_RO flag
     UDFUpdateCompatOption(Vcb, Update, UseCfg, UDF_HANDLE_SOFT_RO, UDF_VCB_IC_SOFT_RO, TRUE);
 
-    // Check if we should generate UDF-style or OS-style DOS-names
-    UDFUpdateCompatOption(Vcb, Update, UseCfg, UDF_OS_NATIVE_DOS_NAME, UDF_VCB_IC_OS_NATIVE_DOS_NAME, FALSE);
-#ifndef UDF_READ_ONLY_BUILD
-    // should we force FO_WRITE_THROUGH on removable media
-    UDFUpdateCompatOption(Vcb, Update, UseCfg, UDF_FORCE_WRITE_THROUGH_NAME, UDF_VCB_IC_FORCE_WRITE_THROUGH,
-                          (Vcb->TargetDeviceObject->Characteristics & FILE_REMOVABLE_MEDIA) ? TRUE : FALSE
-                         );
-#endif //UDF_READ_ONLY_BUILD
     // Should we ignore FO_SEQUENTIAL_ONLY
     UDFUpdateCompatOption(Vcb, Update, UseCfg, UDF_IGNORE_SEQUENTIAL_IO, UDF_VCB_IC_IGNORE_SEQUENTIAL_IO, FALSE);
 // Force Read-only mounts
-#ifndef UDF_READ_ONLY_BUILD
     UDFUpdateCompatOption(Vcb, Update, UseCfg, UDF_FORCE_HW_RO, UDF_VCB_IC_FORCE_HW_RO, FALSE);
-#else //UDF_READ_ONLY_BUILD
-    Vcb->CompatFlags |= UDF_VCB_IC_FORCE_HW_RO;
-#endif //UDF_READ_ONLY_BUILD
-    // Check if we should send FLUSH request for File/Dir down to
-    // underlaying driver
-    if(UDFGetParameter(Vcb, UDF_FLUSH_MEDIA,Update ? Vcb->FlushMedia : FALSE)) {
-        Vcb->FlushMedia = TRUE;
-    } else {
-        Vcb->FlushMedia = FALSE;
-    }
+
     // compare data from packet with data to be writen there
     // before physical writing
-    if(!UDFGetParameter(Vcb, UDF_COMPARE_BEFORE_WRITE, Update ? Vcb->DoNotCompareBeforeWrite : FALSE)) {
+    if (!UDFGetParameter(Vcb, UDF_COMPARE_BEFORE_WRITE, Update ? Vcb->DoNotCompareBeforeWrite : FALSE)) {
         Vcb->DoNotCompareBeforeWrite = TRUE;
     } else {
         Vcb->DoNotCompareBeforeWrite = FALSE;
     }
-    if(!Update)  {
-        if(UDFGetParameter(Vcb, UDF_CHAINED_IO, TRUE)) {
+    if (!Update)  {
+        if (UDFGetParameter(Vcb, UDF_CHAINED_IO, TRUE)) {
             Vcb->CacheChainedIo = TRUE;
         }
 
-        if(UDFGetParameter(Vcb, UDF_FORCE_MOUNT_ALL, FALSE)) {
-            Vcb->VCBFlags |= UDF_VCB_FLAGS_RAW_DISK;
-        }
         // Should we show Blank.Cd file on damaged/unformatted,
         // but UDF-compatible disks
         Vcb->ShowBlankCd = (UCHAR)UDFGetParameter(Vcb, UDF_SHOW_BLANK_CD, FALSE);
-        if(Vcb->ShowBlankCd) {
+        if (Vcb->ShowBlankCd) {
             Vcb->CompatFlags |= UDF_VCB_IC_SHOW_BLANK_CD;
-            if(Vcb->ShowBlankCd > 2) {
+            if (Vcb->ShowBlankCd > 2) {
                 Vcb->ShowBlankCd = 2;
             }
-        }
-        // Should we wait util CD device return from
-        // Becoming Ready state
-        if(UDFGetParameter(Vcb, UDF_WAIT_CD_SPINUP, TRUE)) {
-            Vcb->CompatFlags |= UDF_VCB_IC_WAIT_CD_SPINUP;
-        }
-        // Should we remenber bad VDS locations during mount
-        // Caching will improve mount performance on bad disks, but
-        // will degrade mauntability of unreliable discs
-        if(UDFGetParameter(Vcb, UDF_CACHE_BAD_VDS, TRUE)) {
-            Vcb->CompatFlags |= UDF_VCB_IC_CACHE_BAD_VDS;
         }
 
         // Set partitially damaged volume mount mode
         Vcb->PartitialDamagedVolumeAction = (UCHAR)UDFGetParameter(Vcb, UDF_PART_DAMAGED_BEHAVIOR, UDF_PART_DAMAGED_RW);
-        if(Vcb->PartitialDamagedVolumeAction > 2) {
+        if (Vcb->PartitialDamagedVolumeAction > 2) {
             Vcb->PartitialDamagedVolumeAction = UDF_PART_DAMAGED_RW;
         }
 
         // Set partitially damaged volume mount mode
         Vcb->NoFreeRelocationSpaceVolumeAction = (UCHAR)UDFGetParameter(Vcb, UDF_NO_SPARE_BEHAVIOR, UDF_PART_DAMAGED_RW);
-        if(Vcb->NoFreeRelocationSpaceVolumeAction > 1) {
+        if (Vcb->NoFreeRelocationSpaceVolumeAction > 1) {
             Vcb->NoFreeRelocationSpaceVolumeAction = UDF_PART_DAMAGED_RW;
         }
 
         // Set dirty volume mount mode
-        if(UDFGetParameter(Vcb, UDF_DIRTY_VOLUME_BEHAVIOR, UDF_PART_DAMAGED_RO)) {
+        if (UDFGetParameter(Vcb, UDF_DIRTY_VOLUME_BEHAVIOR, UDF_PART_DAMAGED_RO)) {
             Vcb->CompatFlags |= UDF_VCB_IC_DIRTY_RO;
         }
 
         mult = UDFGetParameter(Vcb, UDF_CACHE_SIZE_MULTIPLIER, 1);
-        if(!mult) mult = 1;
+        if (!mult) mult = 1;
         Vcb->WCacheMaxBlocks *= mult;
         Vcb->WCacheMaxFrames *= mult;
-
-        if(UDFGetParameter(Vcb, UDF_USE_EJECT_BUTTON, TRUE)) {
-            Vcb->UseEvent = TRUE;
-        }
     }
     return;
 } // end UDFReadRegKeys()
@@ -1989,9 +1388,9 @@ UDFGetRegParameter(
     IN ULONG DefValue
     )
 {
-    return UDFRegCheckParameterValue(&(UDFGlobalData.SavedRegPath),
+    return UDFRegCheckParameterValue(&(UdfData.SavedRegPath),
                                      Name,
-                                     Vcb ? &(Vcb->TargetDevName) : NULL,
+                                     NULL,
                                      Vcb ? Vcb->DefaultRegName : NULL,
                                      DefValue);
 } // end UDFGetRegParameter()
@@ -2016,11 +1415,11 @@ UDFGetCfgParameter(
     PUCHAR Cfg    = Vcb->Cfg;
     ULONG  Length = Vcb->CfgLength;
 
-    if(!Cfg || !Length)
+    if (!Cfg || !Length)
         return DefValue;
 
     len = wcslen(Name);
-    if(len >= sizeof(NameA))
+    if (len >= sizeof(NameA))
         return DefValue;
     sprintf(NameA, "%S", Name);
 
@@ -2030,31 +1429,31 @@ UDFGetCfgParameter(
         case '\n':
         case '\r':
         case ',':
-            if(wait_val)
+            if (wait_val)
                 return DefValue;
             continue;
         case ';':
         case '#':
         case '[': // ignore sections for now, treat as comment
-            if(!wait_name)
+            if (!wait_name)
                 return DefValue;
             wait_nl = TRUE;
             continue;
         case '=':
-            if(!wait_val)
+            if (!wait_val)
                 return DefValue;
             continue;
         case ' ':
         case '\t':
             continue;
         default:
-            if(wait_nl)
+            if (wait_nl)
                 continue;
         }
-        if(wait_name) {
-            if(i+len+2 > Length)
+        if (wait_name) {
+            if (i+len+2 > Length)
                 return DefValue;
-            if(RtlCompareMemory(Cfg+i, NameA, len) == len) {
+            if (RtlCompareMemory(Cfg+i, NameA, len) == len) {
                 a=Cfg[i+len];
                 switch(a) {
                 case '\n':
@@ -2083,14 +1482,14 @@ UDFGetCfgParameter(
             }
             continue;
         }
-        if(wait_val) {
-            if(i+3 > Length) {
-                if(a=='0' && Cfg[i+1]=='x') {
+        if (wait_val) {
+            if (i+3 > Length) {
+                if (a=='0' && Cfg[i+1]=='x') {
                     i+=2;
                     radix=16;
                 }
             }
-            if(i >= Length) {
+            if (i >= Length) {
                 return DefValue;
             }
             while(i<Length) {
@@ -2103,19 +1502,19 @@ UDFGetCfgParameter(
                 case ',':
                 case ';':
                 case '#':
-                    if(wait_val)
+                    if (wait_val)
                         return DefValue;
                     return ret_val;
                 }
-                if(a >= '0' && a <= '9') {
+                if (a >= '0' && a <= '9') {
                     a -= '0';
                 } else {
-                    if(radix != 16)
+                    if (radix != 16)
                         return DefValue;
-                    if(a >= 'a' && a <= 'f') {
+                    if (a >= 'a' && a <= 'f') {
                         a -= 'a';
                     } else
-                    if(a >= 'A' && a <= 'F') {
+                    if (a >= 'A' && a <= 'F') {
                         a -= 'A';
                     } else {
                         return DefValue;
@@ -2134,16 +1533,17 @@ UDFGetCfgParameter(
 } // end UDFGetCfgParameter()
 
 VOID
-UDFReleaseVCB(
+UDFDeleteVCB(
+    PIRP_CONTEXT IrpContext,
     PVCB  Vcb
     )
 {
     LARGE_INTEGER delay;
-    UDFPrint(("UDFReleaseVCB\n"));
+    UDFPrint(("UDFDeleteVCB\n"));
 
     delay.QuadPart = -500000; // 0.05 sec
     while(Vcb->PostedRequestCount) {
-        UDFPrint(("UDFReleaseVCB: PostedRequestCount = %d\n", Vcb->PostedRequestCount));
+        UDFPrint(("UDFDeleteVCB: PostedRequestCount = %d\n", Vcb->PostedRequestCount));
         // spin until all queues IRPs are processed
         KeDelayExecutionThread(KernelMode, FALSE, &delay);
         delay.QuadPart -= 500000; // grow delay 0.05 sec
@@ -2152,8 +1552,8 @@ UDFReleaseVCB(
     _SEH2_TRY {
         UDFPrint(("UDF: Flushing buffers\n"));
         UDFVRelease(Vcb);
-        WCacheFlushAll__(&(Vcb->FastCache),Vcb);
-        WCacheRelease__(&(Vcb->FastCache));
+        WCacheFlushAll__(IrpContext, &Vcb->FastCache, Vcb);
+        WCacheRelease__(&Vcb->FastCache);
 
     } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
         BrutePoint();
@@ -2161,7 +1561,7 @@ UDFReleaseVCB(
 
 #ifdef UDF_DBG
     _SEH2_TRY {
-        if (!ExIsResourceAcquiredShared(&UDFGlobalData.GlobalDataResource)) {
+        if (!ExIsResourceAcquiredShared(&UdfData.GlobalDataResource)) {
             UDFPrint(("UDF: attempt to access to not protected data\n"));
             UDFPrint(("UDF: UDFGlobalData\n"));
             BrutePoint();
@@ -2177,19 +1577,10 @@ UDFReleaseVCB(
         BrutePoint();
     } _SEH2_END;
 
-/*    _SEH2_TRY {
-        if(Vcb->VCBFlags & UDF_VCB_FLAGS_STOP_WAITER_EVENT)
-            KeWaitForSingleObject(&(Vcb->WaiterStopped), Executive, KernelMode, FALSE, NULL);
-            Vcb->VCBFlags &= ~UDF_VCB_FLAGS_STOP_WAITER_EVENT;
-    } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    }*/
-
     _SEH2_TRY {
         UDFPrint(("UDF: Delete resources\n"));
-        UDFDeleteResource(&(Vcb->VCBResource));
+        UDFDeleteResource(&(Vcb->VcbResource));
         UDFDeleteResource(&(Vcb->BitMapResource1));
-        UDFDeleteResource(&(Vcb->FcbListResource));
         UDFDeleteResource(&(Vcb->FileIdResource));
         UDFDeleteResource(&(Vcb->DlocResource));
         UDFDeleteResource(&(Vcb->DlocResource2));
@@ -2209,6 +1600,12 @@ UDFReleaseVCB(
         BrutePoint();
     } _SEH2_END;
 
+    // Chuck the backpocket Vpb we kept just in case.
+    UDFFreePool((PVOID*)&Vcb->SwapVpb);
+
+    // If there is a Vpb then we must delete it ourselves.
+    UDFFreePool((PVOID*)&Vcb->Vpb);
+
     _SEH2_TRY {
         UDFPrint(("UDF: Delete DO\n"));
         IoDeleteDevice(Vcb->VCBDeviceObject);
@@ -2216,7 +1613,7 @@ UDFReleaseVCB(
         BrutePoint();
     } _SEH2_END;
 
-} // end UDFReleaseVCB()
+} // end UDFDeleteVCB()
 
 /*
     Read DWORD from Registry
@@ -2263,66 +1660,66 @@ UDFRegCheckParameterValue(
         paramPath.MaximumLength = RegistryPath->Length + paramStr.Length + sizeof(WCHAR);
 
         paramPath.Buffer = (PWCH)MyAllocatePool__(PagedPool, paramPath.MaximumLength);
-        if(!paramPath.Buffer) {
+        if (!paramPath.Buffer) {
             UDFPrint(("UDFCheckRegValue: couldn't allocate paramPath\n"));
             try_return(val = DefValue);
         }
         paramPathUnknown.Buffer = (PWCH)MyAllocatePool__(PagedPool, paramPathUnknown.MaximumLength);
-        if(!paramPathUnknown.Buffer) {
+        if (!paramPathUnknown.Buffer) {
             UDFPrint(("UDFCheckRegValue: couldn't allocate paramPathUnknown\n"));
             try_return(val = DefValue);
         }
 
         RtlZeroMemory(paramPath.Buffer, paramPath.MaximumLength);
         status = RtlAppendUnicodeToString(&paramPath, RegistryPath->Buffer);
-        if(!NT_SUCCESS(status)) {
+        if (!NT_SUCCESS(status)) {
             try_return(val = DefValue);
         }
         status = RtlAppendUnicodeToString(&paramPath, paramStr.Buffer);
-        if(!NT_SUCCESS(status)) {
+        if (!NT_SUCCESS(status)) {
             try_return(val = DefValue);
         }
         UDFPrint(("UDFCheckRegValue: (1) |%S|\n", paramPath.Buffer));
 
         RtlZeroMemory(paramPathUnknown.Buffer, paramPathUnknown.MaximumLength);
         status = RtlAppendUnicodeToString(&paramPathUnknown, RegistryPath->Buffer);
-        if(!NT_SUCCESS(status)) {
+        if (!NT_SUCCESS(status)) {
             try_return(val = DefValue);
         }
         status = RtlAppendUnicodeToString(&paramPathUnknown, paramStr.Buffer);
-        if(!NT_SUCCESS(status)) {
+        if (!NT_SUCCESS(status)) {
             try_return(val = DefValue);
         }
         status = RtlAppendUnicodeToString(&paramPathUnknown, paramPathUnknownStr.Buffer);
-        if(!NT_SUCCESS(status)) {
+        if (!NT_SUCCESS(status)) {
             try_return(val = DefValue);
         }
         UDFPrint(("UDFCheckRegValue: (2) |%S|\n", paramPathUnknown.Buffer));
 
         // First append \Parameters\Default_XXX to the passed in registry path
-        if(DefaultPath) {
+        if (DefaultPath) {
             RtlInitUnicodeString(&defaultParamStr, DefaultPath);
             RtlInitUnicodeString(&defaultParamPath, NULL);
             defaultParamPath.MaximumLength = paramPath.Length + defaultParamStr.Length + sizeof(WCHAR);
             defaultParamPath.Buffer = (PWCH)MyAllocatePool__(PagedPool, defaultParamPath.MaximumLength);
-            if(!defaultParamPath.Buffer) {
+            if (!defaultParamPath.Buffer) {
                 UDFPrint(("UDFCheckRegValue: couldn't allocate defaultParamPath\n"));
                 try_return(val = DefValue);
             }
 
             RtlZeroMemory(defaultParamPath.Buffer, defaultParamPath.MaximumLength);
             status = RtlAppendUnicodeToString(&defaultParamPath, paramPath.Buffer);
-            if(!NT_SUCCESS(status)) {
+            if (!NT_SUCCESS(status)) {
                 try_return(val = DefValue);
             }
             status = RtlAppendUnicodeToString(&defaultParamPath, defaultParamStr.Buffer);
-            if(!NT_SUCCESS(status)) {
+            if (!NT_SUCCESS(status)) {
                 try_return(val = DefValue);
             }
             UDFPrint(("UDFCheckRegValue: (3) |%S|\n", defaultParamPath.Buffer));
         }
 
-        if(PtrVolumePath) {
+        if (PtrVolumePath) {
             paramSuffix = *PtrVolumePath;
         } else {
             RtlInitUnicodeString(&paramSuffix, NULL);
@@ -2332,18 +1729,18 @@ UDFRegCheckParameterValue(
         // now build the device specific path
         paramDevPath.MaximumLength = paramPath.Length + paramSuffix.Length + sizeof(WCHAR);
         paramDevPath.Buffer = (PWCH)MyAllocatePool__(PagedPool, paramDevPath.MaximumLength);
-        if(!paramDevPath.Buffer) {
+        if (!paramDevPath.Buffer) {
             try_return(val = DefValue);
         }
 
         RtlZeroMemory(paramDevPath.Buffer, paramDevPath.MaximumLength);
         status = RtlAppendUnicodeToString(&paramDevPath, paramPath.Buffer);
-        if(!NT_SUCCESS(status)) {
+        if (!NT_SUCCESS(status)) {
             try_return(val = DefValue);
         }
-        if(paramSuffix.Buffer) {
+        if (paramSuffix.Buffer) {
             status = RtlAppendUnicodeToString(&paramDevPath, paramSuffix.Buffer);
-            if(!NT_SUCCESS(status)) {
+            if (!NT_SUCCESS(status)) {
                 try_return(val = DefValue);
             }
         }
@@ -2353,7 +1750,7 @@ UDFRegCheckParameterValue(
         {
             HKEY hk = NULL;
             status = RegTGetKeyHandle(NULL, RegistryPath->Buffer, &hk);
-            if(NT_SUCCESS(status)) {
+            if (NT_SUCCESS(status)) {
                 RegTCloseKeyHandle(hk);
             }
         }
@@ -2367,7 +1764,7 @@ UDFRegCheckParameterValue(
         // *** Read DEV_CLASS_SPEC_DEFAULTS (if any) from
         // "\DwUdf\Parameters_%DevClass%\"
 
-        if(DefaultPath) {
+        if (DefaultPath) {
             status = RegTGetDwordValue(NULL, defaultParamPath.Buffer, Name, &val);
         }
 
@@ -2380,16 +1777,16 @@ try_exit:   NOTHING;
 
     } _SEH2_FINALLY {
 
-        if(DefaultPath && defaultParamPath.Buffer) {
+        if (DefaultPath && defaultParamPath.Buffer) {
             MyFreePool__(defaultParamPath.Buffer);
         }
-        if(paramPath.Buffer) {
+        if (paramPath.Buffer) {
             MyFreePool__(paramPath.Buffer);
         }
-        if(paramDevPath.Buffer) {
+        if (paramDevPath.Buffer) {
             MyFreePool__(paramDevPath.Buffer);
         }
-        if(paramPathUnknown.Buffer) {
+        if (paramPathUnknown.Buffer) {
             MyFreePool__(paramPathUnknown.Buffer);
         }
     } _SEH2_END;
@@ -2416,25 +1813,35 @@ Return Value:
 
 */
 VOID
-UDFInitializeIrpContextFromLite(
-    OUT PtrUDFIrpContext    *IrpContext,
-    IN PtrUDFIrpContextLite IrpContextLite
+UDFInitializeStackIrpContextFromLite(
+    OUT PIRP_CONTEXT IrpContext,
+    IN PIRP_CONTEXT_LITE IrpContextLite
     )
 {
-    (*IrpContext) = UDFAllocateIrpContext(NULL, IrpContextLite->RealDevice);
-    //  Zero and then initialize the structure.
+    ASSERT(IrpContextLite->NodeIdentifier.NodeTypeCode == UDF_NODE_TYPE_IRP_CONTEXT_LITE);
+    ASSERT(IrpContextLite->NodeIdentifier.NodeByteSize == sizeof(IRP_CONTEXT_LITE));
+
+    // Zero and then initialize the structure.
+    RtlZeroMemory(IrpContext, sizeof(IRP_CONTEXT));
+
+    // Set the proper node type code and node byte size
+    IrpContext->NodeIdentifier.NodeTypeCode = UDF_NODE_TYPE_IRP_CONTEXT;
+    IrpContext->NodeIdentifier.NodeByteSize = sizeof(IRP_CONTEXT);
 
     //  Major/Minor Function codes
-    (*IrpContext)->MajorFunction = IRP_MJ_CLOSE;
-    (*IrpContext)->Fcb = IrpContextLite->Fcb;
-    (*IrpContext)->TreeLength = IrpContextLite->TreeLength;
-    (*IrpContext)->IrpContextFlags |= (IrpContextLite->IrpContextFlags & ~UDF_IRP_CONTEXT_NOT_FROM_ZONE);
+    IrpContext->MajorFunction = IRP_MJ_CLOSE;
+    IrpContext->Vcb = IrpContextLite->Fcb->Vcb;
+    IrpContext->Fcb = IrpContextLite->Fcb;
+    IrpContext->TreeLength = IrpContextLite->TreeLength;
+    IrpContext->RealDevice = IrpContextLite->RealDevice;
 
-    //  Set the wait parameter
-    UDFSetFlag( (*IrpContext)->IrpContextFlags, UDF_IRP_CONTEXT_CAN_BLOCK );
+    // Note that this is from the stack.
+    SetFlag(IrpContext->Flags, IRP_CONTEXT_FLAG_ON_STACK);
 
-    return;
-} // end UDFInitializeIrpContextFromLite()
+    // Set the wait parameter
+    SetFlag(IrpContext->Flags, IRP_CONTEXT_FLAG_WAIT);
+
+} // end UDFInitializeStackIrpContextFromLite()
 
 /*
 Routine Description:
@@ -2455,64 +1862,28 @@ Return Value:
 */
 NTSTATUS
 UDFInitializeIrpContextLite(
-    OUT PtrUDFIrpContextLite *IrpContextLite,
-    IN PtrUDFIrpContext    IrpContext,
-    IN PtrUDFFCB           Fcb
+    OUT PIRP_CONTEXT_LITE *IrpContextLite,
+    IN PIRP_CONTEXT IrpContext,
+    IN PFCB                Fcb
     )
 {
-    PtrUDFIrpContextLite LocalIrpContextLite = (PtrUDFIrpContextLite)MyAllocatePool__(NonPagedPool,sizeof(UDFIrpContextLite));
-    if(!LocalIrpContextLite)
+    PIRP_CONTEXT_LITE LocalIrpContextLite = (PIRP_CONTEXT_LITE)MyAllocatePool__(NonPagedPool, sizeof(IRP_CONTEXT_LITE));
+    if (!LocalIrpContextLite)
         return STATUS_INSUFFICIENT_RESOURCES;
     //  Zero and then initialize the structure.
-    RtlZeroMemory( LocalIrpContextLite, sizeof( UDFIrpContextLite ));
+    RtlZeroMemory(LocalIrpContextLite, sizeof(IRP_CONTEXT_LITE));
 
-    LocalIrpContextLite->NodeIdentifier.NodeType  = UDF_NODE_TYPE_IRP_CONTEXT_LITE;
-    LocalIrpContextLite->NodeIdentifier.NodeSize  = sizeof(UDFIrpContextLite);
+    LocalIrpContextLite->NodeIdentifier.NodeTypeCode = UDF_NODE_TYPE_IRP_CONTEXT_LITE;
+    LocalIrpContextLite->NodeIdentifier.NodeByteSize = sizeof(IRP_CONTEXT_LITE);
 
     LocalIrpContextLite->Fcb = Fcb;
     LocalIrpContextLite->TreeLength = IrpContext->TreeLength;
     //  Copy RealDevice for workque algorithms.
-    LocalIrpContextLite->RealDevice = IrpContext->TargetDeviceObject;
-    LocalIrpContextLite->IrpContextFlags = IrpContext->IrpContextFlags;
+    LocalIrpContextLite->RealDevice = IrpContext->RealDevice;
     *IrpContextLite = LocalIrpContextLite;
 
     return STATUS_SUCCESS;
 } // end UDFInitializeIrpContextLite()
-
-NTSTATUS
-NTAPI
-UDFQuerySetEA(
-    PDEVICE_OBJECT DeviceObject,       // the logical volume device object
-    PIRP           Irp                 // I/O Request Packet
-    )
-{
-    NTSTATUS         RC = STATUS_SUCCESS;
-//    PtrUDFIrpContext PtrIrpContext = NULL;
-    BOOLEAN          AreWeTopLevel = FALSE;
-
-    UDFPrint(("UDFQuerySetEA: \n"));
-
-    FsRtlEnterFileSystem();
-    ASSERT(DeviceObject);
-    ASSERT(Irp);
-
-    // set the top level context
-    AreWeTopLevel = UDFIsIrpTopLevel(Irp);
-
-    RC = STATUS_EAS_NOT_SUPPORTED;
-    Irp->IoStatus.Status = RC;
-    Irp->IoStatus.Information = 0;
-    // complete the IRP
-    IoCompleteRequest(Irp, IO_DISK_INCREMENT);
-
-    if(AreWeTopLevel) {
-        IoSetTopLevelIrp(NULL);
-    }
-
-    FsRtlExitFileSystem();
-
-    return(RC);
-} // end UDFQuerySetEA()
 
 ULONG
 UDFIsResourceAcquired(
@@ -2533,16 +1904,16 @@ UDFAcquireResourceExclusiveWithCheck(
     ULONG ReAcqRes =
         ExIsResourceAcquiredExclusiveLite(Resource) ? 1 :
         (ExIsResourceAcquiredSharedLite(Resource) ? 2 : 0);
-    if(ReAcqRes) {
+    if (ReAcqRes) {
         UDFPrint(("UDFAcquireResourceExclusiveWithCheck: ReAcqRes, %x\n", ReAcqRes));
     } else {
 //        BrutePoint();
     }
 
-    if(ReAcqRes == 1) {
+    if (ReAcqRes == 1) {
         // OK
     } else
-    if(ReAcqRes == 2) {
+    if (ReAcqRes == 2) {
         UDFPrint(("UDFAcquireResourceExclusiveWithCheck: !!! Shared !!!\n"));
         //BrutePoint();
     } else {
@@ -2560,16 +1931,16 @@ UDFAcquireResourceSharedWithCheck(
     ULONG ReAcqRes =
         ExIsResourceAcquiredExclusiveLite(Resource) ? 1 :
         (ExIsResourceAcquiredSharedLite(Resource) ? 2 : 0);
-    if(ReAcqRes) {
+    if (ReAcqRes) {
         UDFPrint(("UDFAcquireResourceSharedWithCheck: ReAcqRes, %x\n", ReAcqRes));
 /*    } else {
         BrutePoint();*/
     }
 
-    if(ReAcqRes == 2) {
+    if (ReAcqRes == 2) {
         // OK
     } else
-    if(ReAcqRes == 1) {
+    if (ReAcqRes == 1) {
         UDFPrint(("UDFAcquireResourceSharedWithCheck: Exclusive\n"));
         //BrutePoint();
     } else {
@@ -2589,6 +1960,314 @@ UDFWCacheErrorHandler(
     return ErrorInfo->Status;
 }
 
-#include "Include/misc_common.cpp"
+VOID
+UDFSetModified(
+    IN PVCB        Vcb
+    )
+{
+    if (UDFInterlockedIncrement((PLONG) & (Vcb->Modified)) & 0x80000000)
+        Vcb->Modified = 2;
+} // end UDFSetModified()
+
+VOID
+UDFPreClrModified(
+    IN PVCB Vcb
+    )
+{
+    Vcb->Modified = 1;
+} // end UDFPreClrModified()
+
+VOID
+UDFClrModified(
+    IN PVCB        Vcb
+    )
+{
+    UDFPrint(("ClrModified\n"));
+    UDFInterlockedDecrement((PLONG) & (Vcb->Modified));
+} // end UDFClrModified()
+
+NTSTATUS
+UDFToggleMediaEjectDisable (
+    IN PVCB Vcb,
+    IN BOOLEAN PreventRemoval
+    )
+{
+    PREVENT_MEDIA_REMOVAL Prevent;
+
+    //  If PreventRemoval is the same as UDF_VCB_FLAGS_MEDIA_LOCKED,
+    //  no-op this call, otherwise toggle the state of the flag.
+
+    if ((PreventRemoval ^ BooleanFlagOn(Vcb->VcbState, UDF_VCB_FLAGS_MEDIA_LOCKED)) == 0) {
+
+        return STATUS_SUCCESS;
+
+    } else {
+
+        Vcb->VcbState ^= UDF_VCB_FLAGS_MEDIA_LOCKED;
+    }
+
+    Prevent.PreventMediaRemoval = PreventRemoval;
+
+    return UDFPhSendIOCTL(IOCTL_DISK_MEDIA_REMOVAL,
+                          Vcb->TargetDeviceObject,
+                          &Prevent,
+                          sizeof(Prevent),
+                          NULL,
+                          0,
+                          FALSE,
+                          NULL);
+}
+
+/*++
+
+Routine Description:
+
+    This routine completes a Irp and cleans up the IrpContext.  Either or
+    both of these may not be specified.
+
+Arguments:
+
+    Irp - Supplies the Irp being processed.
+
+    Status - Supplies the status to complete the Irp with
+
+Return Value:
+
+    None.
+
+--*/
+VOID
+UDFCompleteRequest (
+    _Inout_opt_ PIRP_CONTEXT IrpContext OPTIONAL,
+    _Inout_opt_ PIRP Irp OPTIONAL,
+    _In_ NTSTATUS Status
+    )
+{
+    ASSERT_OPTIONAL_IRP_CONTEXT(IrpContext);
+    ASSERT_OPTIONAL_IRP(Irp);
+
+    //  Cleanup the IrpContext if passed in here.
+
+    if (ARGUMENT_PRESENT(IrpContext)) {
+
+        UDFCleanupIrpContext(IrpContext, FALSE);
+    }
+
+    //  If we have an Irp then complete the irp.
+
+    if (ARGUMENT_PRESENT(Irp)) {
+
+        //  Clear the information field in case we have used this Irp
+        //  internally.
+
+        if (NT_ERROR( Status ) &&
+            FlagOn(Irp->Flags, IRP_INPUT_OPERATION)) {
+
+            Irp->IoStatus.Information = 0;
+        }
+
+        Irp->IoStatus.Status = Status;
+
+        AssertVerifyDeviceIrp(Irp);
+
+        IoCompleteRequest(Irp, IO_DISK_INCREMENT);
+    }
+
+    return;
+}
+
+VOID
+UDFSetThreadContext(
+    _Inout_ PIRP_CONTEXT IrpContext,
+    _In_ PTHREAD_CONTEXT ThreadContext
+    )
+
+/*++
+
+Routine Description:
+
+    This routine is called at each Fsd/Fsp entry point set up the IrpContext
+    and thread local storage to track top level requests.  If there is
+    not a Udfs context in the thread local storage then we use the input one.
+    Otherwise we use the one already there.  This routine also updates the
+    IrpContext based on the state of the top-level context.
+
+    If the TOP_LEVEL flag in the IrpContext is already set when we are called
+    then we force this request to appear top level.
+
+Arguments:
+
+    ThreadContext - Address on stack for local storage if not already present.
+
+    ForceTopLevel - We force this request to appear top level regardless of
+        any previous stack value.
+
+Return Value:
+
+    None
+
+--*/
+
+{
+    PTHREAD_CONTEXT CurrentThreadContext;
+#ifdef __REACTOS__
+    ULONG_PTR StackTop;
+    ULONG_PTR StackBottom;
+#endif
+
+    PAGED_CODE();
+
+    ASSERT_IRP_CONTEXT(IrpContext);
+
+    //  Get the current top-level irp out of the thread storage.
+    //  If NULL then this is the top-level request.
+
+    CurrentThreadContext = (PTHREAD_CONTEXT) IoGetTopLevelIrp();
+
+    if (CurrentThreadContext == NULL) {
+
+        SetFlag(IrpContext->Flags, IRP_CONTEXT_FLAG_TOP_LEVEL);
+    }
+
+    // Initialize the input context unless we are using the current
+    // thread context block.  We use the new block if our caller
+    // specified this or the existing block is invalid.
+    //
+    // The following must be true for the current to be a valid Cdfs context.
+    //
+    //      Structure must lie within current stack.
+    //      Address must be ULONG aligned.
+    //      Cdfs signature must be present.
+    //
+    // If this is not a valid Cdfs context then use the input thread
+    // context and store it in the top level context.
+
+#ifdef __REACTOS__
+    IoGetStackLimits( &StackTop, &StackBottom);
+#endif
+
+#pragma warning(suppress: 6011) // Bug in PREFast around bitflag operations
+    if (FlagOn( IrpContext->Flags, IRP_CONTEXT_FLAG_TOP_LEVEL ) ||
+#ifndef __REACTOS__
+        (!IoWithinStackLimits( (ULONG_PTR)CurrentThreadContext, sizeof(THREAD_CONTEXT) ) ||
+#else
+        (((ULONG_PTR) CurrentThreadContext > StackBottom - sizeof( THREAD_CONTEXT )) ||
+         ((ULONG_PTR) CurrentThreadContext <= StackTop) ||
+#endif
+         FlagOn( (ULONG_PTR) CurrentThreadContext, 0x3 ) ||
+         (CurrentThreadContext->Udfs != 0x53464444))) {
+
+        ThreadContext->Udfs = 0x53464444;
+        ThreadContext->SavedTopLevelIrp = (PIRP) CurrentThreadContext;
+        ThreadContext->TopLevelIrpContext = IrpContext;
+        IoSetTopLevelIrp((PIRP)ThreadContext);
+
+        IrpContext->TopLevel = IrpContext;
+        IrpContext->ThreadContext = ThreadContext;
+
+        SetFlag(IrpContext->Flags, IRP_CONTEXT_FLAG_TOP_LEVEL_UDFS);
+
+    //
+    //  Otherwise use the IrpContext in the thread context.
+    //
+
+    } else {
+
+        IrpContext->TopLevel = CurrentThreadContext->TopLevelIrpContext;
+    }
+
+    return;
+}
+
+
+_Requires_lock_held_(_Global_critical_region_)
+_When_(Type == AcquireExclusive && return != FALSE, _Acquires_exclusive_lock_(*Resource))
+_When_(Type == AcquireShared && return != FALSE, _Acquires_shared_lock_(*Resource))
+_When_(Type == AcquireSharedStarveExclusive && return != FALSE, _Acquires_shared_lock_(*Resource))
+_When_(IgnoreWait == FALSE, _Post_satisfies_(return == TRUE))
+BOOLEAN
+UDFAcquireResource(
+    _In_ PIRP_CONTEXT IrpContext,
+    _Inout_ PERESOURCE Resource,
+    _In_ BOOLEAN IgnoreWait,
+    _In_ TYPE_OF_ACQUIRE Type
+    )
+
+/*++
+
+Routine Description:
+
+    This is the single routine used to acquire file system resources.  It
+    looks at the IgnoreWait flag to determine whether to try to acquire the
+    resource without waiting.  Returning TRUE/FALSE to indicate success or
+    failure.  Otherwise it is driven by the WAIT flag in the IrpContext and
+    will raise CANT_WAIT on a failure.
+
+Arguments:
+
+    Resource - This is the resource to try and acquire.
+
+    IgnoreWait - If TRUE then this routine will not wait to acquire the
+        resource and will return a boolean indicating whether the resource was
+        acquired.  Otherwise we use the flag in the IrpContext and raise
+        if the resource is not acquired.
+
+    Type - Indicates how we should try to get the resource.
+
+Return Value:
+
+    BOOLEAN - TRUE if the resource is acquired.  FALSE if not acquired and
+        IgnoreWait is specified.  Otherwise we raise CANT_WAIT.
+
+--*/
+
+{
+    BOOLEAN Wait = FALSE;
+    BOOLEAN Acquired;
+    PAGED_CODE();
+
+    //  We look first at the IgnoreWait flag, next at the flag in the Irp
+    // Context to decide how to acquire this resource.
+
+    if (!IgnoreWait && FlagOn(IrpContext->Flags, IRP_CONTEXT_FLAG_WAIT)) {
+
+        Wait = TRUE;
+    }
+
+    // Attempt to acquire the resource either shared or exclusively.
+
+    switch (Type) {
+        case AcquireExclusive:
+
+#pragma prefast( suppress:28137, "prefast believes Wait should be a constant, but this is ok for CDFS" )
+            Acquired = ExAcquireResourceExclusiveLite( Resource, Wait );
+            break;
+
+        case AcquireShared:
+
+            Acquired = ExAcquireResourceSharedLite( Resource, Wait );
+            break;
+
+        case AcquireSharedStarveExclusive:
+
+            Acquired = ExAcquireSharedStarveExclusive( Resource, Wait );
+            break;
+
+        default:
+            Acquired = FALSE;
+            NT_ASSERT( FALSE );
+    }
+
+    // If not acquired and the user didn't specifiy IgnoreWait then
+    // raise CANT_WAIT.
+
+    if (!Acquired && !IgnoreWait) {
+
+        UDFRaiseStatus(IrpContext, STATUS_CANT_WAIT);
+    }
+
+    return Acquired;
+}
+
 #include "Include/regtools.cpp"
 

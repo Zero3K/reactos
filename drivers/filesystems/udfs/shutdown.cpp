@@ -50,7 +50,7 @@ UDFShutdown(
     )
 {
     NTSTATUS         RC = STATUS_SUCCESS;
-    PtrUDFIrpContext PtrIrpContext = NULL;
+    PIRP_CONTEXT IrpContext = NULL;
     BOOLEAN          AreWeTopLevel = FALSE;
 
     UDFPrint(("UDFShutDown\n"));
@@ -67,20 +67,18 @@ UDFShutdown(
     _SEH2_TRY {
 
         // get an IRP context structure and issue the request
-        PtrIrpContext = UDFAllocateIrpContext(Irp, DeviceObject);
-        if(PtrIrpContext) {
-            RC = UDFCommonShutdown(PtrIrpContext, Irp);
+        IrpContext = UDFCreateIrpContext(Irp, DeviceObject);
+        if (IrpContext) {
+            RC = UDFCommonShutdown(IrpContext, Irp);
         } else {
+
+            UDFCompleteRequest(IrpContext, Irp, STATUS_INSUFFICIENT_RESOURCES);
             RC = STATUS_INSUFFICIENT_RESOURCES;
-            Irp->IoStatus.Status = RC;
-            Irp->IoStatus.Information = 0;
-            // complete the IRP
-            IoCompleteRequest(Irp, IO_DISK_INCREMENT);
         }
 
-    } _SEH2_EXCEPT(UDFExceptionFilter(PtrIrpContext, _SEH2_GetExceptionInformation())) {
+    } _SEH2_EXCEPT(UDFExceptionFilter(IrpContext, _SEH2_GetExceptionInformation())) {
 
-        RC = UDFExceptionHandler(PtrIrpContext, Irp);
+        RC = UDFProcessException(IrpContext, Irp);
 
         UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
     } _SEH2_END;
@@ -113,27 +111,36 @@ UDFShutdown(
 *************************************************************************/
 NTSTATUS
 UDFCommonShutdown(
-    PtrUDFIrpContext PtrIrpContext,
-    PIRP             Irp
+    _Inout_ PIRP_CONTEXT IrpContext,
+    _Inout_ PIRP Irp
     )
 {
-    NTSTATUS            RC = STATUS_SUCCESS;
-    PIO_STACK_LOCATION  IrpSp = NULL;
+    KEVENT Event;
+    NTSTATUS Status;
     PVCB Vcb;
     PLIST_ENTRY Link;
-    PPREVENT_MEDIA_REMOVAL_USER_IN Buf = NULL;
     LARGE_INTEGER delay;
 
-    UDFPrint(("UDFCommonShutdown\n"));
+    PAGED_CODE();
+
+    // Make sure we don't get any pop-ups.
+
+    SetFlag( IrpContext->Flags, IRP_CONTEXT_FLAG_DISABLE_POPUPS );
+
+    // Initialize an event for doing calls down to
+    // our target device objects.
+
+    KeInitializeEvent(&Event, NotificationEvent, FALSE);
+
+    // Indicate that shutdown has started.
+
+    SetFlag(UdfData.Flags, UDFS_FLAGS_SHUTDOWN);
+
+    // Get everyone else out of the way
+
+    UDFAcquireUdfData(IrpContext);
 
     _SEH2_TRY {
-        // First, get a pointer to the current I/O stack location
-        IrpSp = IoGetCurrentIrpStackLocation(Irp);
-        ASSERT(IrpSp);
-
-        Buf = (PPREVENT_MEDIA_REMOVAL_USER_IN)MyAllocatePool__(NonPagedPool, sizeof(PREVENT_MEDIA_REMOVAL_USER_IN));
-        if(!Buf)
-            try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
 
         // (a) Block all new "mount volume" requests by acquiring an appropriate
         //       global resource/lock.
@@ -152,87 +159,137 @@ UDFCommonShutdown(
         //              device object
         //       (v) Release the VCB resource we will have acquired in (i) above.
 
-        // Acquire GlobalDataResource
-        UDFAcquireResourceExclusive(&(UDFGlobalData.GlobalDataResource), TRUE);
-        // Walk through all of the Vcb's attached to the global data.
-        Link = UDFGlobalData.VCBQueue.Flink;
+        //  Now walk through all the mounted Vcb's and shutdown the target
+        //  device objects.
 
-        while (Link != &(UDFGlobalData.VCBQueue)) {
-            // Get 'next' Vcb
+        Link = UdfData.VcbQueue.Flink;
+
+        while (Link != &(UdfData.VcbQueue)) {
+
             Vcb = CONTAINING_RECORD( Link, VCB, NextVCB );
+
             // Move to the next link now since the current Vcb may be deleted.
+
             Link = Link->Flink;
-            ASSERT(Link != Link->Flink);
 
-            if(!(Vcb->VCBFlags & UDF_VCB_FLAGS_SHUTDOWN)) {
+            // If we have already been called before for this volume
+            // (and yes this does happen), skip this volume as no writes
+            // have been allowed since the first shutdown.
 
-#ifdef UDF_DELAYED_CLOSE
-                UDFAcquireResourceExclusive(&(Vcb->VCBResource), TRUE);
-                UDFPrint(("    UDFCommonShutdown:     set UDF_VCB_FLAGS_NO_DELAYED_CLOSE\n"));
-                Vcb->VCBFlags |= UDF_VCB_FLAGS_NO_DELAYED_CLOSE;
-                UDFReleaseResource(&(Vcb->VCBResource));
-#endif //UDF_DELAYED_CLOSE
+            if (FlagOn(Vcb->VcbState, VCB_STATE_SHUTDOWN) ||
+                (Vcb->VcbCondition != VcbMounted)) {
 
-                // Note: UDFCloseAllDelayed() doesn't acquire DelayedCloseResource if
-                // GlobalDataResource is already acquired. Thus for now we should
-                // release GlobalDataResource and re-acquire it later.
-                UDFReleaseResource( &(UDFGlobalData.GlobalDataResource) );
-                if(Vcb->RootDirFCB && Vcb->RootDirFCB->FileInfo) {
-                    UDFPrint(("    UDFCommonShutdown:     UDFCloseAllSystemDelayedInDir\n"));
-                    RC = UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootDirFCB->FileInfo);
-                    ASSERT(OS_SUCCESS(RC));
-                }
-
-#ifdef UDF_DELAYED_CLOSE
-                UDFCloseAllDelayed(Vcb);
-//                UDFReleaseResource(&(UDFGlobalData.DelayedCloseResource));
-#endif //UDF_DELAYED_CLOSE
-
-                // re-acquire GlobalDataResource
-                UDFAcquireResourceExclusive(&(UDFGlobalData.GlobalDataResource), TRUE);
-
-                // disable Eject Waiter
-                UDFStopEjectWaiter(Vcb);
-                // Acquire Vcb resource
-                UDFAcquireResourceExclusive(&(Vcb->VCBResource), TRUE);
-
-                ASSERT(!Vcb->OverflowQueueCount);
-
-                if(!(Vcb->VCBFlags & UDF_VCB_FLAGS_SHUTDOWN)) {
-
-                    UDFDoDismountSequence(Vcb, Buf, FALSE);
-                    if(Vcb->VCBFlags & UDF_VCB_FLAGS_REMOVABLE_MEDIA) {
-                        // let drive flush all data before reset
-                        delay.QuadPart = -10000000; // 1 sec
-                        KeDelayExecutionThread(KernelMode, FALSE, &delay);
-                    }
-                    Vcb->VCBFlags |= (UDF_VCB_FLAGS_SHUTDOWN |
-                                      UDF_VCB_FLAGS_VOLUME_READ_ONLY);
-                }
-
-                UDFReleaseResource(&(Vcb->VCBResource));
+                continue;
             }
+
+            UDFAcquireVcbExclusive(IrpContext, Vcb, FALSE);
+
+            UDFFlushVolume(IrpContext, Vcb);
+
+#ifdef UDF_DELAYED_CLOSE
+            UDFAcquireResourceExclusive(&(Vcb->VcbResource), TRUE);
+            UDFPrint(("    UDFCommonShutdown:     set UDF_VCB_FLAGS_NO_DELAYED_CLOSE\n"));
+            Vcb->VcbState |= UDF_VCB_FLAGS_NO_DELAYED_CLOSE;
+            UDFReleaseResource(&(Vcb->VcbResource));
+#endif //UDF_DELAYED_CLOSE
+
+            if (Vcb->RootIndexFcb && Vcb->RootIndexFcb->FileInfo) {
+                UDFPrint(("    UDFCommonShutdown:     UDFCloseAllSystemDelayedInDir\n"));
+                Status = UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
+                ASSERT(NT_SUCCESS(Status));
+            }
+
+#ifdef UDF_DELAYED_CLOSE
+            UDFFspClose(Vcb);
+#endif //UDF_DELAYED_CLOSE
+
+            ASSERT(!Vcb->OverflowQueueCount);
+
+            {
+            _SEH2_TRY {
+
+                IO_STATUS_BLOCK Iosb;
+
+                PIRP NewIrp = IoBuildSynchronousFsdRequest(IRP_MJ_SHUTDOWN,
+                                                           Vcb->TargetDeviceObject,
+                                                           NULL,
+                                                           0,
+                                                           NULL,
+                                                           &Event,
+                                                           &Iosb);
+
+                if (NewIrp != NULL) {
+
+                    if (NT_SUCCESS(IoCallDriver( Vcb->TargetDeviceObject, NewIrp ))) {
+
+                        (VOID) KeWaitForSingleObject(&Event,
+                                                     Executive,
+                                                     KernelMode,
+                                                     FALSE,
+                                                     NULL);
+
+                        KeClearEvent(&Event);
+                    }
+                }
+
+            } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+
+            } _SEH2_END;
+            }
+
+            ASSERT(!Vcb->OverflowQueueCount);
+
+            if (!(Vcb->VcbState & VCB_STATE_SHUTDOWN)) {
+
+                UDFDoDismountSequence(Vcb, FALSE);
+                if (Vcb->VcbState & VCB_STATE_REMOVABLE_MEDIA) {
+                    // let drive flush all data before reset
+                    delay.QuadPart = -10000000; // 1 sec
+                    KeDelayExecutionThread(KernelMode, FALSE, &delay);
+                }
+
+                SetFlag(Vcb->VcbState, VCB_STATE_SHUTDOWN);
+            }
+
+            UDFReleaseVcb(IrpContext, Vcb);
         }
+
         // Once we have processed all the mounted logical volumes, we can release
         // all acquired global resources and leave (in peace :-)
-        UDFReleaseResource( &(UDFGlobalData.GlobalDataResource) );
-        RC = STATUS_SUCCESS;
+        UDFReleaseResource( &(UdfData.GlobalDataResource) );
 
-try_exit: NOTHING;
+        // Now, delete any device objects, etc. we may have created
+        IoUnregisterFileSystem(UdfData.UDFDeviceObject_CD);
+        if (UdfData.UDFDeviceObject_CD) {
+            IoDeleteDevice(UdfData.UDFDeviceObject_CD);
+            UdfData.UDFDeviceObject_CD = NULL;
+        }
+        IoUnregisterFileSystem(UdfData.UDFDeviceObject_HDD);
+        if (UdfData.UDFDeviceObject_HDD) {
+            IoDeleteDevice(UdfData.UDFDeviceObject_HDD);
+            UdfData.UDFDeviceObject_HDD = NULL;
+        }
+
+        // free up any memory we might have reserved for zones/lookaside
+        //  lists
+        if (UdfData.Flags & UDF_DATA_FLAGS_ZONES_INITIALIZED) {
+            UDFDestroyZones();
+        }
+
+        // delete the resource we may have initialized
+        if (UdfData.Flags & UDF_DATA_FLAGS_RESOURCE_INITIALIZED) {
+            // un-initialize this resource
+            UDFDeleteResource(&(UdfData.GlobalDataResource));
+            ClearFlag(UdfData.Flags, UDF_DATA_FLAGS_RESOURCE_INITIALIZED);
+        }
+
+        Status = STATUS_SUCCESS;
 
     } _SEH2_FINALLY {
 
-        if(Buf) MyFreePool__(Buf);
-        if(!_SEH2_AbnormalTermination()) {
-            Irp->IoStatus.Status = RC;
-            Irp->IoStatus.Information = 0;
-            // Free up the Irp Context
-            UDFReleaseIrpContext(PtrIrpContext);
-                // complete the IRP
-            IoCompleteRequest(Irp, IO_DISK_INCREMENT);
-        }
+        UDFReleaseUdfData(IrpContext);
 
     } _SEH2_END; // end of "__finally" processing
 
-    return(RC);
+    return STATUS_SUCCESS;
 } // end UDFCommonShutdown()

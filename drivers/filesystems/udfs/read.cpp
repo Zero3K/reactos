@@ -29,8 +29,15 @@
 #define OVERFLOW_READ_THRESHHOLD         (0x1000)
 #endif // defined(_M_IX86)
 
-//#define POST_LOCK_PAGES
+//  This macro just puts a nice little try-except around RtlZeroMemory
 
+#define SafeZeroMemory(AT,BYTE_COUNT) {                            \
+    _SEH2_TRY {                                                    \
+        RtlZeroMemory((AT), (BYTE_COUNT));                         \
+    } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {                    \
+         UDFRaiseStatus(IrpContext, STATUS_INVALID_USER_BUFFER);\
+    } _SEH2_END;                                                   \
+}
 
 /*************************************************************************
 *
@@ -55,7 +62,7 @@ UDFRead(
     PIRP           Irp)                // I/O Request Packet
 {
     NTSTATUS            RC = STATUS_SUCCESS;
-    PtrUDFIrpContext    PtrIrpContext = NULL;
+    PIRP_CONTEXT IrpContext = NULL;
     BOOLEAN             AreWeTopLevel = FALSE;
 
     TmPrint(("UDFRead: \n"));
@@ -66,25 +73,31 @@ UDFRead(
 
     // set the top level context
     AreWeTopLevel = UDFIsIrpTopLevel(Irp);
-    ASSERT(!UDFIsFSDevObj(DeviceObject));
 
     _SEH2_TRY {
 
         // get an IRP context structure and issue the request
-        PtrIrpContext = UDFAllocateIrpContext(Irp, DeviceObject);
-        if(PtrIrpContext) {
-            RC = UDFCommonRead(PtrIrpContext, Irp);
+        IrpContext = UDFCreateIrpContext(Irp, DeviceObject);
+        if (IrpContext) {
+
+            if (FlagOn(IrpContext->MinorFunction, IRP_MN_COMPLETE)) {
+
+                RC = UDFCompleteMdl(IrpContext, Irp);
+
+            } else {
+
+                RC = UDFCommonRead(IrpContext, Irp);
+            }
+
         } else {
+
+            UDFCompleteRequest(IrpContext, Irp, STATUS_INSUFFICIENT_RESOURCES);
             RC = STATUS_INSUFFICIENT_RESOURCES;
-            Irp->IoStatus.Status = RC;
-            Irp->IoStatus.Information = 0;
-            // complete the IRP
-            IoCompleteRequest(Irp, IO_DISK_INCREMENT);
         }
 
-    } _SEH2_EXCEPT(UDFExceptionFilter(PtrIrpContext, _SEH2_GetExceptionInformation())) {
+    } _SEH2_EXCEPT(UDFExceptionFilter(IrpContext, _SEH2_GetExceptionInformation())) {
 
-        RC = UDFExceptionHandler(PtrIrpContext, Irp);
+        RC = UDFProcessException(IrpContext, Irp);
 
         UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
     } _SEH2_END;
@@ -116,9 +129,9 @@ UDFRead(
 *************************************************************************/
 NTSTATUS
 UDFPostStackOverflowRead(
-    IN PtrUDFIrpContext PtrIrpContext,
+    IN PIRP_CONTEXT IrpContext,
     IN PIRP             Irp,
-    IN PtrUDFFCB        Fcb
+    IN PFCB             Fcb
     )
 {
     PKEVENT Event;
@@ -129,24 +142,24 @@ UDFPostStackOverflowRead(
     //  Allocate an event and get shared on the resource we will
     //  be later using the common read.
     Event = (PKEVENT)MyAllocatePool__(NonPagedPool, sizeof(KEVENT));
-    if(!Event)
+    if (!Event)
         return STATUS_INSUFFICIENT_RESOURCES;
     KeInitializeEvent( Event, NotificationEvent, FALSE );
 
-    if ((Irp->Flags & IRP_PAGING_IO) && (Fcb->NTRequiredFCB->CommonFCBHeader.PagingIoResource)) {
-        Resource = Fcb->NTRequiredFCB->CommonFCBHeader.PagingIoResource;
+    if (Irp->Flags & IRP_PAGING_IO && Fcb->Header.PagingIoResource) {
+        Resource = Fcb->Header.PagingIoResource;
     } else {
-        Resource = Fcb->NTRequiredFCB->CommonFCBHeader.Resource;
+        Resource = Fcb->Header.Resource;
     }
 
-    UDFAcquireResourceShared( Resource, TRUE );
+    UDFAcquireResourceShared(Resource, TRUE);
 
     _SEH2_TRY {
         //  If this read is the result of a verify, we have to
         //  tell the overflow read routne to temporarily
         //  hijack the Vcb->VerifyThread field so that reads
         //  can go through.
-        FsRtlPostStackOverflow(PtrIrpContext, Event, UDFStackOverflowRead);
+        FsRtlPostStackOverflow(IrpContext, Event, UDFStackOverflowRead);
         //  And wait for the worker thread to complete the item
         DbgWaitForSingleObject(Event, NULL);
 
@@ -187,18 +200,18 @@ UDFStackOverflowRead(
     IN PKEVENT Event
     )
 {
-    PtrUDFIrpContext PtrIrpContext = (PtrUDFIrpContext)Context;
+    PIRP_CONTEXT IrpContext = (PIRP_CONTEXT)Context;
     NTSTATUS RC;
 
     UDFPrint(("UDFStackOverflowRead: \n"));
     //  Make it now look like we can wait for I/O to complete
-    PtrIrpContext->IrpContextFlags |= UDF_IRP_CONTEXT_CAN_BLOCK;
+    IrpContext->Flags |= IRP_CONTEXT_FLAG_WAIT;
 
     //  Do the read operation protected by a try-except clause
     _SEH2_TRY {
-        UDFCommonRead(PtrIrpContext, PtrIrpContext->Irp);
-    } _SEH2_EXCEPT(UDFExceptionFilter(PtrIrpContext, _SEH2_GetExceptionInformation())) {
-        RC = UDFExceptionHandler(PtrIrpContext, PtrIrpContext->Irp);
+        UDFCommonRead(IrpContext, IrpContext->Irp);
+    } _SEH2_EXCEPT(UDFExceptionFilter(IrpContext, _SEH2_GetExceptionInformation())) {
+        RC = UDFProcessException(IrpContext, IrpContext->Irp);
         UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
     } _SEH2_END;
 
@@ -227,34 +240,31 @@ UDFStackOverflowRead(
 *************************************************************************/
 NTSTATUS
 UDFCommonRead(
-    PtrUDFIrpContext PtrIrpContext,
+    PIRP_CONTEXT IrpContext,
     PIRP             Irp
     )
 {
     NTSTATUS                RC = STATUS_SUCCESS;
-    PIO_STACK_LOCATION      IrpSp = NULL;
+    PIO_STACK_LOCATION      IrpSp = IoGetCurrentIrpStackLocation(Irp);
     LARGE_INTEGER           ByteOffset;
     ULONG                   ReadLength = 0, TruncatedLength = 0;
     SIZE_T                  NumberBytesRead = 0;
     PFILE_OBJECT            FileObject = NULL;
-    PtrUDFFCB               Fcb = NULL;
-    PtrUDFCCB               Ccb = NULL;
+    TYPE_OF_OPEN TypeOfOpen;
+    PFCB                    Fcb = NULL;
+    PCCB                    Ccb = NULL;
     PVCB                    Vcb = NULL;
-    PtrUDFNTRequiredFCB     NtReqFcb = NULL;
-    PERESOURCE              PtrResourceAcquired = NULL;
-    PERESOURCE              PtrResourceAcquired2 = NULL;
+    BOOLEAN                 VcbAcquired = FALSE;
+    BOOLEAN                 MainResourceAcquired = FALSE;
+    BOOLEAN                 PagingIoResourceAcquired = FALSE;
     PVOID                   SystemBuffer = NULL;
     PIRP                    TopIrp;
-//    uint32                  KeyValue = 0;
-
-    ULONG                   Res1Acq = 0;
-    ULONG                   Res2Acq = 0;
 
     BOOLEAN                 CacheLocked = FALSE;
 
     BOOLEAN                 CanWait = FALSE;
     BOOLEAN                 PagingIo = FALSE;
-    BOOLEAN                 NonBufferedIo = FALSE;
+    BOOLEAN                 NonCachedIo = FALSE;
     BOOLEAN                 SynchronousIo = FALSE;
 
     TmPrint(("UDFCommonRead: irp %x\n", Irp));
@@ -281,29 +291,17 @@ UDFCommonRead(
             UDFPrint(("  NULL TOP_LEVEL_IRP\n"));
             break;
         default:
-            if(TopIrp == Irp) {
+            if (TopIrp == Irp) {
                 UDFPrint(("  TOP_LEVEL_IRP\n"));
             } else {
                 UDFPrint(("  RECURSIVE_IRP, TOP = %x\n", TopIrp));
             }
             break;
         }
-        // First, get a pointer to the current I/O stack location
-        IrpSp = IoGetCurrentIrpStackLocation(Irp);
-        ASSERT(IrpSp);
-        MmPrint(("    Enter Irp, MDL=%x\n", Irp->MdlAddress));
-        if(Irp->MdlAddress) {
-            UDFTouch(Irp->MdlAddress);
-        }
 
-        // If this happens to be a MDL read complete request, then
-        // there is not much processing that the FSD has to do.
-        if (IrpSp->MinorFunction & IRP_MN_COMPLETE) {
-            // Caller wants to tell the Cache Manager that a previously
-            // allocated MDL can be freed.
-            UDFMdlComplete(PtrIrpContext, Irp, IrpSp, TRUE);
-            // The IRP has been completed.
-            try_return(RC = STATUS_SUCCESS);
+        MmPrint(("    Enter Irp, MDL=%x\n", Irp->MdlAddress));
+        if (Irp->MdlAddress) {
+            UDFTouch(Irp->MdlAddress);
         }
 
         // If this is a request at IRQL DISPATCH_LEVEL, then post
@@ -317,21 +315,25 @@ UDFCommonRead(
         FileObject = IrpSp->FileObject;
         ASSERT(FileObject);
 
-        // Get the FCB and CCB pointers
-        Ccb = (PtrUDFCCB)(FileObject->FsContext2);
-        ASSERT(Ccb);
-        Fcb = Ccb->Fcb;
-        ASSERT(Fcb);
+        // Decode the file object and verify we support read on this.  It
+        // must be a user file, stream file or volume file (for a data disk).
+
+        TypeOfOpen = UDFDecodeFileObject(IrpSp->FileObject, &Fcb, &Ccb);
+
         Vcb = Fcb->Vcb;
 
-        if(Fcb->FCBFlags & UDF_FCB_DELETED) {
+        ASSERT_CCB(Ccb);
+        ASSERT_FCB(Fcb);
+        ASSERT_VCB(Vcb);
+
+        if (Fcb->FcbState & UDF_FCB_DELETED) {
             ASSERT(FALSE);
             try_return(RC = STATUS_ACCESS_DENIED);
         }
 
         // check for stack overflow
         if (IoGetRemainingStackSize() < OVERFLOW_READ_THRESHHOLD) {
-            RC = UDFPostStackOverflowRead( PtrIrpContext, Irp, Fcb );
+            RC = UDFPostStackOverflowRead( IrpContext, Irp, Fcb );
             try_return(RC);
         }
 
@@ -341,24 +343,29 @@ UDFCommonRead(
 
         ByteOffset = IrpSp->Parameters.Read.ByteOffset;
 
-        CanWait = (PtrIrpContext->IrpContextFlags & UDF_IRP_CONTEXT_CAN_BLOCK) ? TRUE : FALSE;
+        CanWait = (IrpContext->Flags & IRP_CONTEXT_FLAG_WAIT) ? TRUE : FALSE;
         PagingIo = (Irp->Flags & IRP_PAGING_IO) ? TRUE : FALSE;
-        NonBufferedIo = (Irp->Flags & IRP_NOCACHE) ? TRUE : FALSE;
+        NonCachedIo = (Irp->Flags & IRP_NOCACHE) ? TRUE : FALSE;
         SynchronousIo = (FileObject->Flags & FO_SYNCHRONOUS_IO) ? TRUE : FALSE;
         UDFPrint(("    Flags: %s %s %s %s\n",
                       CanWait ? "W" : "w", PagingIo ? "Pg" : "pg",
-                      NonBufferedIo ? "NBuf" : "buff", SynchronousIo ? "Snc" : "Asc"));
+                      NonCachedIo ? "NonCached" : "Cached", SynchronousIo ? "Snc" : "Asc"));
 
-        if(!NonBufferedIo &&
-           (Fcb->NodeIdentifier.NodeType != UDF_NODE_TYPE_VCB)) {
-            if(UDFIsAStream(Fcb->FileInfo)) {
-                UDFNotifyFullReportChange( Vcb, Fcb->FileInfo,
-                                           FILE_NOTIFY_CHANGE_LAST_ACCESS,
-                                           FILE_ACTION_MODIFIED_STREAM);
+        if (!NonCachedIo &&
+           (Fcb->NodeIdentifier.NodeTypeCode != UDF_NODE_TYPE_VCB)) {
+
+            if (UDFIsAStream(Fcb->FileInfo)) {
+
+                UDFNotifyFullReportChange(Vcb,
+                                          Fcb,
+                                          FILE_NOTIFY_CHANGE_LAST_ACCESS,
+                                          FILE_ACTION_MODIFIED_STREAM);
             } else {
-                UDFNotifyFullReportChange( Vcb, Fcb->FileInfo,
-                                           FILE_NOTIFY_CHANGE_LAST_ACCESS,
-                                           FILE_ACTION_MODIFIED);
+
+                UDFNotifyFullReportChange(Vcb,
+                                          Fcb,
+                                          FILE_NOTIFY_CHANGE_LAST_ACCESS,
+                                          FILE_ACTION_MODIFIED);
             }
         }
 
@@ -371,151 +378,90 @@ UDFCommonRead(
         UDFPrint(("    ByteOffset = %I64x, ReadLength = %x\n", ByteOffset.QuadPart, ReadLength));
 
         // Is this a read of the volume itself ?
-        if (Fcb->NodeIdentifier.NodeType == UDF_NODE_TYPE_VCB) {
+        if (Fcb == Fcb->Vcb->VolumeDasdFcb) {
             // Yup, we need to send this on to the disk driver after
             //  validation of the offset and length.
-            Vcb = (PVCB)Fcb;
-            Vcb->VCBFlags |= UDF_VCB_SKIP_EJECT_CHECK;
-            if(!CanWait)
+
+            Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
+            if (!CanWait)
                 try_return(RC = STATUS_PENDING);
 
-
-            if(PtrIrpContext->IrpContextFlags & UDF_IRP_CONTEXT_FLUSH2_REQUIRED) {
+            if (IrpContext->Flags & UDF_IRP_CONTEXT_FLUSH2_REQUIRED) {
 
                 UDFPrint(("  UDF_IRP_CONTEXT_FLUSH2_REQUIRED\n"));
-                PtrIrpContext->IrpContextFlags &= ~UDF_IRP_CONTEXT_FLUSH2_REQUIRED;
+                IrpContext->Flags &= ~UDF_IRP_CONTEXT_FLUSH2_REQUIRED;
 
-                if(!(Vcb->VCBFlags & UDF_VCB_FLAGS_RAW_DISK)) {
-                    UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootDirFCB->FileInfo);
-                }
+                UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
+
 #ifdef UDF_DELAYED_CLOSE
-                UDFCloseAllDelayed(Vcb);
+                UDFFspClose(Vcb);
 #endif //UDF_DELAYED_CLOSE
 
             }
 
-            if(PtrIrpContext->IrpContextFlags & UDF_IRP_CONTEXT_FLUSH_REQUIRED) {
+            if (IrpContext->Flags & UDF_IRP_CONTEXT_FLUSH_REQUIRED) {
 
                 UDFPrint(("  UDF_IRP_CONTEXT_FLUSH_REQUIRED\n"));
-                PtrIrpContext->IrpContextFlags &= ~UDF_IRP_CONTEXT_FLUSH_REQUIRED;
+                IrpContext->Flags &= ~UDF_IRP_CONTEXT_FLUSH_REQUIRED;
 
                 // Acquire the volume resource exclusive
-                UDFAcquireResourceExclusive(&(Vcb->VCBResource), TRUE);
-                PtrResourceAcquired = &(Vcb->VCBResource);
+                UDFAcquireResourceExclusive(&Vcb->VcbResource, TRUE);
+                VcbAcquired = TRUE;
 
-                UDFFlushLogicalVolume(NULL, NULL, Vcb, 0);
+                UDFFlushVolume(IrpContext, Vcb);
 
-                UDFReleaseResource(PtrResourceAcquired);
-                PtrResourceAcquired = NULL;
+                UDFReleaseResource(&Vcb->VcbResource);
+                VcbAcquired = FALSE;
             }
 
             // Acquire the volume resource shared ...
-            UDFAcquireResourceShared(&(Vcb->VCBResource), TRUE);
-            PtrResourceAcquired = &(Vcb->VCBResource);
-
-#if 0
-            if(PagingIo) {
-                CollectStatistics(Vcb, MetaDataReads);
-                CollectStatisticsEx(Vcb, MetaDataReadBytes, NumberBytesRead);
-            }
-#endif
+            UDFAcquireResourceShared(&Vcb->VcbResource, TRUE);
+            VcbAcquired = TRUE;
 
             // Forward the request to the lower level driver
             // Lock the callers buffer
-            if (!NT_SUCCESS(RC = UDFLockCallersBuffer(PtrIrpContext, Irp, TRUE, ReadLength))) {
+            if (!NT_SUCCESS(RC = UDFLockUserBuffer(IrpContext, ReadLength, IoWriteAccess))) {
                 try_return(RC);
             }
-            SystemBuffer = UDFGetCallersBuffer(PtrIrpContext, Irp);
-            if(!SystemBuffer) {
+            SystemBuffer = UDFMapUserBuffer(Irp);
+            if (!SystemBuffer) {
                 try_return(RC = STATUS_INVALID_USER_BUFFER);
             }
-            if(Vcb->VCBFlags & UDF_VCB_FLAGS_VOLUME_MOUNTED) {
-                 RC = UDFReadData(Vcb, TRUE, ByteOffset.QuadPart,
+            if (Vcb->VcbCondition == VcbMounted) {
+                 RC = UDFReadData(IrpContext, Vcb, TRUE, ByteOffset.QuadPart,
                                 ReadLength, FALSE, (PCHAR)SystemBuffer,
                                 &NumberBytesRead);
             } else {
-                 RC = UDFTRead(Vcb, SystemBuffer, ReadLength,
+                 RC = UDFTRead(IrpContext, Vcb, SystemBuffer, ReadLength,
                                 (ULONG)(ByteOffset.QuadPart >> Vcb->BlockSizeBits),
                                 &NumberBytesRead);
             }
-            UDFUnlockCallersBuffer(PtrIrpContext, Irp, SystemBuffer);
+            UDFUnlockCallersBuffer(IrpContext, Irp, SystemBuffer);
             try_return(RC);
         }
-        Vcb->VCBFlags |= UDF_VCB_SKIP_EJECT_CHECK;
+        Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
 
         // If the read request is directed to a page file (if your FSD
         // supports paging files), send the request directly to the disk
         // driver. For requests directed to a page file, you have to trust
         // that the offsets will be set correctly by the VMM. You should not
         // attempt to acquire any FSD resources either.
-        if(Fcb->FCBFlags & UDF_FCB_PAGE_FILE) {
-            NonBufferedIo = TRUE;
+        if (Fcb->FcbState & UDF_FCB_PAGE_FILE) {
+            NonCachedIo = TRUE;
         }
 
-        if(ByteOffset.HighPart == -1) {
-            if(ByteOffset.LowPart == FILE_USE_FILE_POINTER_POSITION) {
+        if (ByteOffset.HighPart == -1) {
+            if (ByteOffset.LowPart == FILE_USE_FILE_POINTER_POSITION) {
                 ByteOffset = FileObject->CurrentByteOffset;
             }
         }
 
         // If this read is directed to a directory, it is not allowed
         //  by the UDF FSD.
-        if(Fcb->FCBFlags & UDF_FCB_DIRECTORY) {
+        if (Fcb->FcbState & UDF_FCB_DIRECTORY) {
             RC = STATUS_INVALID_DEVICE_REQUEST;
             try_return(RC);
         }
-
-        NtReqFcb = Fcb->NTRequiredFCB;
-
-        Res1Acq = UDFIsResourceAcquired(&(NtReqFcb->MainResource));
-        if(!Res1Acq) {
-            Res1Acq = PtrIrpContext->IrpContextFlags & UDF_IRP_CONTEXT_RES1_ACQ;
-        }
-        Res2Acq = UDFIsResourceAcquired(&(NtReqFcb->PagingIoResource));
-        if(!Res2Acq) {
-            Res2Acq = PtrIrpContext->IrpContextFlags & UDF_IRP_CONTEXT_RES2_ACQ;
-        }
-
-#if 0
-        if(PagingIo) {
-            CollectStatistics(Vcb, UserFileReads);
-            CollectStatisticsEx(Vcb, UserFileReadBytes, NumberBytesRead);
-        }
-#endif
-
-        // This is a good place for oplock related processing.
-
-        // If this is the normal file we have to check for
-        // write access according to the current state of the file locks.
-        if (!PagingIo &&
-            !FsRtlCheckLockForReadAccess( &(NtReqFcb->FileLock), Irp )) {
-                try_return( RC = STATUS_FILE_LOCK_CONFLICT );
-        }
-
-        // Validate start offset and length supplied.
-        //  If start offset is > end-of-file, return an appropriate error. Note
-        // that since a FCB resource has already been acquired, and since all
-        // file size changes require acquisition of both FCB resources,
-        // the contents of the FCB and associated data structures
-        // can safely be examined.
-
-        //  Also note that we are using the file size in the "Common FCB Header"
-        // to perform the check. However, your FSD might decide to keep a
-        // separate copy in the FCB (or some other representation of the
-        //  file associated with the FCB).
-
-        TruncatedLength = ReadLength;
-        if (ByteOffset.QuadPart >= NtReqFcb->CommonFCBHeader.FileSize.QuadPart) {
-            // Starting offset is >= file size
-            try_return(RC = STATUS_END_OF_FILE);
-        }
-        // We can also go ahead and truncate the read length here
-        //  such that it is contained within the file size
-        if( NtReqFcb->CommonFCBHeader.FileSize.QuadPart < (ByteOffset.QuadPart + ReadLength) ) {
-            TruncatedLength = (ULONG)(NtReqFcb->CommonFCBHeader.FileSize.QuadPart - ByteOffset.QuadPart);
-            // we can't get ZERO here
-        }
-        UDFPrint(("    TruncatedLength = %x\n", TruncatedLength));
 
         // There are certain complications that arise when the same file stream
         // has been opened for cached and non-cached access. The FSD is then
@@ -533,76 +479,91 @@ UDFCommonRead(
         // (b) OR the current request is paging-io BUT it did not originate via
         //       the Cache Manager (or is a recursive I/O operation) and we do
         //       have an image section that has been initialized.
-#define UDF_REQ_NOT_VIA_CACHE_MGR(ptr)  (!MmIsRecursiveIoFault() && ((ptr)->ImageSectionObject != NULL))
-
-        if(NonBufferedIo &&
-           (NtReqFcb->SectionObject.DataSectionObject != NULL)) {
-            if(!PagingIo) {
-
-/*                // We hold the main resource exclusive here because the flush
-                // may generate a recursive write in this thread.  The PagingIo
-                // resource is held shared so the drop-and-release serialization
-                // below will work.
-                if(!UDFAcquireResourceExclusive(&(NtReqFcb->MainResource), CanWait)) {
-                    try_return(RC = STATUS_PENDING);
-                }
-                PtrResourceAcquired = &(NtReqFcb->MainResource);
-
-                // We hold PagingIo shared around the flush to fix a
-                // cache coherency problem.
-                UDFAcquireResourceShared(&(NtReqFcb->PagingIoResource), TRUE );*/
-
-                MmPrint(("    CcFlushCache()\n"));
-                CcFlushCache(&(NtReqFcb->SectionObject), &ByteOffset, TruncatedLength, &(Irp->IoStatus));
-
-/*                UDFReleaseResource(&(NtReqFcb->PagingIoResource));
-                UDFReleaseResource(PtrResourceAcquired);
-                PtrResourceAcquired = NULL;
-                // If the flush failed, return error to the caller
-                if(!NT_SUCCESS(RC = Irp->IoStatus.Status)) {
-                    try_return(RC);
-                }
-
-                // Acquiring and immediately dropping the resource serializes
-                // us behind any other writes taking place (either from the
-                // lazy writer or modified page writer).*/
-                if(!Res2Acq) {
-                    UDFAcquireResourceExclusive(&(NtReqFcb->PagingIoResource), TRUE );
-                    UDFReleaseResource(&(NtReqFcb->PagingIoResource));
-                }
-            }
-        }
 
         // Acquire the appropriate FCB resource shared
         if (PagingIo) {
+
+            // Don't offload jobs when doing paging IO - otherwise this can lead to
+            // deadlocks in CcCopyRead.
+            CanWait = true;
             // Try to acquire the FCB PagingIoResource shared
-            if(!Res2Acq) {
-                if (!UDFAcquireResourceShared(&(NtReqFcb->PagingIoResource), CanWait)) {
-                    try_return(RC = STATUS_PENDING);
-                }
-                // Remember the resource that was acquired
-                PtrResourceAcquired2 = &(NtReqFcb->PagingIoResource);
+            if (!UDFAcquireSharedStarveExclusive(&Fcb->FcbNonpaged->FcbPagingIoResource, CanWait)) {
+                try_return(RC = STATUS_PENDING);
             }
+            PagingIoResourceAcquired = TRUE;
+
         } else {
             // Try to acquire the FCB MainResource shared
-            if(NonBufferedIo) {
-                if(!Res2Acq) {
-                    if(!UDFAcquireSharedWaitForExclusive(&(NtReqFcb->PagingIoResource), CanWait)) {
-                        try_return(RC = STATUS_PENDING);
-                    }
-                    PtrResourceAcquired2 = &(NtReqFcb->PagingIoResource);
+            if (NonCachedIo && Fcb->FcbNonpaged->SegmentObject.DataSectionObject) {
+
+                // We hold the main resource exclusive here because the flush
+                // may generate a recursive write in this thread.
+                UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+                if (!UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbResource, CanWait)) {
+                    try_return(RC = STATUS_PENDING);
                 }
+                MainResourceAcquired = TRUE;
+
+                // We hold PagingIo shared around the flush to fix a
+                // cache coherency problem.
+                UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbPagingIoResource, TRUE );
+
+                MmPrint(("    CcFlushCache()\n"));
+                CcFlushCache(&Fcb->FcbNonpaged->SegmentObject, &ByteOffset, ReadLength, &Irp->IoStatus);
+
+                UDFReleaseResource(&Fcb->FcbNonpaged->FcbPagingIoResource);
+
+                // If the flush failed, return error to the caller
+                if (!NT_SUCCESS(RC = Irp->IoStatus.Status)) {
+                    try_return(RC);
+                }
+
+                UDFConvertExclusiveToSharedLite(&Fcb->FcbNonpaged->FcbResource);
+
             } else {
-                if(!Res1Acq) {
-                    UDF_CHECK_PAGING_IO_RESOURCE(NtReqFcb);
-                    if(!UDFAcquireResourceShared(&(NtReqFcb->MainResource), CanWait)) {
-                        try_return(RC = STATUS_PENDING);
-                    }
-                    // Remember the resource that was acquired
-                    PtrResourceAcquired = &(NtReqFcb->MainResource);
+                UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+                if (!UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbResource, CanWait)) {
+                    try_return(RC = STATUS_PENDING);
                 }
+                MainResourceAcquired = TRUE;
             }
         }
+
+        // This is a good place for oplock related processing.
+
+        // If this is the normal file we have to check for
+        // write access according to the current state of the file locks.
+        if (!PagingIo &&
+            Fcb->FileLock != NULL &&
+            !FsRtlCheckLockForReadAccess(Fcb->FileLock, Irp)) {
+
+                try_return( RC = STATUS_FILE_LOCK_CONFLICT );
+        }
+
+        // Validate start offset and length supplied.
+        // If start offset is > end-of-file, return an appropriate error. Note
+        // that since a FCB resource has already been acquired, and since all
+        // file size changes require acquisition of both FCB resources,
+        // the contents of the FCB and associated data structures
+        // can safely be examined.
+
+        // Also note that we are using the file size in the "Common FCB Header"
+        // to perform the check. However, your FSD might decide to keep a
+        // separate copy in the FCB (or some other representation of the
+        // file associated with the FCB).
+
+        TruncatedLength = ReadLength;
+        if (ByteOffset.QuadPart >= Fcb->Header.FileSize.QuadPart) {
+            // Starting offset is >= file size
+            try_return(RC = STATUS_END_OF_FILE);
+        }
+        // We can also go ahead and truncate the read length here
+        //  such that it is contained within the file size
+        if (Fcb->Header.FileSize.QuadPart < (ByteOffset.QuadPart + ReadLength)) {
+            TruncatedLength = (ULONG)(Fcb->Header.FileSize.QuadPart - ByteOffset.QuadPart);
+            // we can't get ZERO here
+        }
+        UDFPrint(("    TruncatedLength = %x\n", TruncatedLength));
 
         // This is also a good place to set whether fast-io can be performed
         // on this particular file or not. Your FSD must make it's own
@@ -612,36 +573,33 @@ UDFCommonRead(
         // choosen by your FSD could result in your setting FastIoIsNotPossible
         // OR FastIoIsQuestionable instead of FastIoIsPossible.
 
-        NtReqFcb->CommonFCBHeader.IsFastIoPossible = UDFIsFastIoPossible(Fcb);
-/*        if(NtReqFcb->CommonFCBHeader.IsFastIoPossible == FastIoIsPossible)
+        Fcb->Header.IsFastIoPossible = UDFIsFastIoPossible(Fcb);
+/*        if (NtReqFcb->CommonFCBHeader.IsFastIoPossible == FastIoIsPossible)
             NtReqFcb->CommonFCBHeader.IsFastIoPossible = FastIoIsQuestionable;*/
 
 #ifdef UDF_DISABLE_SYSTEM_CACHE_MANAGER
-        NonBufferedIo = TRUE;
+        NonCachedIo = TRUE;
 #endif
 
-        if(Fcb && Fcb->FileInfo && Fcb->FileInfo->Dloc) {
+        if (Fcb && Fcb->FileInfo && Fcb->FileInfo->Dloc) {
             AdPrint(("UDFCommonRead: DataLoc %x, Mapping %x\n", &Fcb->FileInfo->Dloc->DataLoc, Fcb->FileInfo->Dloc->DataLoc.Mapping));
         }
 
         //  Branch here for cached vs non-cached I/O
-        if (!NonBufferedIo) {
+        if (!NonCachedIo) {
 
-            if(FileObject->Flags & FO_WRITE_THROUGH) {
-                CanWait = TRUE;
-            }
             // The caller wishes to perform cached I/O. Initiate caching if
             // this is the first cached I/O operation using this file object
             if (!(FileObject->PrivateCacheMap)) {
                 // This is the first cached I/O operation. You must ensure
                 // that the FCB Common FCB Header contains valid sizes at this time
                 MmPrint(("    CcInitializeCacheMap()\n"));
-                CcInitializeCacheMap(FileObject, (PCC_FILE_SIZES)(&(NtReqFcb->CommonFCBHeader.AllocationSize)),
+                CcInitializeCacheMap(FileObject, (PCC_FILE_SIZES)&Fcb->Header.AllocationSize,
                     FALSE,      // We will not utilize pin access for this file
-                    &(UDFGlobalData.CacheMgrCallBacks), // callbacks
-                    NtReqFcb);        // The context used in callbacks
+                    &(UdfData.CacheMgrCallBacks), // callbacks
+                    Fcb);        // The context used in callbacks
                 MmPrint(("    CcSetReadAheadGranularity()\n"));
-                CcSetReadAheadGranularity(FileObject, Vcb->SystemCacheGran);
+                CcSetReadAheadGranularity(FileObject, READ_AHEAD_GRANULARITY);
             }
 
             // Check and see if this request requires a MDL returned to the caller
@@ -661,18 +619,18 @@ UDFCommonRead(
             // This is a regular run-of-the-mill cached I/O request. Let the
             // Cache Manager worry about it!
             // First though, we need a buffer pointer (address) that is valid
-            SystemBuffer = UDFGetCallersBuffer(PtrIrpContext, Irp);
-            if(!SystemBuffer)
+            SystemBuffer = UDFMapUserBuffer(Irp);
+            if (!SystemBuffer)
                 try_return(RC = STATUS_INVALID_USER_BUFFER);
             ASSERT(SystemBuffer);
             MmPrint(("    CcCopyRead()\n"));
-            if (!CcCopyRead(FileObject, &(ByteOffset), TruncatedLength, CanWait, SystemBuffer, &(Irp->IoStatus))) {
+            if (!CcCopyRead(FileObject, &(ByteOffset), TruncatedLength, CanWait, SystemBuffer, &Irp->IoStatus)) {
                 // The caller was not prepared to block and data is not immediately
                 // available in the system cache
                 try_return(RC = STATUS_PENDING);
             }
 
-            UDFUnlockCallersBuffer(PtrIrpContext, Irp, SystemBuffer);
+            UDFUnlockCallersBuffer(IrpContext, Irp, SystemBuffer);
             // We have the data
             RC = Irp->IoStatus.Status;
             NumberBytesRead = Irp->IoStatus.Information;
@@ -681,76 +639,70 @@ UDFCommonRead(
 
         } else {
 
-            MmPrint(("    Read NonBufferedIo\n"));
+            MmPrint(("    Read NonCachedIo\n"));
 
-#if 1
-            if((ULONG_PTR)TopIrp == FSRTL_MOD_WRITE_TOP_LEVEL_IRP) {
-                UDFPrint(("FSRTL_MOD_WRITE_TOP_LEVEL_IRP => CanWait\n"));
-                CanWait = TRUE;
-            } else
-            if((ULONG_PTR)TopIrp == FSRTL_CACHE_TOP_LEVEL_IRP) {
-                UDFPrint(("FSRTL_CACHE_TOP_LEVEL_IRP => CanWait\n"));
-                CanWait = TRUE;
-            }
-
-            if(NtReqFcb->AcqSectionCount || NtReqFcb->AcqFlushCount) {
-                MmPrint(("    AcqCount (%d/%d)=> CanWait ?\n", NtReqFcb->AcqSectionCount, NtReqFcb->AcqFlushCount));
-                CanWait = TRUE;
-            } else
-            {}
-/*            if((TopIrp != Irp)) {
-                UDFPrint(("(TopIrp != Irp) => CanWait\n"));
-                CanWait = TRUE;
-            } else*/
-#endif
-            if(KeGetCurrentIrql() > PASSIVE_LEVEL) {
-                MmPrint(("    !PASSIVE_LEVEL\n"));
-                CanWait = FALSE;
-                PtrIrpContext->IrpContextFlags |= UDF_IRP_CONTEXT_FORCED_POST;
-            }
-            if(!CanWait && UDFIsFileCached__(Vcb, Fcb->FileInfo, ByteOffset.QuadPart, TruncatedLength, FALSE)) {
+            if (!CanWait && UDFIsFileCached__(Vcb, Fcb->FileInfo, ByteOffset.QuadPart, TruncatedLength, FALSE)) {
                 MmPrint(("    Locked => CanWait\n"));
                 CacheLocked = TRUE;
                 CanWait = TRUE;
             }
 
             // Send the request to lower level drivers
-            if(!CanWait) {
+            if (!CanWait) {
                 try_return(RC = STATUS_PENDING);
             }
 
 //                ASSERT(NT_SUCCESS(RC));
-            if(!Res2Acq) {
-                if(UDFAcquireResourceSharedWithCheck(&(NtReqFcb->PagingIoResource)))
-                    PtrResourceAcquired2 = &(NtReqFcb->PagingIoResource);
-            }
 
-            RC = UDFLockCallersBuffer(PtrIrpContext, Irp, TRUE, TruncatedLength);
-            if(!NT_SUCCESS(RC)) {
+            RC = UDFLockUserBuffer(IrpContext, TruncatedLength, IoWriteAccess);
+            if (!NT_SUCCESS(RC)) {
                 try_return(RC);
             }
 
-            SystemBuffer = UDFGetCallersBuffer(PtrIrpContext, Irp);
-            if(!SystemBuffer) {
+            SystemBuffer = UDFMapUserBuffer(Irp);
+            if (!SystemBuffer) {
                 try_return(RC = STATUS_INVALID_USER_BUFFER);
             }
 
-            RC = UDFReadFile__(Vcb, Fcb->FileInfo, ByteOffset.QuadPart, TruncatedLength,
+            // Start by zeroing any part of the read after Valid Data
+
+            LARGE_INTEGER ValidDataLength = Fcb->Header.ValidDataLength;
+
+            if (ByteOffset.QuadPart + TruncatedLength > ValidDataLength.QuadPart) {
+
+                if (ByteOffset.QuadPart < ValidDataLength.QuadPart) {
+
+                    ULONG LBS = Vcb->LBlockSize;
+                    ULONG ZeroingOffset = ((ValidDataLength.QuadPart - ByteOffset.QuadPart) + (LBS - 1)) & ~(LBS - 1);
+
+                    // If the offset is at or above the byte count, no harm: just means
+                    // that the read ends in the last sector and the zeroing will be
+                    // done at completion.
+
+                    if (TruncatedLength > ZeroingOffset) {
+
+                        SafeZeroMemory((PUCHAR)SystemBuffer + ZeroingOffset, TruncatedLength - ZeroingOffset);
+                    }
+                } else {
+
+                    //  All we have to do now is sit here and zero the
+                    //  user's buffer, no reading is required.
+
+                    SafeZeroMemory(SystemBuffer, TruncatedLength);
+                    NumberBytesRead = TruncatedLength;
+                    UDFUnlockCallersBuffer(IrpContext, Irp, SystemBuffer);
+                    try_return(STATUS_SUCCESS);
+                }
+            }
+
+            RC = UDFReadFile__(IrpContext, Vcb, Fcb->FileInfo, ByteOffset.QuadPart, TruncatedLength,
                            CacheLocked, (PCHAR)SystemBuffer, &NumberBytesRead);
 /*                // AFAIU, CacheManager wants this:
-            if(!NT_SUCCESS(RC)) {
+            if (!NT_SUCCESS(RC)) {
                 NumberBytesRead = 0;
             }*/
 
-            UDFUnlockCallersBuffer(PtrIrpContext, Irp, SystemBuffer);
-
-#if 0
-            if(PagingIo) {
-                CollectStatistics(Vcb, UserDiskReads);
-            } else {
-                CollectStatistics2(Vcb, NonCachedDiskReads);
-            }
-#endif
+            UDFUnlockCallersBuffer(IrpContext, Irp, SystemBuffer);
 
             try_return(RC);
 
@@ -776,43 +728,37 @@ try_exit:   NOTHING;
 
     } _SEH2_FINALLY {
 
-        if(CacheLocked) {
+        if (CacheLocked) {
             WCacheEODirect__(&(Vcb->FastCache), Vcb);
         }
 
         // Release any resources acquired here ...
-        if(PtrResourceAcquired2) {
-            UDFReleaseResource(PtrResourceAcquired2);
+        if (PagingIoResourceAcquired) {
+            UDFReleaseResource(&Fcb->FcbNonpaged->FcbPagingIoResource);
         }
-        if(PtrResourceAcquired) {
-            if(NtReqFcb &&
-               (PtrResourceAcquired ==
-                &(NtReqFcb->MainResource))) {
-                UDF_CHECK_PAGING_IO_RESOURCE(NtReqFcb);
-            }
-            UDFReleaseResource(PtrResourceAcquired);
+
+        if (MainResourceAcquired) {
+            UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+            UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
+        }
+
+        if (VcbAcquired) {
+            UDFReleaseResource(&Vcb->VcbResource);
         }
 
         // Post IRP if required
-        if(RC == STATUS_PENDING) {
+        if (RC == STATUS_PENDING) {
 
             // Lock the callers buffer here. Then invoke a common routine to
             // perform the post operation.
             if (!(IrpSp->MinorFunction & IRP_MN_MDL)) {
-                RC = UDFLockCallersBuffer(PtrIrpContext, Irp, TRUE, ReadLength);
+                RC = UDFLockUserBuffer(IrpContext, ReadLength, IoWriteAccess);
                 ASSERT(NT_SUCCESS(RC));
             }
-            if(PagingIo) {
-                if(Res1Acq) {
-                    PtrIrpContext->IrpContextFlags |= UDF_IRP_CONTEXT_RES1_ACQ;
-                }
-                if(Res2Acq) {
-                    PtrIrpContext->IrpContextFlags |= UDF_IRP_CONTEXT_RES2_ACQ;
-                }
-            }
+
             // Perform the post operation which will mark the IRP pending
             // and will return STATUS_PENDING back to us
-            RC = UDFPostRequest(PtrIrpContext, Irp);
+            RC = UDFPostRequest(IrpContext, Irp);
 
         } else {
             // For synchronous I/O, the FSD must maintain the current byte offset
@@ -825,18 +771,18 @@ try_exit:   NOTHING;
             // performed and that the file time should be updated at cleanup
             if (NT_SUCCESS(RC) && !PagingIo) {
                 FileObject->Flags |= FO_FILE_FAST_IO_READ;
-                Ccb->CCBFlags |= UDF_CCB_ACCESSED;
+                Ccb->Flags |= UDF_CCB_ACCESSED;
             }
 
-            if(!_SEH2_AbnormalTermination()) {
+            if (!_SEH2_AbnormalTermination()) {
                 Irp->IoStatus.Status = RC;
                 Irp->IoStatus.Information = NumberBytesRead;
                 UDFPrint(("    NumberBytesRead = %x\n", NumberBytesRead));
                 // Free up the Irp Context
-                UDFReleaseIrpContext(PtrIrpContext);
+                UDFCleanupIrpContext(IrpContext);
                 // complete the IRP
                 MmPrint(("    Complete Irp, MDL=%x\n", Irp->MdlAddress));
-                if(Irp->MdlAddress) {
+                if (Irp->MdlAddress) {
                     UDFTouch(Irp->MdlAddress);
                 }
                 IoCompleteRequest(Irp, IO_DISK_INCREMENT);
@@ -850,12 +796,11 @@ try_exit:   NOTHING;
 
 #ifdef UDF_DBG
 ULONG LockBufferCounter = 0;
-ULONG BuildMdlCounter = 0;
 #endif //UDF_DBG
 
 /*************************************************************************
 *
-* Function: UDFGetCallersBuffer()
+* Function: UDFMapUserBuffer()
 *
 * Description:
 *   Obtain a pointer to the caller's buffer.
@@ -868,59 +813,27 @@ ULONG BuildMdlCounter = 0;
 *
 *************************************************************************/
 PVOID
-UDFGetCallersBuffer(
-    PtrUDFIrpContext PtrIrpContext,
-    PIRP             Irp
+UDFMapUserBuffer(
+    PIRP Irp
     )
 {
-    VOID            *ReturnedBuffer = NULL;
+    // If there is no Mdl, then we must be in the Fsd, and we can simply
+    // return the UserBuffer field from the Irp.
 
-    UDFPrint(("UDFGetCallersBuffer: \n"));
+    if (Irp->MdlAddress == NULL) {
 
-    // If an MDL is supplied, use it.
-    if(Irp->MdlAddress) {
-        MmPrint(("    UDFGetCallersBuffer: MmGetSystemAddressForMdl(Irp->MdlAddress) MDL=%x\n", Irp->MdlAddress));
-//        ReturnedBuffer = MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
-        ReturnedBuffer = MmGetSystemAddressForMdlSafer(Irp->MdlAddress);
-    } else
-    if (PtrIrpContext->IrpContextFlags & UDF_IRP_CONTEXT_BUFFER_LOCKED) {
-        // Free buffer
-#ifndef POST_LOCK_PAGES
-        MmPrint(("    UDFGetCallersBuffer: MmGetSystemAddressForMdl(PtrIrpContext->PtrMdl) MDL=%x\n", PtrIrpContext->PtrMdl));
-        ReturnedBuffer = MmGetSystemAddressForMdlSafe(PtrIrpContext->PtrMdl, NormalPagePriority);
-#else //POST_LOCK_PAGES
-            if(PtrIrpContext->TransitionBuffer) {
-                MmPrint(("    UDFGetCallersBuffer: TransitionBuffer\n"));
-                return PtrIrpContext->TransitionBuffer;
-            }
+        return Irp->UserBuffer;
 
-            _SEH2_TRY {
-                MmPrint(("    MmProbeAndLockPages()\n"));
-                MmProbeAndLockPages(PtrIrpContext->PtrMdl, Irp->RequestorMode,
-                                    ((PtrIrpContext->MajorFunction == IRP_MJ_READ) ? IoWriteAccess:IoReadAccess));
-#ifdef UDF_DBG
-                LockBufferCounter++;
-#endif //UDF_DBG
-            } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
-                //RC = STATUS_INVALID_USER_BUFFER;
-                BrutePoint();
-                return NULL;
-            } _SEH2_END;
-
-            MmPrint(("    MmGetSystemAddressForMdlSafer()\n"));
-        ReturnedBuffer = MmGetSystemAddressForMdlSafer(PtrIrpContext->PtrMdl);
-#endif //POST_LOCK_PAGES
     } else {
-        MmPrint(("    UDFGetCallersBuffer: Irp->UserBuffer\n"));
-        ReturnedBuffer = Irp->UserBuffer;
+
+        return MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority | MdlMappingNoExecute);
     }
 
-    return(ReturnedBuffer);
-} // end UDFGetCallersBuffer()
+} // end UDFMapUserBuffer()
 
 /*************************************************************************
 *
-* Function: UDFLockCallersBuffer()
+* Function: UDFLockUserBuffer()
 *
 * Description:
 *   Obtain a MDL that describes the buffer. Lock pages for I/O
@@ -933,88 +846,48 @@ UDFGetCallersBuffer(
 *
 *************************************************************************/
 NTSTATUS
-UDFLockCallersBuffer(
-    PtrUDFIrpContext  PtrIrpContext,
-    PIRP              Irp,
-    BOOLEAN           IsReadOperation,
-    uint32            Length
+UDFLockUserBuffer(
+    PIRP_CONTEXT IrpContext,
+    ULONG BufferLength,
+    LOCK_OPERATION LockOperation
     )
 {
     NTSTATUS            RC = STATUS_SUCCESS;
-    PMDL                PtrMdl = NULL;
+    PMDL                Mdl = NULL;
 
-    UDFPrint(("UDFLockCallersBuffer: \n"));
+    ASSERT_IRP_CONTEXT(IrpContext);
+    ASSERT_IRP(IrpContext->Irp);
 
-    ASSERT(Irp);
+    // Is a MDL already present in the IRP
+    if (!IrpContext->Irp->MdlAddress) {
 
-    _SEH2_TRY {
-        // Is a MDL already present in the IRP
-        if (!(Irp->MdlAddress)) {
-            // Allocate a MDL
-/*
-            if(!IsReadOperation) {
-                MmPrint(("  Allocate TransitionBuffer\n"));
-                PtrIrpContext->TransitionBuffer = (PCHAR)DbgAllocatePool(NonPagedPool, Length);
-                if(!PtrIrpContext->TransitionBuffer) {
-                    RC = STATUS_INSUFFICIENT_RESOURCES;
-                    try_return(RC);
-                }
-                _SEH2_TRY {
-                    RtlCopyMemory(PtrIrpContext->TransitionBuffer, Irp->UserBuffer, Length);
-                } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
-                    RC = STATUS_INVALID_USER_BUFFER;
-                } _SEH2_END;
-            } else*/ {
+        // This will place allocated Mdl to Irp
+        if (!(Mdl = IoAllocateMdl(IrpContext->Irp->UserBuffer, BufferLength, FALSE, FALSE, IrpContext->Irp))) {
 
-                MmPrint(("  IoAllocateMdl()\n"));
-//                if (!(PtrMdl = IoAllocateMdl(Irp->UserBuffer, Length, FALSE, FALSE, NULL))) {
-
-                // This will place allocated Mdl to Irp
-                if (!(PtrMdl = IoAllocateMdl(Irp->UserBuffer, Length, FALSE, FALSE, Irp))) {
-                    RC = STATUS_INSUFFICIENT_RESOURCES;
-                    try_return(RC);
-                }
-                MmPrint(("    Alloc MDL=%x\n", PtrMdl));
-#ifdef UDF_DBG
-                BuildMdlCounter++;
-#endif //UDF_DBG
-            }
-            // Probe and lock the pages described by the MDL
-            // We could encounter an exception doing so, swallow the exception
-            // NOTE: The exception could be due to an unexpected (from our
-            // perspective), invalidation of the virtual addresses that comprise
-            // the passed in buffer
-#ifndef POST_LOCK_PAGES
-            _SEH2_TRY {
-                MmPrint(("    MmProbeAndLockPages()\n"));
-                MmProbeAndLockPages(PtrMdl, Irp->RequestorMode, (IsReadOperation ? IoWriteAccess:IoReadAccess));
-            } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
-                MmPrint(("    MmProbeAndLockPages() failed\n"));
-                Irp->MdlAddress = NULL;
-                RC = STATUS_INVALID_USER_BUFFER;
-            } _SEH2_END;
-#endif //POST_LOCK_PAGES
-
-            if(NT_SUCCESS(RC)) {
-                PtrIrpContext->IrpContextFlags |= UDF_IRP_CONTEXT_BUFFER_LOCKED;
-                PtrIrpContext->PtrMdl = PtrMdl;
-            }
-        } else {
-            MmPrint(("    UDFLockCallersBuffer: do nothing, MDL=%x\n", Irp->MdlAddress));
-            UDFTouch(Irp->MdlAddress);
+            return(RC = STATUS_INSUFFICIENT_RESOURCES);
         }
 
-try_exit:   NOTHING;
+        // Probe and lock the pages described by the MDL
+        // We could encounter an exception doing so, swallow the exception
+        // NOTE: The exception could be due to an unexpected (from our
+        // perspective), invalidation of the virtual addresses that comprise
+        // the passed in buffer
 
-    } _SEH2_FINALLY {
-        if (!NT_SUCCESS(RC) && PtrMdl) {
-            MmPrint(("    Free MDL=%x\n", PtrMdl));
-            IoFreeMdl(PtrMdl);
-        }
-    } _SEH2_END;
+        _SEH2_TRY {
+
+            MmProbeAndLockPages(Mdl, IrpContext->Irp->RequestorMode, LockOperation);
+
+        } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+
+            IoFreeMdl(Mdl);
+            IrpContext->Irp->MdlAddress = NULL;
+            RC = STATUS_INVALID_USER_BUFFER;
+
+        } _SEH2_END;
+    }
 
     return(RC);
-} // end UDFLockCallersBuffer()
+} // end UDFLockUserBuffer()
 
 /*************************************************************************
 *
@@ -1032,7 +905,7 @@ try_exit:   NOTHING;
 *************************************************************************/
 NTSTATUS
 UDFUnlockCallersBuffer(
-    PtrUDFIrpContext PtrIrpContext,
+    PIRP_CONTEXT IrpContext,
     PIRP    Irp,
     PVOID   SystemBuffer
     )
@@ -1044,54 +917,13 @@ UDFUnlockCallersBuffer(
     ASSERT(Irp);
 
     _SEH2_TRY {
-        // Is a nonPaged buffer already present in the IRP
-        if (PtrIrpContext->IrpContextFlags & UDF_IRP_CONTEXT_BUFFER_LOCKED) {
 
-            UDFPrint(("  UDF_IRP_CONTEXT_BUFFER_LOCKED MDL=%x, Irp MDL=%x\n", PtrIrpContext->PtrMdl, Irp->MdlAddress));
-            if(PtrIrpContext->TransitionBuffer) {
-                MmPrint(("    UDFUnlockCallersBuffer: free TransitionBuffer\n"));
-                DbgFreePool(PtrIrpContext->TransitionBuffer);
-                PtrIrpContext->TransitionBuffer = NULL;
-                PtrIrpContext->IrpContextFlags &= ~UDF_IRP_CONTEXT_BUFFER_LOCKED;
-                try_return(RC);
-            }
-            // Free buffer
-            KeFlushIoBuffers( PtrIrpContext->PtrMdl, TRUE, FALSE );
-//            MmPrint(("    IrpCtx->Mdl, MmUnmapLockedPages()\n"));
-//            MmUnmapLockedPages(SystemBuffer, PtrIrpContext->PtrMdl);
+        if (Irp->MdlAddress) {
 
-            // This will be done in IoCompleteIrp !!!
-
-            //MmPrint(("    MmUnlockPages()\n"));
-            //MmUnlockPages(PtrIrpContext->PtrMdl);
-
-#ifdef UDF_DBG
-            LockBufferCounter--;
-#endif //UDF_DBG
-
-            // This will be done in IoCompleteIrp !!!
-
-            //IoFreeMdl(PtrIrpContext->PtrMdl);
-
-#ifdef UDF_DBG
-            BuildMdlCounter--;
-#endif //UDF_DBG
-            UDFTouch(PtrIrpContext->PtrMdl);
-            PtrIrpContext->PtrMdl = NULL;
-            PtrIrpContext->IrpContextFlags &= ~UDF_IRP_CONTEXT_BUFFER_LOCKED;
-        } else
-        if(Irp->MdlAddress) {
-//            MmPrint(("    Irp->Mdl, MmUnmapLockedPages()\n"));
-//            MmUnmapLockedPages(SystemBuffer, Irp->MdlAddress);
-            UDFPrint(("  UDF_IRP_CONTEXT_BUFFER_LOCKED MDL=%x, Irp MDL=%x\n", PtrIrpContext->PtrMdl, Irp->MdlAddress));
-            UDFTouch(Irp->MdlAddress);
             KeFlushIoBuffers( Irp->MdlAddress,
                               ((IoGetCurrentIrpStackLocation(Irp))->MajorFunction) == IRP_MJ_READ,
                               FALSE );
-        } else
-        { ; }
-
-try_exit:   NOTHING;
+        }
 
     } _SEH2_FINALLY {
         NOTHING;
@@ -1102,7 +934,7 @@ try_exit:   NOTHING;
 
 /*************************************************************************
 *
-* Function: UDFMdlComplete()
+* Function: UDFCompleteMdl()
 *
 * Description:
 *   Tell Cache Manager to release MDL (and possibly flush).
@@ -1114,42 +946,45 @@ try_exit:   NOTHING;
 * Return Value: None.
 *
 *************************************************************************/
-VOID UDFMdlComplete(
-PtrUDFIrpContext            PtrIrpContext,
-PIRP                        Irp,
-PIO_STACK_LOCATION          IrpSp,
-BOOLEAN                     ReadCompletion)
-{
-    NTSTATUS                RC = STATUS_SUCCESS;
-    PFILE_OBJECT            FileObject = NULL;
 
-    UDFPrint(("UDFMdlComplete: \n"));
+NTSTATUS
+UDFCompleteMdl(
+    PIRP_CONTEXT IrpContext,
+    PIRP Irp
+    )
+{
+    PFILE_OBJECT FileObject;
+    PIO_STACK_LOCATION IrpSp;
+
+    UDFPrint(("UDFCompleteMdl: \n"));
+
+    IrpSp = IoGetCurrentIrpStackLocation(Irp);
 
     FileObject = IrpSp->FileObject;
     ASSERT(FileObject);
 
     UDFTouch(Irp->MdlAddress);
     // Not much to do here.
-    if (ReadCompletion) {
+    if (IrpContext->MajorFunction == IRP_MJ_READ) {
+
         MmPrint(("    CcMdlReadComplete() MDL=%x\n", Irp->MdlAddress));
         CcMdlReadComplete(FileObject, Irp->MdlAddress);
+
     } else {
+
+        ASSERT(IrpContext->MajorFunction == IRP_MJ_WRITE);
         // The Cache Manager needs the byte offset in the I/O stack location.
         MmPrint(("    CcMdlWriteComplete() MDL=%x\n", Irp->MdlAddress));
-        CcMdlWriteComplete(FileObject, &(IrpSp->Parameters.Write.ByteOffset), Irp->MdlAddress);
+        CcMdlWriteComplete(FileObject, &IrpSp->Parameters.Write.ByteOffset, Irp->MdlAddress);
     }
 
-    // Clear the MDL address field in the IRP so the IoCompleteRequest()
-    // does not __try to play around with the MDL.
+    // Mdl is now deallocated.
+
     Irp->MdlAddress = NULL;
 
-    // Free up the Irp Context.
-    UDFReleaseIrpContext(PtrIrpContext);
+    // Complete the request and exit right away.
 
-    // Complete the IRP.
-    Irp->IoStatus.Status = RC;
-    Irp->IoStatus.Information = 0;
-    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+    UDFCompleteRequest(IrpContext, Irp, STATUS_SUCCESS);
 
-    return;
+    return STATUS_SUCCESS;
 }

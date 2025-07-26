@@ -27,54 +27,28 @@
 
 #include "Include/platform.h"
 
-/**************************************************************************
-    some empty typedefs defined here so we can reference them easily
-**************************************************************************/
-struct _UDFIdentifier;
-struct _UDFObjectName;
-struct _UDFContextControlBlock;
-struct _UDFNTRequiredFCB;
-struct _UDFDiskDependentFCB;
-struct _UDFFileControlBlock;
-struct _UDFVolumeControlBlock;
-struct _UDFIrpContext;
-struct _UDFIrpContextLite;
-struct _UDF_FILE_INFO;
-struct _UDFData;
-struct _UDFEjectWaitContext;
-struct _UDFFileIDCacheItem;
-struct _SparingEntry;
-struct _UDFTrackMap;
 
 /**************************************************************************
  include udf related structures *here* (because we need definition of Fcb)
 **************************************************************************/
 #include "udf_info/udf_rel.h"
 
-/**************************************************************************
-    each structure has a unique "node type" or signature associated with it
-**************************************************************************/
-#define UDF_NODE_TYPE_NT_REQ_FCB            ((CSHORT)(0xfcb0))
-#define UDF_NODE_TYPE_OBJECT_NAME           (0xfdecba01)
-#define UDF_NODE_TYPE_CCB                   (0xfdecba02)
-#define UDF_NODE_TYPE_FCB                   (0xfdecba03)
-#define UDF_NODE_TYPE_VCB                   (0xfdecba04)
-#define UDF_NODE_TYPE_IRP_CONTEXT           (0xfdecba05)
-#define UDF_NODE_TYPE_GLOBAL_DATA           (0xfdecba06)
-#define UDF_NODE_TYPE_FILTER_DEVOBJ         (0xfdecba07)
-#define UDF_NODE_TYPE_UDFFS_DEVOBJ          (0xfdecba08)
-#define UDF_NODE_TYPE_IRP_CONTEXT_LITE      (0xfdecba09)
-#define UDF_NODE_TYPE_UDFFS_DRVOBJ          (0xfdecba0a)
+struct IRP_CONTEXT_LITE;
+struct IO_CONTEXT;
+struct IRP_CONTEXT;
 
 /**************************************************************************
     every structure has a node type, and a node size associated with it.
     The node type serves as a signature field. The size is used for
     consistency checking ...
 **************************************************************************/
-typedef struct _UDFIdentifier {
-    uint32      NodeType;           // a 32 bit identifier for the structure
-    uint32      NodeSize;           // computed as sizeof(structure)
-} UDFIdentifier, *PtrUDFIdentifier;
+struct UDFIdentifier {
+    NODE_TYPE_CODE NodeTypeCode;           // a 16 bit identifier for the structure
+    NODE_BYTE_SIZE NodeByteSize;           // computed as sizeof(structure)
+};
+
+static_assert(sizeof(UDFIdentifier) == offsetof(FSRTL_ADVANCED_FCB_HEADER, Flags),
+    "UDFIdentifier size mismatch with NodeTypeCode and NodeByteSize in FSRTL_ADVANCED_FCB_HEADER");
 
 /**************************************************************************
     Every open on-disk object must have a name associated with it
@@ -87,14 +61,13 @@ typedef struct _UDFIdentifier {
 
     This structure must be quad-word aligned because it is zone allocated.
 **************************************************************************/
-typedef struct _UDFObjectName {
+struct UDFObjectName {
     UDFIdentifier                       NodeIdentifier;
     uint32                              ObjectNameFlags;
     // an absolute pathname of the object is stored below
     UNICODE_STRING                      ObjectName;
-} UDFObjectName, *PtrUDFObjectName;
-
-#define     UDF_OBJ_NAME_NOT_FROM_ZONE               (0x80000000)
+};
+using PtrUDFObjectName = UDFObjectName*;
 
 /**************************************************************************
     Each file open instance is represented by a context control block.
@@ -105,16 +78,16 @@ typedef struct _UDFObjectName {
 
     This structure must be quad-word aligned because it is zone allocated.
 **************************************************************************/
-typedef struct _UDFContextControlBlock {
+struct CCB {
     UDFIdentifier                       NodeIdentifier;
     // ptr to the associated FCB
-    struct _UDFFileControlBlock *Fcb;
+    FCB*                                Fcb;
     // all CCB structures for a FCB are linked together
     LIST_ENTRY                          NextCCB;
     // each CCB is associated with a file object
     PFILE_OBJECT                        FileObject;
     // flags (see below) associated with this CCB
-    uint32                              CCBFlags;
+    uint32                              Flags;
     // current index in directory is required sometimes
     ULONG                               CurrentIndex;
     // if this CCB represents a directory object open, we may
@@ -124,8 +97,8 @@ typedef struct _UDFContextControlBlock {
     ULONG                               TreeLength;
     // Acces rights previously granted to caller's thread
     ACCESS_MASK                         PreviouslyGrantedAccess;
-} UDFCCB, *PtrUDFCCB;
-
+};
+using PCCB = CCB*;
 
 /**************************************************************************
     the following CCBFlags values are relevant. These flag
@@ -139,8 +112,6 @@ typedef struct _UDFContextControlBlock {
 // the file object specified synchronous access at create/open time.
 //  this implies that UDF must maintain the current byte offset
 #define UDF_CCB_OPENED_FOR_SYNC_ACCESS          (0x00000002)
-// file object specified sequential access for this file
-#define UDF_CCB_OPENED_FOR_SEQ_ACCESS           (0x00000004)
 // the CCB has had an IRP_MJ_CLEANUP issued on it. we must
 //  no longer allow the file object / CCB to be used in I/O requests.
 #define UDF_CCB_CLEANED                         (0x00000008)
@@ -157,23 +128,55 @@ typedef struct _UDFContextControlBlock {
 #define UDF_CCB_ATTRIBUTES_SET                  (0x00020000)
 
 #define UDF_CCB_CASE_SENSETIVE                  (0x00000400)
-
-#ifndef UDF_READ_ONLY_BUILD
 #define UDF_CCB_DELETE_ON_CLOSE                 (0x00000800)
-#endif //UDF_READ_ONLY_BUILD
+#define UDF_CCB_FLAG_DISMOUNT_ON_CLOSE          (0x00040000)
 
 // this CCB was allocated for a "volume open" operation
 #define UDF_CCB_VOLUME_OPEN                     (0x00001000)
 #define UDF_CCB_MATCH_ALL                       (0x00002000)
 #define UDF_CCB_WILDCARD_PRESENT                (0x00004000)
 #define UDF_CCB_CAN_BE_8_DOT_3                  (0x00008000)
-#define UDF_CCB_READ_ONLY                       (0x00010000)
 //#define UDF_CCB_ATTRIBUTES_SET                (0x00020000) // see above
 
+#define CCB_FLAG_OPEN_BY_ID                     (0x01000000)
+
+#define CCB_FLAG_SENT_FORMAT_UNIT               (0x10000000)
 #define UDF_CCB_FLUSHED                         (0x20000000)
 #define UDF_CCB_VALID                           (0x40000000)
 #define UDF_CCB_NOT_FROM_ZONE                   (0x80000000)
 
+struct FCB_NONPAGED {
+
+    //  Type and size of this record must be UDF_NODE_TYPE_FCB_NONPAGED
+
+    _Field_range_(==, UDF_NODE_TYPE_FCB_NONPAGED) NODE_TYPE_CODE NodeTypeCode;
+    NODE_BYTE_SIZE NodeByteSize;
+
+    //  The following field contains a record of special pointers used by
+    //  MM and Cache to manipluate section objects.  Note that the values
+    //  are set outside of the file system.  However the file system on an
+    //  open/create will set the file object's SectionObject field to
+    //  point to this field
+
+    SECTION_OBJECT_POINTERS SegmentObject;
+
+    // This is the resource structure for this Fcb.
+
+    ERESOURCE FcbResource;
+
+    ERESOURCE FcbPagingIoResource;
+
+    // This is the FastMutex for this Fcb.
+
+    FAST_MUTEX FcbMutex;
+
+    // This is the mutex that is inserted into the FCB_ADVANCED_HEADER
+    // FastMutex field
+
+    FAST_MUTEX AdvancedFcbHeaderMutex;
+
+};
+using PFCB_NONPAGED = FCB_NONPAGED*;
 
 /**************************************************************************
     each open file/directory/volume is represented by a file control block.
@@ -199,46 +202,11 @@ typedef struct _UDFContextControlBlock {
     These structures must be quad-word aligned because they are zone-allocated.
 **************************************************************************/
 
-typedef struct _UDFNTRequiredFCB {
-
-    FSRTL_COMMON_FCB_HEADER             CommonFCBHeader;
-    SECTION_OBJECT_POINTERS             SectionObject;
-    FILE_LOCK                           FileLock;
-    ERESOURCE                           MainResource;
-    ERESOURCE                           PagingIoResource;
-    // we will maintain some time information here to make our life easier
-    LARGE_INTEGER                       CreationTime;
-    LARGE_INTEGER                       LastAccessTime;
-    LARGE_INTEGER                       LastWriteTime;
-    LARGE_INTEGER                       ChangeTime;
-    // NT requires that a file system maintain and honor the various
-    //  SHARE_ACCESS modes ...
-    SHARE_ACCESS                        FCBShareAccess;
-    // This counter is used to prevent unexpected structure releases
-    ULONG                               CommonRefCount;
-    PSECURITY_DESCRIPTOR                SecurityDesc;
-    ULONG                               NtReqFCBFlags;
-    // to identify the lazy writer thread(s) we will grab and store
-    //  the thread id here when a request to acquire resource(s)
-    //  arrives ..
-    uint32                              LazyWriterThreadID;
-    UCHAR                               AcqSectionCount;
-    UCHAR                               AcqFlushCount;
-#ifdef DBG
-    PFILE_OBJECT                        FileObject;
-#endif //DBG
-    PETHREAD                            CloseThread;
-} UDFNTRequiredFCB, *PtrUDFNTRequiredFCB;
-
-#define     UDF_NTREQ_FCB_SD_MODIFIED   (0x00000001)
-#define     UDF_NTREQ_FCB_INLIST        (0x00000002)
 #define     UDF_NTREQ_FCB_DELETED       (0x00000004)
 #define     UDF_NTREQ_FCB_MODIFIED      (0x00000008)
 #define     UDF_NTREQ_FCB_VALID         (0x40000000)
 
 /**************************************************************************/
-
-#define UDF_FCB_MT NonPagedPool
 
 /***************************************************/
 /*****************  W A R N I N G  *****************/
@@ -248,21 +216,33 @@ typedef struct _UDFNTRequiredFCB {
 /*      DO NOT FORGET TO UPDATE VCB's HEADER !     */
 /***************************************************/
 
-typedef struct _UDFFileControlBlock {
-    UDFIdentifier                       NodeIdentifier;
-    // we will not embed the "NT Required FCB" here, 'cause we dislike
-    // troubles with Hard(&Symbolic) Links
-    PtrUDFNTRequiredFCB                 NTRequiredFCB;
+struct FCB_DATA {
+
+};
+
+struct FCB_INDEX {
+
+};
+
+struct FCB {
+
+    union {
+
+        UDFIdentifier NodeIdentifier;
+        FSRTL_ADVANCED_FCB_HEADER Header;
+    };
+
+    ULONG NtReqFCBFlags;
+
     // UDF related data
     PUDF_FILE_INFO                      FileInfo;
     // this FCB belongs to some mounted logical volume
-    struct _UDFVolumeControlBlock*      Vcb;
-    // to be able to access all open file(s) for a volume, we will
-    //  link all FCB structures for a logical volume together
-    LIST_ENTRY                          NextFCB;
-    // some state information for the FCB is maintained using the
-    //  flags field
-    uint32                              FCBFlags;
+    struct VCB*      Vcb;
+
+    // FileId for this file.
+
+    FILE_ID FileId;
+
     // all CCB's for this particular FCB are linked off the following
     //  list head.
     LIST_ENTRY                          NextCCB;
@@ -278,19 +258,61 @@ typedef struct _UDFFileControlBlock {
     //  But when we have mapped data, we can receive no IRP_MJ_CLOSE
     //  In this case OpenHandleCount may reach zero, but ReferenceCount may
     //  be non-zero.
-    uint32                              ReferenceCount;
-    uint32                              OpenHandleCount;
-    uint32                              CachedOpenHandleCount;
+    ULONG                              FcbReference;
+    ULONG                              FcbCleanup;
+    ULONG                              CachedOpenHandleCount;
+    ULONG FcbUserReference;
+
+    // State flags for this Fcb.
+
+    ULONG FcbState;
+
     // for the UDF fsd, there exists a 1-1 correspondence between a
     //  full object pathname and a FCB
     PtrUDFObjectName                    FCBName;
     ERESOURCE                           CcbListResource;
 
-    struct _UDFFileControlBlock*        ParentFcb;
+    // Pointer to the Fcb non-paged structures.
+
+    PFCB_NONPAGED FcbNonpaged;
+
+
+    // Share access structure
+    SHARE_ACCESS ShareAccess;
+
+    // we will maintain some time information here to make our life easier
+    LARGE_INTEGER                       CreationTime;
+    LARGE_INTEGER                       LastAccessTime;
+    LARGE_INTEGER                       LastWriteTime;
+    LARGE_INTEGER                       ChangeTime;
+
+    PVOID LazyWriteThread;
+
+    FCB* ParentFcb;
     // Pointer to IrpContextLite in delayed queue.
-    struct _UDFIrpContextLite*          IrpContextLite;
+    IRP_CONTEXT_LITE* IrpContextLite;
     uint32                              CcbCount;
-} UDFFCB, *PtrUDFFCB;
+
+    //  The following field is used by the filelock module
+    //  to maintain current byte range locking information.
+    //  A file lock is allocated as needed.
+
+    PFILE_LOCK FileLock;
+
+    union{
+
+        ULONG FcbType;
+        FCB_DATA FcbData;
+        FCB_INDEX FcbIndex;
+    };
+};
+using PFCB = FCB*;
+
+#define SIZEOF_FCB_DATA     \
+    (FIELD_OFFSET(FCB, FcbType) + sizeof(FCB_DATA))
+
+#define SIZEOF_FCB_INDEX    \
+    (FIELD_OFFSET(FCB, FcbType) + sizeof(FCB_INDEX))
 
 /**************************************************************************
     the following FCBFlags values are relevant. These flag
@@ -302,7 +324,6 @@ typedef struct _UDFFileControlBlock {
 #define     UDF_FCB_PAGE_FILE                           (0x00000004)
 #define     UDF_FCB_DIRECTORY                           (0x00000008)
 #define     UDF_FCB_ROOT_DIRECTORY                      (0x00000010)
-#define     UDF_FCB_WRITE_THROUGH                       (0x00000020)
 #define     UDF_FCB_MAPPED                              (0x00000040)
 #define     UDF_FCB_FAST_IO_READ_IN_PROGESS             (0x00000080)
 #define     UDF_FCB_FAST_IO_WRITE_IN_PROGESS            (0x00000100)
@@ -315,6 +336,9 @@ typedef struct _UDFFileControlBlock {
 
 #define     UDF_FCB_INITIALIZED_CCB_LIST_RESOURCE       (0x00008000)
 #define     UDF_FCB_POSTED_RENAME                       (0x00010000)
+
+#define     FCB_STATE_INITIALIZED                       (0x00020000)
+#define     FCB_STATE_IN_FCB_TABLE                      (0x00040000)
 
 #define     UDF_FCB_DELETE_PARENT                       (0x10000000)
 #define     UDF_FCB_NOT_FROM_ZONE                       (0x80000000)
@@ -329,8 +353,352 @@ typedef struct _UDFFileControlBlock {
 
 #define _BROWSE_UDF_
 
-// Common UDF-related definitions
-#include "Include/udf_common.h"
+enum UDFFSD_MEDIA_TYPE {
+    MediaUnknown = 0,
+    MediaHdd,
+    MediaCdr,
+    MediaCdrw,
+    MediaCdrom,
+    MediaZip,
+    MediaFloppy,
+    MediaDvdr,
+    MediaDvdrw
+};
+
+enum VCB_CONDITION {
+
+    VcbNotMounted = 0,
+    VcbMountInProgress,
+    VcbMounted,
+    VcbInvalid,
+    VcbDismountInProgress
+};
+
+struct VCB {
+
+    UDFIdentifier NodeIdentifier;
+
+    // Condition flag for the Vcb.
+    VCB_CONDITION VcbCondition;
+
+    ULONG                               VcbCleanup;
+    ULONG                               VcbReference;
+    ULONG                               VcbUserReference;
+    ERESOURCE                           FlushResource;
+    // each VCB is accessible off a global linked list
+    LIST_ENTRY                          NextVCB;
+    // each VCB points to a VPB structure created by the NT I/O Manager
+    PVPB                                Vpb;
+    // we will maintain a global list of IRP's that are pending
+    //  because of a directory notify request.
+    LIST_ENTRY                          NextNotifyIRP;
+    // the above list is protected only by the mutex declared below
+    PNOTIFY_SYNC                        NotifyIRPMutex;
+    // for each mounted volume, we create a device object. Here then
+    //  is a back pointer to that device object
+    PDEVICE_OBJECT                      VCBDeviceObject;
+    // We also retain a pointer to the physical device object on which we
+    // have mounted ourselves. The I/O Manager passes us a pointer to this
+    // device object when requesting a mount operation.
+    PDEVICE_OBJECT                      TargetDeviceObject;
+    PCWSTR                               DefaultRegName;
+    // the volume structure contains a pointer to the root directory FCB
+    FCB* RootIndexFcb;
+    FCB* VolumeDasdFcb;
+    // the complete name of the user visible drive letter we serve
+    PUCHAR                              PtrVolumePath;
+    // Pointer to a stream file object created for the volume information
+    // to be more easily read from secondary storage (with the support of
+    // the NT Cache Manager).
+/*    PFILE_OBJECT                        PtrStreamFileObject;
+    // Required to use the Cache Manager.
+*/
+    // Volume lock file object - used in Lock/Unlock routines
+    PFILE_OBJECT                        VolumeLockFileObject;
+    DEVICE_TYPE                         FsDeviceType;
+
+    //  The following field tells how many requests for this volume have
+    //  either been enqueued to ExWorker threads or are currently being
+    //  serviced by ExWorker threads.  If the number goes above
+    //  a certain threshold, put the request on the overflow queue to be
+    //  executed later.
+    ULONG PostedRequestCount;
+    //  The following field indicates the number of IRP's waiting
+    //  to be serviced in the overflow queue.
+    ULONG OverflowQueueCount;
+    //  The following field contains the queue header of the overflow queue.
+    //  The Overflow queue is a list of IRP's linked via the IRP's ListEntry
+    //  field.
+    LIST_ENTRY OverflowQueue;
+    //  The following spinlock protects access to all the above fields.
+    KSPIN_LOCK OverflowQueueSpinLock;
+    ULONG StopOverflowQueue;
+
+    //---------------
+    //
+    //---------------
+
+    ULONG           BM_FlushTime;
+    ULONG           BM_FlushPriod;
+    ULONG           Tree_FlushTime;
+    ULONG           Tree_FlushPriod;
+    ULONG           SkipCountLimit;
+
+    // File Id cache
+    struct _UDFFileIDCacheItem* FileIdCache;
+    ULONG           FileIdCount;
+    //
+    ULONG           MediaLockCount;
+
+    BOOLEAN         IsVolumeJustMounted;
+
+    // FS size cache
+    LONGLONG        TotalAllocUnits;
+    LONGLONG        FreeAllocUnits;
+    LONGLONG        EstimatedFreeUnits;
+
+    // a resource to protect the fields contained within the VCB
+    ERESOURCE                           VcbResource;
+    ERESOURCE                           BitMapResource1;
+    ERESOURCE                           FileIdResource;
+    ERESOURCE                           DlocResource;
+    ERESOURCE                           DlocResource2;
+    ERESOURCE                           PreallocResource;
+    ERESOURCE                           IoResource;
+
+    // Vcb fast mutex.  This is used to synchronize the fields in the Vcb
+    // when modified when the Vcb is not held exclusively.  Included here
+    // are the count fields and Fcb table.
+
+    // We also use this to synchronize changes to the Fcb reference field.
+
+    FAST_MUTEX VcbMutex;
+    PVOID VcbLockThread;
+
+    //---------------
+    // Physical media parameters
+    //---------------
+
+    ULONG           BlockSize;
+    ULONG           BlockSizeBits;
+    ULONG           WriteBlockSize;
+    ULONG           LBlockSize;
+    ULONG           LBlockSizeBits;
+    ULONG           LB2B_Bits;
+    // Number of last session
+    ULONG           LastSession;
+    ULONG           FirstTrackNum;
+    ULONG           FirstTrackNumLastSes;
+    ULONG           LastTrackNum;
+    // First & Last LBA of the last session
+    ULONG           FirstLBA;
+    ULONG           FirstLBALastSes;
+    ULONG           LastLBA;
+    // Last writable LBA
+    ULONG           LastPossibleLBA;
+    // First writable LBA
+    ULONG           NWA;
+    // sector type map
+    struct _UDFTrackMap* TrackMap;
+    ULONG           LastModifiedTrack;
+    ULONG           LastReadTrack;
+    ULONG           CdrwBufferSize;
+    ULONG           CdrwBufferSizeCounter;
+    uint32          SavedFeatures;
+    // OPC info
+//    PCHAR           OPC_buffer;
+    UCHAR           OPCNum;
+    BOOLEAN         OPCDone;
+    UCHAR           MediaType;
+    UCHAR           MediaClassEx;
+
+    UCHAR           PhErasable;
+    UCHAR           PhDiskType;
+    UCHAR           PhMediaCapFlags;
+
+    UCHAR           MRWStatus;
+    BOOLEAN         BlankCD;
+    UCHAR           Reserved;
+
+    ULONG           PhSerialNumber;
+
+    BOOLEAN         CDR_Mode;
+    BOOLEAN         DVD_Mode;
+
+#define SYNC_CACHE_RECOVERY_NONE     0
+#define SYNC_CACHE_RECOVERY_ATTEMPT  1
+#define SYNC_CACHE_RECOVERY_RETRY    2
+
+    UCHAR           SyncCacheState;
+
+    // W-cache
+    W_CACHE         FastCache;
+    ULONG           WCacheMaxFrames;
+    ULONG           WCacheMaxBlocks;
+    ULONG           WCacheBlocksPerFrameSh;
+    ULONG           WCacheFramesToKeepFree;
+
+    PCHAR           ZBuffer;
+    PCHAR           fZBuffer;
+    ULONG           fZBufferSize;
+
+    ULONG           IoErrorCounter;
+    // Media change count (equal to the same field in CDFS VCB)
+    ULONG           MediaChangeCount;
+
+#define INCREMENTAL_SEEK_NONE        0
+#define INCREMENTAL_SEEK_WORKAROUND  1
+#define INCREMENTAL_SEEK_DONE        2
+
+    UCHAR           IncrementalSeekState;
+
+    BOOLEAN         VerifyOnWrite;
+    BOOLEAN         DoNotCompareBeforeWrite;
+    BOOLEAN         CacheChainedIo;
+
+    ULONG           MountPhErrorCount;
+
+    // a set of flags that might mean something useful
+    uint32          VcbState;
+    BOOLEAN         FP_disc;
+
+    //---------------
+    // UDF related data
+    //---------------
+
+    // Anchors LBA
+#define MAX_ANCHOR_LOCATIONS 11
+    ULONG           Anchor[MAX_ANCHOR_LOCATIONS];
+    ULONG           BadSeqLoc[MAX_ANCHOR_LOCATIONS * 2];
+    NTSTATUS        BadSeqStatus[MAX_ANCHOR_LOCATIONS * 2];
+    ULONG           BadSeqLocIndex;
+    // Volume label
+    UNICODE_STRING  VolIdent;
+    // Volume creation time
+    int64           VolCreationTime;
+    // Root & SystemStream lb_addr
+    lb_addr         RootLbAddr;
+    lb_addr         SysStreamLbAddr;
+    // Number of partition
+    USHORT          PartitionMaps;
+    // Pointer to partition structures
+    PUDFPartMap     Partitions;
+    LogicalVolIntegrityDesc* LVid;
+    uint32          IntegrityType;
+    uint32          origIntegrityType;
+    extent_ad       LVid_loc;
+    ULONG           SerialNumber;
+    // on-disk structure version control
+    uint16          UdfRevision;
+    uint16          minUDFReadRev;
+    uint16          minUDFWriteRev;
+    uint16          maxUDFWriteRev;
+    // file/dir counters for Mac OS
+    uint32          numFiles;
+    uint32          numDirs;
+    // VAT
+    uint32          InitVatCount;
+    uint32          VatCount;
+    uint32* Vat;
+    uint32          VatPartNdx;
+    PUDF_FILE_INFO  VatFileInfo;
+    // sparing table
+    ULONG           SparingCountFree;
+    ULONG           SparingCount;
+    ULONG           SparingBlockSize;
+    struct _SparingEntry* SparingTable;
+#define MAX_SPARING_TABLE_LOCATIONS 32
+    uint32          SparingTableLoc[MAX_SPARING_TABLE_LOCATIONS];
+    uint32          SparingTableCount;
+    uint32          SparingTableLength;
+    uint32          SparingTableModified;
+    // free space bitmap
+    ULONG           FSBM_ByteCount;
+    // the following 2 fields are equal to NTIFS's RTL_BITMAP structure
+    ULONG           FSBM_BitCount;
+    PCHAR           FSBM_Bitmap;     // 0 - free, 1 - used
+#ifdef UDF_TRACK_ONDISK_ALLOCATION_OWNERS
+    PULONG          FSBM_Bitmap_owners; // 0 - free
+    // -1 - used by unknown
+    // other - owner's FE location
+#endif //UDF_TRACK_ONDISK_ALLOCATION_OWNERS
+
+    PCHAR           FSBM_OldBitmap;  // 0 - free, 1 - used
+    ULONG           BitmapModified;
+
+    PCHAR           ZSBM_Bitmap;     // 0 - data, 1 - zero-filleld
+
+    PCHAR           BSBM_Bitmap;     // 0 - normal, 1 - bad-block
+
+    // pointers to Volume Descriptor Sequences
+    ULONG VDS1;
+    ULONG VDS1_Len;
+    ULONG VDS2;
+    ULONG VDS2_Len;
+
+    ULONG           Modified;
+
+    // System Stream Dir
+    PUDF_FILE_INFO  SysSDirFileInfo;
+    // Non-alloc space
+    PUDF_FILE_INFO  NonAllocFileInfo;
+    // Unique ID Mapping
+    PUDF_FILE_INFO  UniqueIDMapFileInfo;
+    // Saved location of Primary Vol Descr (used for setting Label)
+    UDF_VDS_RECORD  PVolDescAddr;
+    UDF_VDS_RECORD  PVolDescAddr2;
+    // NSR flags
+    uint32          NSRDesc;
+    // File Id cache
+    ULONGLONG       NextUniqueId;
+    // FE location cache
+    PUDF_DATALOC_INDEX DlocList;
+    ULONG           DlocCount;
+    // FS compatibility
+    USHORT          DefaultAllocMode; // Default alloc mode (from registry)
+    BOOLEAN         UseExtendedFE;
+    BOOLEAN         LowFreeSpace;
+    UDFFSD_MEDIA_TYPE MediaTypeEx;
+    ULONG           DefaultAttr;      // Default file attributes (NT-style)
+
+
+    UCHAR           PartitialDamagedVolumeAction;
+    BOOLEAN         NoFreeRelocationSpaceVolumeAction;
+    BOOLEAN         WriteSecurity;
+    BOOLEAN         ForgetVolume;
+    UCHAR           Reserved5[3];
+
+    //
+    ULONG           FECharge;
+    ULONG           FEChargeSDir;
+    ULONG           PackDirThreshold;
+    ULONG           SparseThreshold;  // in blocks
+
+    PUDF_ALLOCATION_CACHE_ITEM    FEChargeCache;
+    ULONG                         FEChargeCacheMaxSize;
+
+    PUDF_ALLOCATION_CACHE_ITEM    PreallocCache;
+    ULONG                         PreallocCacheMaxSize;
+
+    UDF_VERIFY_CTX  VerifyCtx;
+
+    PUCHAR          Cfg;
+    ULONG           CfgLength;
+    ULONG           CfgVersion;
+
+    uint32          CompatFlags;
+    UCHAR           ShowBlankCd;
+
+    // Fcb table.  Synchronized with the Vcb fast mutex.
+
+    RTL_GENERIC_TABLE FcbTable;
+
+    // Preallocated VPB for swapout, so we are not forced to consider
+    // must succeed pool.
+    PVPB SwapVpb;
+};
+
+using PVCB = VCB*;
 
 // One for root
 #define         UDF_RESIDUAL_REFERENCE              (2)
@@ -344,6 +712,45 @@ typedef struct _UDFFileControlBlock {
 
 #define         UDF_MAX_BG_WRITERS                  16
 
+// The Volume Device Object is an I/O system device object with a
+// workqueue and an VCB record appended to the end.  There are multiple
+// of these records, one for every mounted volume, and are created during
+// a volume mount operation.  The work queue is for handling an overload
+// of work requests to the volume.
+
+struct VOLUME_DEVICE_OBJECT {
+
+    DEVICE_OBJECT DeviceObject;
+
+    // The following field tells how many requests for this volume have
+    // either been enqueued to ExWorker threads or are currently being
+    // serviced by ExWorker threads.  If the number goes above
+    // a certain threshold, put the request on the overflow queue to be
+    // executed later.
+
+    __volatile ULONG PostedRequestCount;
+
+    // The following field indicates the number of IRP's waiting
+    // to be serviced in the overflow queue.
+
+    ULONG OverflowQueueCount;
+
+    // The following field contains the queue header of the overflow queue.
+    // The Overflow queue is a list of IRP's linked via the IRP's ListEntry
+    // field.
+
+    LIST_ENTRY OverflowQueue;
+
+    // The following spinlock protects access to all the above fields.
+
+    KSPIN_LOCK OverflowQueueSpinLock;
+
+    // This is the file system specific volume control block.
+
+    VCB Vcb;
+};
+typedef VOLUME_DEVICE_OBJECT* PVOLUME_DEVICE_OBJECT;
+
 typedef struct _FILTER_DEV_EXTENSION {
     UDFIdentifier   NodeIdentifier;
     PFILE_OBJECT    fileObject;
@@ -353,140 +760,332 @@ typedef struct _FILTER_DEV_EXTENSION {
 typedef struct _UDFFS_DEV_EXTENSION {
     UDFIdentifier   NodeIdentifier;
 } UDFFS_DEV_EXTENSION, *PUDFFS_DEV_EXTENSION;
+
+//  Following structure is used to track the top level request.  Each Udfs
+//  Fsd and Fsp entry point will examine the top level irp location in the
+//  thread local storage to determine if this request is top level and/or
+//  top level Udfs.  The top level Udfs request will remember the previous
+//  value and update that location with a stack location.  This location
+//  can be accessed by recursive Udfs entry points.
+
+struct THREAD_CONTEXT {
+
+    //  UDFS signature.  Used to confirm structure on stack is valid.
+    ULONG Udfs;
+
+    //  Previous value in top-level thread location.  We restore this
+    //  when done.
+    PIRP SavedTopLevelIrp;
+
+    //  Top level Udfs IrpContext.  Initial Udfs entry point on stack
+    //  will store the IrpContext for the request in this stack location.
+    IRP_CONTEXT* TopLevelIrpContext;
+};
+using PTHREAD_CONTEXT = THREAD_CONTEXT*;
+
 /**************************************************************************
     The IRP context encapsulates the current request. This structure is
     used in the "common" dispatch routines invoked either directly in
     the context of the original requestor, or indirectly in the context
     of a system worker thread.
 **************************************************************************/
-typedef struct _UDFIrpContext {
+struct IRP_CONTEXT {
     UDFIdentifier                   NodeIdentifier;
-    uint32                          IrpContextFlags;
+    ULONG                           Flags;
     // copied from the IRP
-    uint8                           MajorFunction;
+    UCHAR                           MajorFunction;
     // copied from the IRP
-    uint8                           MinorFunction;
+    UCHAR                           MinorFunction;
     // to queue this IRP for asynchronous processing
     WORK_QUEUE_ITEM                 WorkQueueItem;
     // the IRP for which this context structure was created
     PIRP                            Irp;
     // the target of the request (obtained from the IRP)
-    PDEVICE_OBJECT                  TargetDeviceObject;
+    PDEVICE_OBJECT                  RealDevice;
     // if an exception occurs, we will store the code here
-    NTSTATUS                        SavedExceptionCode;
+    NTSTATUS                        ExceptionStatus;
     // For queued close operation we save Fcb
-    _UDFFileControlBlock            *Fcb;
+    FCB*                            Fcb;
     ULONG                           TreeLength;
-    PMDL                            PtrMdl;
-    PCHAR                           TransitionBuffer;
-    // support for delayed close
-} UDFIrpContext, *PtrUDFIrpContext;
 
-#define         UDF_IRP_CONTEXT_CAN_BLOCK           (0x00000001)
-#define         UDF_IRP_CONTEXT_WRITE_THROUGH       (0x00000002)
-#define         UDF_IRP_CONTEXT_EXCEPTION           (0x00000004)
-#define         UDF_IRP_CONTEXT_DEFERRED_WRITE      (0x00000008)
-#define         UDF_IRP_CONTEXT_ASYNC_PROCESSING    (0x00000010)
-#define         UDF_IRP_CONTEXT_NOT_TOP_LEVEL       (0x00000020)
-#define         UDF_IRP_CONTEXT_FLAG_DISABLE_POPUPS (0x00000040)
-#define         UDF_IRP_CONTEXT_FLUSH_REQUIRED      (0x00000080)
-#define         UDF_IRP_CONTEXT_FLUSH2_REQUIRED     (0x00000100)
-#define         UDF_IRP_CONTEXT_READ_ONLY           (0x00010000)
-#define         UDF_IRP_CONTEXT_RES1_ACQ            (0x01000000)
-#define         UDF_IRP_CONTEXT_RES2_ACQ            (0x02000000)
-#define         UDF_IRP_CONTEXT_FORCED_POST         (0x20000000)
-#define         UDF_IRP_CONTEXT_BUFFER_LOCKED       (0x40000000)
-#define         UDF_IRP_CONTEXT_NOT_FROM_ZONE       (0x80000000)
+    // Io context for a read request.
+    // Address of Fcb for teardown oplock in create case.
+
+    union {
+
+        IO_CONTEXT* IoContext;
+        PFCB* TeardownFcb;
+    };
+
+    // Top level irp context for this thread.
+    IRP_CONTEXT* TopLevel;
+
+    //  Pointer to the top-level context if this IrpContext is responsible
+    //  for cleaning it up.
+    THREAD_CONTEXT* ThreadContext;
+
+    VCB*      Vcb;
+};
+using PIRP_CONTEXT = IRP_CONTEXT*;
+
+#define IRP_CONTEXT_FLAG_ON_STACK               (0x00000001)
+#define IRP_CONTEXT_FLAG_MORE_PROCESSING        (0x00000002)
+#define IRP_CONTEXT_FLAG_WAIT                   (0x00000004)
+#define IRP_CONTEXT_FLAG_FORCE_POST             (0x00000008)
+#define IRP_CONTEXT_FLAG_TOP_LEVEL              (0x00000010)
+#define IRP_CONTEXT_FLAG_TOP_LEVEL_UDFS         (0x00000020)
+#define IRP_CONTEXT_FLAG_IN_FSP                 (0x00000040)
+#define IRP_CONTEXT_FLAG_IN_TEARDOWN            (0x00000080)
+#define IRP_CONTEXT_FLAG_ALLOC_IO               (0x00000100)
+#define IRP_CONTEXT_FLAG_DISABLE_POPUPS         (0x00000200)
+#define IRP_CONTEXT_FLAG_DEFERRED_WRITE         (0x00000400)
+#define IRP_CONTEXT_FLAG_WRITE_THROUGH          (0x00020000)
+#define IRP_CONTEXT_FLAG_FULL_NAME              (0x00040000)
+#define IRP_CONTEXT_FLAG_TRAIL_BACKSLASH        (0x00080000)
+#define UDF_IRP_CONTEXT_NOT_TOP_LEVEL           (0x10000000)
+#define UDF_IRP_CONTEXT_FLUSH_REQUIRED          (0x20000000)
+#define UDF_IRP_CONTEXT_FLUSH2_REQUIRED         (0x40000000)
+
+//  The following flags need to be cleared when a request is posted.
+
+#define IRP_CONTEXT_FLAGS_CLEAR_ON_POST (   \
+    IRP_CONTEXT_FLAG_MORE_PROCESSING    |   \
+    IRP_CONTEXT_FLAG_WAIT               |   \
+    IRP_CONTEXT_FLAG_FORCE_POST         |   \
+    IRP_CONTEXT_FLAG_TOP_LEVEL          |   \
+    IRP_CONTEXT_FLAG_TOP_LEVEL_UDFS     |   \
+    IRP_CONTEXT_FLAG_IN_FSP             |   \
+    IRP_CONTEXT_FLAG_IN_TEARDOWN        |   \
+    IRP_CONTEXT_FLAG_DISABLE_POPUPS         \
+)
+
+//  The following flags need to be cleared when a request is retried.
+
+#define IRP_CONTEXT_FLAGS_CLEAR_ON_RETRY (  \
+    IRP_CONTEXT_FLAG_MORE_PROCESSING    |   \
+    IRP_CONTEXT_FLAG_IN_TEARDOWN        |   \
+    IRP_CONTEXT_FLAG_DISABLE_POPUPS         \
+)
+
+//  The following flags are set each time through the Fsp loop.
+
+#define IRP_CONTEXT_FSP_FLAGS (             \
+    IRP_CONTEXT_FLAG_WAIT               |   \
+    IRP_CONTEXT_FLAG_TOP_LEVEL          |   \
+    IRP_CONTEXT_FLAG_TOP_LEVEL_UDFS     |   \
+    IRP_CONTEXT_FLAG_IN_FSP                 \
+)
 
 /**************************************************************************
     Following structure is used to queue a request to the delayed close queue.
     This structure should be the minimum block allocation size.
 **************************************************************************/
-typedef struct _UDFIrpContextLite {
+struct IRP_CONTEXT_LITE {
     UDFIdentifier                   NodeIdentifier;
     //  Fcb for the file object being closed.
-    _UDFFileControlBlock            *Fcb;
+    FCB*                            Fcb;
     //  List entry to attach to delayed close queue.
     LIST_ENTRY                      DelayedCloseLinks;
     //  User reference count for the file object being closed.
-    //ULONG                           UserReference;
+    ULONG                           UserReference;
     //  Real device object.  This represents the physical device closest to the media.
     PDEVICE_OBJECT                  RealDevice;
     ULONG                           TreeLength;
-    uint32                          IrpContextFlags;
-} UDFIrpContextLite, *PtrUDFIrpContextLite;
+};
+using PIRP_CONTEXT_LITE = IRP_CONTEXT_LITE*;
+
+/**************************************************************************
+    we will store all of our global variables in one structure.
+    Global variables are not specific to any mounted volume BUT
+    by definition are required for successful operation of the
+    FSD implementation.
+**************************************************************************/
+typedef struct _UDFData {
+
+    UDFIdentifier               NodeIdentifier;
+    // the fields in this list are protected by the following resource
+    ERESOURCE                   GlobalDataResource;
+    // each driver has a driver object created for it by the NT I/O Mgr.
+    //  we are no exception to this rule.
+    PDRIVER_OBJECT              DriverObject;
+    // we will create a device object for our FSD as well ...
+    //  Although not really required, it helps if a helper application
+    //  writen by us wishes to send us control information via
+    //  IOCTL requests ...
+    PDEVICE_OBJECT              UDFDeviceObject_CD;
+    PDEVICE_OBJECT              UDFDeviceObject_HDD;
+
+    // we will keep a list of all logical volumes for our UDF FSD
+    LIST_ENTRY VcbQueue;
+
+    // the NT Cache Manager, the I/O Manager and we will conspire
+    //  to bypass IRP usage using the function pointers contained
+    //  in the following structure
+    FAST_IO_DISPATCH            UDFFastIoDispatch;
+    // The NT Cache Manager uses the following call backs to ensure
+    //  correct locking hierarchy is maintained
+    CACHE_MANAGER_CALLBACKS     CacheMgrCallBacks;
+
+    // Our lookaside lists.
+    NPAGED_LOOKASIDE_LIST IrpContextLookasideList;
+    NPAGED_LOOKASIDE_LIST ObjectNameLookasideList;
+    NPAGED_LOOKASIDE_LIST NonPagedFcbLookasideList;
+    NPAGED_LOOKASIDE_LIST UDFNonPagedFcbLookasideList;
+    PAGED_LOOKASIDE_LIST UDFFcbIndexLookasideList;
+    PAGED_LOOKASIDE_LIST UDFFcbDataLookasideList;
+
+    PAGED_LOOKASIDE_LIST CcbLookasideList;
+
+    LIST_ENTRY AsyncCloseQueue;
+    ULONG AsyncCloseCount;
+    BOOLEAN FspCloseActive;
+    BOOLEAN ReduceDelayedClose;
+    USHORT Flags;
+
+    // The following fields describe the deferred close file objects.
+
+    LIST_ENTRY DelayedCloseQueue;
+    ULONG DelayedCloseCount;
+    ULONG MaxDelayedCloseCount;
+    ULONG MinDelayedCloseCount;
+    WORK_QUEUE_ITEM CloseItem;
+
+    // Fast mutex used to lock the fields of this structure.
+
+    PVOID UdfDataLockThread;
+    FAST_MUTEX UdfDataMutex;
+
+    WORK_QUEUE_ITEM             LicenseKeyItem;
+    BOOLEAN                     LicenseKeyItemStarted;
+
+    LARGE_INTEGER               UDFLargeZero;
+
+    // mount event (for udf gui app)
+    PKEVENT                     MountEvent;
+
+    UNICODE_STRING              SavedRegPath;
+    UNICODE_STRING              UnicodeStrRoot;
+    UNICODE_STRING              UnicodeStrSDir;
+    UNICODE_STRING              AclName;
+
+    ULONG                       WCacheMaxFrames;
+    ULONG                       WCacheMaxBlocks;
+    ULONG                       WCacheBlocksPerFrameSh;
+    ULONG                       WCacheFramesToKeepFree;
+
+} UDFData, *PUDFData;
+
+#define UDFS_FLAGS_SHUTDOWN                   (0x0001)
+
+#define TAG_IRP_CONTEXT         'cidU'
+#define TAG_OBJECT_NAME         'nodU'
+#define TAG_FCB_NONPAGED        'nfdU'
+#define TAG_FCB                 'pfdU'
+#define TAG_CCB                 'ccdU'
+#define TAG_VPB                 'pvdU'
+#define TAG_FCB_TABLE           'tfdU'
+#define TAG_FILE_NAME           'nFdU'      //  Filename buffer
+
+// some valid flags for the VCB
+#define         VCB_STATE_LOCKED                    (0x00000001)
+#define         VCB_STATE_DISMOUNT_IN_PROGRESS      (0x00000002)
+#define         VCB_STATE_MOUNTED_DIRTY             (0x00000004)
+#define         VCB_STATE_SHUTDOWN                  (0x00000008)
+#define         VCB_STATE_VOLUME_READ_ONLY          (0x00000010)
+#define         UDF_VCB_FLAGS_VCB_INITIALIZED       (0x00000020)
+#define         VCB_STATE_VPB_NOT_ON_DEVICE         (0x00000040)
+#define         VCB_STATE_MEDIA_WRITE_PROTECT       (0x00000080)
+#define         VCB_STATE_REMOVABLE_MEDIA           (0x00000100)
+#define         UDF_VCB_FLAGS_MEDIA_LOCKED          (0x00000200)
+#define         UDF_VCB_SKIP_EJECT_CHECK            (0x00000400)
+#define         UDF_VCB_LAST_WRITE                  (0x00001000)
+#define         UDF_VCB_FLAGS_TRACKMAP              (0x00002000)
+#define         UDF_VCB_ASSUME_ALL_USED             (0x00004000)
+#define         VCB_STATE_RMW_INITIALIZED           (0x00008000)
+#define         VCB_STATE_SEQUENCE_CACHE            (0x00010000)
+#define         VCB_STATE_PNP_NOTIFICATION          (0x00020000)
+#define         UDF_VCB_FLAGS_RAW_DISK              (0x00040000)
+
+#define         UDF_VCB_FLAGS_NO_DELAYED_CLOSE      (0x00200000)
+
+#define         UDF_VCB_FLAGS_FLUSH_BREAK_REQ       (0x01000000)
+#define         UDF_VCB_FLAGS_EJECT_REQ             (0x02000000)
+#define         UDF_VCB_FLAGS_FORCE_SYNC_CACHE      (0x04000000)
+
+#define         UDF_VCB_FLAGS_UNSAFE_IOCTL          (0x10000000)
+#define         UDF_VCB_FLAGS_DEAD                  (0x20000000)  // device unexpectedly disappeared
 
 
+// flags for FS Interface Compatibility
+#define         UDF_VCB_IC_UPDATE_ACCESS_TIME          (0x00000001)
+#define         UDF_VCB_IC_UPDATE_MODIFY_TIME          (0x00000002)
+#define         UDF_VCB_IC_UPDATE_ATTR_TIME            (0x00000004)
+#define         UDF_VCB_IC_UPDATE_ARCH_BIT             (0x00000008)
+#define         UDF_VCB_IC_UPDATE_DIR_WRITE            (0x00000010)
+#define         UDF_VCB_IC_UPDATE_DIR_READ             (0x00000020)
+#define         UDF_VCB_IC_WRITE_IN_RO_DIR             (0x00000040)
+#define         UDF_VCB_IC_UPDATE_UCHG_DIR_ACCESS_TIME (0x00000080)
+#define         UDF_VCB_IC_W2K_COMPAT_ALLOC_DESCS      (0x00000100)
+#define         UDF_VCB_IC_HW_RO                       (0x00000200)
+#define         UDF_VCB_IC_FORCE_HW_RO                 (0x00001000)
+#define         UDF_VCB_IC_IGNORE_SEQUENTIAL_IO        (0x00002000)
+#define         UDF_VCB_IC_NO_SYNCCACHE_AFTER_WRITE    (0x00004000)
+#define         UDF_VCB_IC_BAD_RW_SEEK                 (0x00008000)
+#define         UDF_VCB_IC_FP_ADDR_PROBLEM             (0x00010000)
+#define         UDF_VCB_IC_MRW_ADDR_PROBLEM            (0x00020000)
+#define         UDF_VCB_IC_BAD_DVD_LAST_LBA            (0x00040000)
+#define         UDF_VCB_IC_SYNCCACHE_BEFORE_READ       (0x00080000)
+#define         UDF_VCB_IC_INSTANT_COMPAT_ALLOC_DESCS  (0x00100000)
+#define         UDF_VCB_IC_SOFT_RO                     (0x00200000)
 
+#define         UDF_VCB_IC_DIRTY_RO                    (0x04000000)
+#define         UDF_VCB_IC_W2K_COMPAT_VLABEL           (0x08000000)
+#define         UDF_VCB_IC_SHOW_BLANK_CD               (0x40000000)
+#define         UDF_VCB_IC_ADAPTEC_NONALLOC_COMPAT     (0x80000000)
 
-// a default size of the number of pages of non-paged pool allocated
-//  for each of the zones ...
+// valid flag values for the global data structure
+#define     UDF_DATA_FLAGS_RESOURCE_INITIALIZED     (0x00000001)
+#define     UDF_DATA_FLAGS_ZONES_INITIALIZED        (0x00000002)
+#define     UDF_DATA_FLAGS_SHUTDOWN                 (0x00000004)
 
-//  Note that the values are absolutely arbitrary, the only information
-//  worth using from the values themselves is that they increase for
-//  larger systems (i.e. systems with more memory)
-#define     UDF_DEFAULT_ZONE_SIZE_SMALL_SYSTEM          (0x4)
-#define     UDF_DEFAULT_ZONE_SIZE_MEDIUM_SYSTEM         (0x8)
-#define     UDF_DEFAULT_ZONE_SIZE_LARGE_SYSTEM          (0xc)
+#define FILE_ID_CACHE_GRANULARITY 16
+#define DLOC_LIST_GRANULARITY 16
 
-// another simplistic (brain dead ? :-) method used is to simply double
-//  the values for a "server" machine
+// Some defines
+#define UDFIsDvdMedia(Vcb)       (Vcb->DVD_Mode)
+#define UDFIsWriteParamsReq(Vcb) (Vcb->WriteParamsReq && !Vcb->DVD_Mode)
 
-//  So, for all you guys who "modified" the registry ;-) to change the
-//  wkstation into a server, tough luck !
-#define     UDF_NTAS_MULTIPLE                               (0x2)
-
-typedef struct _UDFEjectWaitContext {
-    PVCB    Vcb;
-
-    BOOLEAN SoftEjectReq;
-    UCHAR   Padding0[3];
-
-    KEVENT  StopReq;
-    PKEVENT WaiterStopped;
-    WORK_QUEUE_ITEM EjectReqWorkQueueItem;
-
-    GET_EVENT_USER_OUT EjectReqBuffer;
-    UCHAR   PaddingEvt[(0x40 - sizeof(GET_EVENT_USER_OUT)) & 0x0f];
-
-    GET_CAPABILITIES_USER_OUT DevCap;
-    UCHAR   PaddingDevCap[(0x40 - sizeof(GET_CAPABILITIES_USER_OUT)) & 0x0f];
-
-    GET_LAST_ERROR_USER_OUT Error;
-    UCHAR   PaddingError[(0x40 - sizeof(GET_LAST_ERROR_USER_OUT)) & 0x0f];
-
-    ULONG   Zero;
-} UDFEjectWaitContext, *PUDFEjectWaitContext;
-
-typedef struct _UDFBGWriteContext {
-    PVCB  Vcb;
-    PVOID Buffer;     // Target buffer
-    ULONG Length;
-    ULONG Lba;
-    ULONG WrittenBytes;
-    BOOLEAN FreeBuffer;
-    WORK_QUEUE_ITEM WorkQueueItem;
-} UDFBGWriteContext, *PUDFBGWriteContext;
-
-//  Define the file system statistics struct.  Vcb->Statistics points to an
-//  array of these (one per processor) and they must be 64 byte aligned to
-//  prevent cache line tearing.
-typedef struct _FILE_SYSTEM_STATISTICS {
-    //  This contains the actual data.
-    FILESYSTEM_STATISTICS Common;
-    FAT_STATISTICS Fat;
-    //  Pad this structure to a multiple of 64 bytes.
-    UCHAR Pad[64-(sizeof(FILESYSTEM_STATISTICS)+sizeof(FAT_STATISTICS))%64];
-} FILE_SYSTEM_STATISTICS, *PFILE_SYSTEM_STATISTICS;
-
-//
 typedef struct _UDFFileIDCacheItem {
-    LONGLONG Id;
+    FILE_ID Id;
     UNICODE_STRING FullName;
     BOOLEAN CaseSens;
 } UDFFileIDCacheItem, *PUDFFileIDCacheItem;
 
 #define DIRTY_PAGE_LIMIT   32
+
+#define UDFS_FILE_SYSTEM                 ((ULONG)0x0000009BL)
+
+#define UDFBugCheck(A,B,C) { KeBugCheckEx(UDFS_FILE_SYSTEM, UDF_BUG_CHECK_ID | __LINE__, A, B, C ); }
+
+#define MAXIMUM_NUMBER_TRACKS_LARGE 0xAA
+
+typedef struct _CDROM_TOC_LARGE {
+
+    //
+    // Header
+    //
+
+    UCHAR Length[2];  // add two bytes for this field
+    UCHAR FirstTrack;
+    UCHAR LastTrack;
+
+    //
+    // Track data
+    //
+
+    TRACK_DATA TrackData[MAXIMUM_NUMBER_TRACKS_LARGE];
+
+} CDROM_TOC_LARGE;
 
 #endif /* _UDF_STRUCTURES_H_ */ // has this file been included?
 

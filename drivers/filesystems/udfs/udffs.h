@@ -38,11 +38,9 @@
 
 //#define UDF_ASYNC_IO
 
-//#define UDF_ENABLE_SECURITY
-
-#define UDF_HANDLE_EAS
-
-#define UDF_HDD_SUPPORT
+// WCACHE was disabled due to errors in it.
+// Test case: Running 'git clone https://github.com/reactos/reactos' under ReactOS results in an error.
+//#define UDF_USE_WCACHE
 
 #define UDF_ALLOW_FRAG_AD
 
@@ -52,7 +50,10 @@
     #define UDF_DEFAULT_DIR_PACK_THRESHOLD (16)
 #endif // UDF_LIMIT_DIR_SIZE
 
-#define UDF_DEFAULT_READAHEAD_GRAN 0x10000
+// Read ahead amount used for normal data files
+
+#define READ_AHEAD_GRANULARITY           (0x10000)
+
 #define UDF_DEFAULT_SPARSE_THRESHOLD (256*PACKETSIZE_UDF)
 
 #define ALLOW_SPARSE
@@ -82,8 +83,6 @@
 #define UDF_FE_ALLOCATION_CHARGE
 #endif //UDF_DELAYED_CLOSE
 
-#define UDF_ALLOW_RENAME_MOVE
-
 #define UDF_ALLOW_HARD_LINKS
 
 #ifdef UDF_ALLOW_HARD_LINKS
@@ -95,30 +94,37 @@
 #define UDF_DEFAULT_BM_FLUSH_TIMEOUT 16         // seconds
 #define UDF_DEFAULT_TREE_FLUSH_TIMEOUT 5        // seconds
 
-#define UDF_DEFAULT_FSP_THREAD_PER_CPU  (4)
-#define UDF_FSP_THREAD_PER_CPU (Vcb->ThreadsPerCpu)
-#define FSP_PER_DEVICE_THRESHOLD (UDFGlobalData.CPU_Count*UDF_FSP_THREAD_PER_CPU)
-
 /************* END OF OPTIONS **************/
 
-// some constant definitions
-#define UDF_PANIC_IDENTIFIER        (0x86427531)
-
 // Common include files - should be in the include dir of the MS supplied IFS Kit
-#ifndef _CONSOLE
-extern "C" {
-#include "ntifs.h"
-#include "ntifs_ex.h"
-}
-#endif //_CONSOLE
 
+#pragma warning(disable : 4996)
+#pragma warning(disable : 4995)
+#include <ntifs.h>
+#include <ntddscsi.h>
+#include <scsi.h>
+#include <ntddcdrm.h>
+#include <ntddcdvd.h>
+#include "ntdddisk.h"
 #include <pseh/pseh2.h>
 
-#include "Include/check_env.h"
+#include "nodetype.h"
+
+//  Udfs file id is a large integer.
+
+typedef LARGE_INTEGER               FILE_ID;
+typedef FILE_ID                     *PFILE_ID;
+
+#ifdef __REACTOS__
+// Downgrade unsupported NT6.2+ features.
+#undef MdlMappingNoExecute
+#define MdlMappingNoExecute 0
+#define NonPagedPoolNx NonPagedPool
+#endif
 
 #define PEXTENDED_IO_STACK_LOCATION  PIO_STACK_LOCATION
 
-#define NDEBUG
+// #define NDEBUG
 #ifndef NDEBUG
 #define UDF_DBG
 #endif
@@ -126,80 +132,60 @@ extern "C" {
 #define VALIDATE_STRUCTURES
 // the following include files should be in the inc sub-dir associated with this driver
 
-#define OS_SUCCESS(a)     NT_SUCCESS(a)
-#define OSSTATUS          NTSTATUS
-
-#ifndef _CONSOLE
-#include "ntdddisk.h"
-#include <devioctl.h>
-#include "Include/CrossNt/CrossNt.h"
-#endif //_CONSOLE
-
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
-//#include "ecma_167.h"
-//#include "osta_misc.h"
 #include "wcache.h"
-#include "CDRW/cdrw_usr.h"
 
 #include "Include/regtools.h"
-
-#ifdef _CONSOLE
-#include "udf_info/udf_rel.h"
-#include "Include/udf_common.h"
-#else
 #include "struct.h"
-#endif //_CONSOLE
 
 // global variables - minimize these
-extern UDFData              UDFGlobalData;
+extern UDFData              UdfData;
 
-#ifndef _CONSOLE
 #include "env_spec.h"
-#include "dldetect.h"
 #include "udf_dbg.h"
-#else
-#include "Include/env_spec_w32.h"
-#endif //_CONSOLE
 
-#include "sys_spec.h"
+#include "Include/Sys_spec_lib.h"
 
 #include "udf_info/udf_info.h"
 
-#ifndef _CONSOLE
 #include "protos.h"
-#endif //_CONSOLE
 
 #include "Include/phys_lib.h"
 #include "errmsg.h"
-//#include "Include/tools.h"
-#include "udfpubl.h"
-//#include "ntifs.h"
 #include "mem.h"
 
-extern CCHAR   DefLetter[];
+#define Add2Ptr(PTR,INC,CAST) ((CAST)((PUCHAR)(PTR) + (INC)))
 
 // try-finally simulation
 #define try_return(S)   { S; goto try_exit; }
 #define try_return1(S)  { S; goto try_exit1; }
 #define try_return2(S)  { S; goto try_exit2; }
 
-// some global (helpful) macros
-#define UDFSetFlag(Flag, Value) ((Flag) |= (Value))
-#define UDFClearFlag(Flag, Value)   ((Flag) &= ~(Value))
+//  Encapsulate safe pool freeing
 
-#define PtrOffset(BASE,OFFSET) ((ULONG)((ULONG)(OFFSET) - (ULONG)(BASE)))
+inline
+VOID
+UDFFreePool(
+    _Inout_ _At_(*Pool, __drv_freesMem(Mem) _Post_null_) PVOID *Pool
+    )
+{
+    if (*Pool != NULL) {
+
+        ExFreePool(*Pool);
+        *Pool = NULL;
+    }
+}
+
+// some global (helpful) macros
 
 #define UDFQuadAlign(Value)         ((((uint32)(Value)) + 7) & 0xfffffff8)
 
-// to perform a bug-check (panic), the following macro is used
-#define UDFPanic(arg1, arg2, arg3)                  \
-    (KeBugCheckEx(UDF_PANIC_IDENTIFIER, UDF_BUG_CHECK_ID | __LINE__, (uint32)(arg1), (uint32)(arg2), (uint32)(arg3)))
 // small check for illegal open mode (desired access) if volume is
 // read only (on standard CD-ROM device or another like this)
 #define UdfIllegalFcbAccess(Vcb,DesiredAccess) ((   \
-    (Vcb->VCBFlags & UDF_VCB_FLAGS_VOLUME_READ_ONLY) && \
+    (Vcb->VcbState & VCB_STATE_VOLUME_READ_ONLY) && \
      (FlagOn( (DesiredAccess),                       \
             FILE_WRITE_DATA         |   \
             FILE_ADD_FILE           |   \
@@ -226,10 +212,15 @@ extern CCHAR   DefLetter[];
 #endif
 #define UDFPrintErr(Args) KdPrint(Args)
 
+#define UDFAcquireDeviceShared(IrpContext, Vcb, ResourceThreadId) \
+    ((void)0) /* No operation - CD/DVD write modes not currently supported */
+
+#define UDFReleaseDevice(IrpContext, Vcb, ResourceThreadId) \
+    ((void)0) /* No operation - CD/DVD write modes not currently supported */
+
 //
 #if !defined(UDF_DBG) && !defined(PRINT_ALWAYS)
 
-#ifndef _CONSOLE
 #define UDFAcquireResourceExclusive(Resource,CanWait)  \
     (ExAcquireResourceExclusiveLite((Resource),(CanWait)))
 #define UDFAcquireResourceShared(Resource,CanWait) \
@@ -255,16 +246,12 @@ extern CCHAR   DefLetter[];
 #define UDFInterlockedExchangeAdd(addr,i) \
     (InterlockedExchangeAdd((addr),(i)))
 
-#endif //_CONSOLE
-
 #define UDF_CHECK_PAGING_IO_RESOURCE(NTReqFCB)
 #define UDF_CHECK_EXVCB_RESOURCE(Vcb)
 #define UDF_CHECK_BITMAP_RESOURCE(Vcb)
 
-
 #else //UDF_DBG
 
-#ifndef _CONSOLE
 #define UDFAcquireResourceExclusive(Resource,CanWait)  \
     (UDFDebugAcquireResourceExclusiveLite((Resource),(CanWait),UDF_BUG_CHECK_ID,__LINE__))
 
@@ -292,31 +279,29 @@ extern CCHAR   DefLetter[];
 #define UDFInterlockedExchangeAdd(addr,i) \
     (UDFDebugInterlockedExchangeAdd((addr),(i), UDF_BUG_CHECK_ID,__LINE__))
 
-#endif //_CONSOLE
-
-#define UDF_CHECK_PAGING_IO_RESOURCE(NTReqFCB) \
-    ASSERT(!ExIsResourceAcquiredExclusiveLite(&(NTReqFCB->PagingIoResource))); \
-    ASSERT(!ExIsResourceAcquiredSharedLite(&(NTReqFCB->PagingIoResource)));
+#define UDF_CHECK_PAGING_IO_RESOURCE(Fcb) \
+    ASSERT(!ExIsResourceAcquiredExclusiveLite(&Fcb->FcbNonpaged->FcbPagingIoResource)); \
+    ASSERT(!ExIsResourceAcquiredSharedLite(&Fcb->FcbNonpaged->FcbPagingIoResource));
 
 #define UDF_CHECK_EXVCB_RESOURCE(Vcb) \
-    ASSERT( ExIsResourceAcquiredExclusiveLite(&(Vcb->VCBResource)) );
+    ASSERT( ExIsResourceAcquiredExclusiveLite(&(Vcb->VcbResource)) );
 
 #define UDF_CHECK_BITMAP_RESOURCE(Vcb)
 /* \
-    ASSERT( (ExIsResourceAcquiredExclusiveLite(&(Vcb->VCBResource)) ||  \
-             ExIsResourceAcquiredSharedLite(&(Vcb->VCBResource))) ); \
+    ASSERT( (ExIsResourceAcquiredExclusiveLite(&(Vcb->VcbResource)) ||  \
+             ExIsResourceAcquiredSharedLite(&(Vcb->VcbResource))) ); \
     ASSERT(ExIsResourceAcquiredExclusiveLite(&(Vcb->BitMapResource1))); \
 */
 #endif //UDF_DBG
 
 #define UDFRaiseStatus(IC,S) {                              \
-    (IC)->SavedExceptionCode = (S);                         \
+    (IC)->ExceptionStatus = (S);                            \
     ExRaiseStatus( (S) );                                   \
 }
 
 #define UDFNormalizeAndRaiseStatus(IC,S) {                                          \
-    (IC)->SavedExceptionCode = FsRtlNormalizeNtstatus((S),STATUS_UNEXPECTED_IO_ERROR); \
-    ExRaiseStatus( (IC)->SavedExceptionCode );                                         \
+    (IC)->ExceptionStatus = FsRtlNormalizeNtstatus((S),STATUS_UNEXPECTED_IO_ERROR); \
+    ExRaiseStatus( (IC)->ExceptionStatus );                                         \
 }
 
 #define UDFIsRawDevice(RC) (           \
@@ -370,14 +355,132 @@ extern CCHAR   DefLetter[];
 #define UDF_FILE_PROTECT                                (0x00000300)
 //#define UDF_FILE_PROTECT_                                (0x0000030x)
 
+#define         UDF_PART_DAMAGED_RW                 (0x00)
+#define         UDF_PART_DAMAGED_RO                 (0x01)
+#define         UDF_PART_DAMAGED_NO                 (0x02)
+
+#define         UDF_FS_NAME_CD              L"\\UdfCd"
+#define         UDF_FS_NAME_HDD             L"\\UdfHdd"
+
+#define         UDF_ROOTDIR_NAME            L"\\"
+
 #define SystemAllocatePool(hernya,size) ExAllocatePoolWithTag(hernya, size, 'Snwd')
 #define SystemFreePool(addr) ExFreePool((PVOID)(addr))
 
 //Device names
 
 #include "Include/udf_reg.h"
+#include <mountmgr.h>
 
-#include <ddk/mountmgr.h>
+#if DBG
+
+#define ASSERT_STRUCT(S,T)                  NT_ASSERT( SafeNodeType( S ) == (T) )
+#define ASSERT_OPTIONAL_STRUCT(S,T)         NT_ASSERT( ((S) == NULL) ||  (SafeNodeType( S ) == (T)) )
+
+#define ASSERT_VCB(V)                       ASSERT_STRUCT( (V), UDF_NODE_TYPE_VCB )
+#define ASSERT_OPTIONAL_VCB(V)              ASSERT_OPTIONAL_STRUCT( (V), UDF_NODE_TYPE_VCB )
+
+#define ASSERT_FCB(F)                                           \
+    NT_ASSERT( (SafeNodeType( F ) == UDF_NODE_TYPE_FCB ) ||     \
+            (SafeNodeType( F ) == UDF_NODE_TYPE_INDEX ) ||      \
+            (SafeNodeType( F ) == UDF_NODE_TYPE_DATA ) )
+
+#define ASSERT_OPTIONAL_FCB(F)                                  \
+    NT_ASSERT( ((F) == NULL) ||                                 \
+            (SafeNodeType( F ) == UDF_NODE_TYPE_FCB ) ||        \
+            (SafeNodeType( F ) == UDF_NODE_TYPE_INDEX ) ||      \
+            (SafeNodeType( F ) == UDF_NODE_TYPE_DATA ) )
+
+#define ASSERT_FCB_NONPAGED(FN)             ASSERT_STRUCT( (FN), CDFS_NTC_FCB_NONPAGED )
+#define ASSERT_OPTIONAL_FCB_NONPAGED(FN)    ASSERT_OPTIONAL_STRUCT( (FN), CDFS_NTC_FCB_NONPAGED )
+
+#define ASSERT_CCB(C)                       ASSERT_STRUCT( (C), UDF_NODE_TYPE_CCB )
+#define ASSERT_OPTIONAL_CCB(C)              ASSERT_OPTIONAL_STRUCT( (C), UDF_NODE_TYPE_CCB )
+
+#define ASSERT_IRP_CONTEXT(IC)              ASSERT_STRUCT( (IC), UDF_NODE_TYPE_IRP_CONTEXT )
+#define ASSERT_OPTIONAL_IRP_CONTEXT(IC)     ASSERT_OPTIONAL_STRUCT( (IC), UDF_NODE_TYPE_IRP_CONTEXT )
+
+#define ASSERT_IRP(I)                       ASSERT_STRUCT( (I), IO_TYPE_IRP )
+#define ASSERT_OPTIONAL_IRP(I)              ASSERT_OPTIONAL_STRUCT( (I), IO_TYPE_IRP )
+
+#define ASSERT_FILE_OBJECT(FO)              ASSERT_STRUCT( (FO), IO_TYPE_FILE )
+#define ASSERT_OPTIONAL_FILE_OBJECT(FO)     ASSERT_OPTIONAL_STRUCT( (FO), IO_TYPE_FILE )
+
+#define ASSERT_EXCLUSIVE_RESOURCE(R)        NT_ASSERT( ExIsResourceAcquiredExclusiveLite( R ))
+
+#define ASSERT_SHARED_RESOURCE(R)           NT_ASSERT( ExIsResourceAcquiredSharedLite( R ))
+
+#define ASSERT_RESOURCE_NOT_MINE(R)         NT_ASSERT( !ExIsResourceAcquiredSharedLite( R ))
+
+#define ASSERT_EXCLUSIVE_CDDATA             NT_ASSERT( ExIsResourceAcquiredExclusiveLite( &UdfData.GlobalDataResource ))
+#define ASSERT_EXCLUSIVE_VCB(V)             NT_ASSERT( ExIsResourceAcquiredExclusiveLite( &(V)->VcbResource ))
+#define ASSERT_SHARED_VCB(V)                NT_ASSERT( ExIsResourceAcquiredSharedLite( &(V)->VcbResource ))
+
+#define ASSERT_EXCLUSIVE_FCB(F)             NT_ASSERT( ExIsResourceAcquiredExclusiveLite( &(F)->FcbNonpaged->FcbResource ))
+#define ASSERT_SHARED_FCB(F)                NT_ASSERT( ExIsResourceAcquiredSharedLite( &(F)->FcbNonpaged->FcbResource ))
+
+#define ASSERT_EXCLUSIVE_FILE(F)            NT_ASSERT( ExIsResourceAcquiredExclusiveLite( (F)->Resource ))
+#define ASSERT_SHARED_FILE(F)               NT_ASSERT( ExIsResourceAcquiredSharedLite( (F)->Resource ))
+
+#define ASSERT_LOCKED_VCB(V)                NT_ASSERT( (V)->VcbLockThread == PsGetCurrentThread() )
+#define ASSERT_NOT_LOCKED_VCB(V)            NT_ASSERT( (V)->VcbLockThread != PsGetCurrentThread() )
+
+#define ASSERT_LOCKED_FCB(F)                NT_ASSERT( !FlagOn( (F)->FcbState, FCB_STATE_IN_FCB_TABLE) || ((F)->FcbLockThread == PsGetCurrentThread()))
+#define ASSERT_NOT_LOCKED_FCB(F)            NT_ASSERT( (F)->FcbLockThread != PsGetCurrentThread() )
+
+#else
+
+#define ASSERT_STRUCT(S,T)              { NOTHING; }
+#define ASSERT_OPTIONAL_STRUCT(S,T)     { NOTHING; }
+#define ASSERT_VCB(V)                   { NOTHING; }
+#define ASSERT_OPTIONAL_VCB(V)          { NOTHING; }
+#define ASSERT_FCB(F)                   { NOTHING; }
+#define ASSERT_OPTIONAL_FCB(F)          { NOTHING; }
+#define ASSERT_FCB_NONPAGED(FN)         { NOTHING; }
+#define ASSERT_OPTIONAL_FCB(FN)         { NOTHING; }
+#define ASSERT_CCB(C)                   { NOTHING; }
+#define ASSERT_OPTIONAL_CCB(C)          { NOTHING; }
+#define ASSERT_IRP_CONTEXT(IC)          { NOTHING; }
+#define ASSERT_OPTIONAL_IRP_CONTEXT(IC) { NOTHING; }
+#define ASSERT_IRP(I)                   { NOTHING; }
+#define ASSERT_OPTIONAL_IRP(I)          { NOTHING; }
+#define ASSERT_FILE_OBJECT(FO)          { NOTHING; }
+#define ASSERT_OPTIONAL_FILE_OBJECT(FO) { NOTHING; }
+#define ASSERT_EXCLUSIVE_RESOURCE(R)    { NOTHING; }
+#define ASSERT_SHARED_RESOURCE(R)       { NOTHING; }
+#define ASSERT_RESOURCE_NOT_MINE(R)     { NOTHING; }
+#define ASSERT_EXCLUSIVE_CDDATA         { NOTHING; }
+#define ASSERT_EXCLUSIVE_VCB(V)         { NOTHING; }
+#define ASSERT_SHARED_VCB(V)            { NOTHING; }
+#define ASSERT_EXCLUSIVE_FCB(F)         { NOTHING; }
+#define ASSERT_SHARED_FCB(F)            { NOTHING; }
+#define ASSERT_EXCLUSIVE_FILE(F)        { NOTHING; }
+#define ASSERT_SHARED_FILE(F)           { NOTHING; }
+#define ASSERT_LOCKED_VCB(V)            { NOTHING; }
+#define ASSERT_NOT_LOCKED_VCB(V)        { NOTHING; }
+#define ASSERT_LOCKED_FCB(F)            { NOTHING; }
+#define ASSERT_NOT_LOCKED_FCB(F)        { NOTHING; }
+
+#endif
+
+#define IS_ALIGNED_POWER_OF_2(Value) \
+    ((Value) != 0 && ((Value) & ((Value) - 1)) == 0)
+
+#define MAX_SECTOR_SIZE          0x1000
+
+#define FID_DIR_MASK  0x80000000            // high order bit means directory.
+
+inline
+FILE_ID
+UdfGetFidFromLbAddr(lb_addr lbAddr)
+{
+    FILE_ID FileId;
+
+    FileId.LowPart = lbAddr.logicalBlockNum;
+    FileId.HighPart = lbAddr.partitionReferenceNum;
+
+    return FileId;
+}
 
 #endif  // _UDF_UDF_H_
 

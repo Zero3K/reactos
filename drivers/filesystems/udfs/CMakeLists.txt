@@ -18,7 +18,6 @@ list(APPEND SOURCE
     env_spec.cpp
     fastio.cpp
     fileinfo.cpp
-    filter.cpp
     flush.cpp
     fscntrl.cpp
     lockctrl.cpp
@@ -37,12 +36,16 @@ list(APPEND SOURCE
     volinfo.cpp
     wcache.cpp
     write.cpp
+    strucsup.cpp
+    filobsup.cpp
     udffs.h)
 
 add_library(udfs MODULE ${SOURCE} udffs.rc)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     target_compile_options(udfs PRIVATE -Wno-unused-but-set-variable)
+    target_compile_options(udfs PRIVATE -Wno-invalid-offsetof)
+    target_compile_options(udfs PRIVATE -Wno-error -fpermissive)
 endif()
 
 if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
