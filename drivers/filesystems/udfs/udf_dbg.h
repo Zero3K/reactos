@@ -164,8 +164,29 @@ VOID DebugFreePool(PVOID addr);
 
 #ifdef PROTECTED_MEM_RTL
 
-#ifdef __cplusplus
-// Use lambdas for C++ compilation to avoid SEH naming conflicts
+#if defined(__MINGW32__) || defined(__MINGW64__)
+// MinGW-specific solution: avoid SEH entirely and use simpler approach
+__forceinline void DbgMoveMemoryImpl(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY {
+        RtlMoveMemory(d, s, l);
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
+        BrutePoint();
+    } _SEH2_END;
+}
+
+__forceinline void DbgCopyMemoryImpl(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY {
+        RtlCopyMemory(d, s, l);
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
+        BrutePoint();
+    } _SEH2_END;
+}
+
+#define DbgMoveMemory(d, s, l) DbgMoveMemoryImpl((d), (s), (l))
+#define DbgCopyMemory(d, s, l) DbgCopyMemoryImpl((d), (s), (l))
+
+#elif defined(__cplusplus)
+// Use lambdas for other C++ compilers to avoid SEH naming conflicts
 #define DbgMoveMemory(d, s, l) \
     [&]() { \
         _SEH2_TRY { \
