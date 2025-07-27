@@ -42,6 +42,10 @@
 // Test case: Running 'git clone https://github.com/reactos/reactos' under ReactOS results in an error.
 //#define UDF_USE_WCACHE
 
+// Use System Cache to back WCache operations for improved performance
+// Compatible with Windows Server 2003/ReactOS and up
+#define UDF_USE_SYSTEM_CACHE
+
 #define UDF_ALLOW_FRAG_AD
 
 #ifndef UDF_LIMIT_DIR_SIZE

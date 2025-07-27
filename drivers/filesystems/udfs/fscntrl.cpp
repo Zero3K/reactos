@@ -734,6 +734,17 @@ UDFCleanupVCB(
         BrutePoint();
     } _SEH2_END;
 
+#ifdef UDF_USE_SYSTEM_CACHE
+    // Clean up the stream file object for System Cache
+    if (Vcb->PtrStreamFileObject) {
+        if (Vcb->PtrStreamFileObject->PrivateCacheMap) {
+            CcUninitializeCacheMap(Vcb->PtrStreamFileObject, NULL, NULL);
+        }
+        ObDereferenceObject(Vcb->PtrStreamFileObject);
+        Vcb->PtrStreamFileObject = NULL;
+    }
+#endif // UDF_USE_SYSTEM_CACHE
+
     MyFreeMemoryAndPointer(Vcb->Partitions);
     MyFreeMemoryAndPointer(Vcb->LVid);
     MyFreeMemoryAndPointer(Vcb->Vat);

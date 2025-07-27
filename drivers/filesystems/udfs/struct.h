@@ -410,9 +410,11 @@ struct VCB {
     // Pointer to a stream file object created for the volume information
     // to be more easily read from secondary storage (with the support of
     // the NT Cache Manager).
-/*    PFILE_OBJECT                        PtrStreamFileObject;
+#ifdef UDF_USE_SYSTEM_CACHE
+    PFILE_OBJECT                        PtrStreamFileObject;
     // Required to use the Cache Manager.
-*/
+    SECTION_OBJECT_POINTERS             SectionObject;
+#endif // UDF_USE_SYSTEM_CACHE
     // Volume lock file object - used in Lock/Unlock routines
     PFILE_OBJECT                        VolumeLockFileObject;
     DEVICE_TYPE                         FsDeviceType;

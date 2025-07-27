@@ -937,16 +937,18 @@ UDFInitializeVCB(
     Vcb->WCacheFramesToKeepFree = UdfData.WCacheFramesToKeepFree;
 
     // Create a stream file object for this volume.
-    //Vcb->PtrStreamFileObject = IoCreateStreamFileObject(NULL,
-    //                                            Vcb->Vpb->RealDevice);
-    //ASSERT(Vcb->PtrStreamFileObject);
+#ifdef UDF_USE_SYSTEM_CACHE
+    Vcb->PtrStreamFileObject = IoCreateStreamFileObject(NULL,
+                                                Vcb->Vpb->RealDevice);
+    ASSERT(Vcb->PtrStreamFileObject);
 
     // Initialize some important fields in the newly created file object.
-    //Vcb->PtrStreamFileObject->FsContext = (PVOID)Vcb;
-    //Vcb->PtrStreamFileObject->FsContext2 = NULL;
-    //Vcb->PtrStreamFileObject->SectionObjectPointer = &(Vcb->SectionObject);
+    Vcb->PtrStreamFileObject->FsContext = (PVOID)Vcb;
+    Vcb->PtrStreamFileObject->FsContext2 = NULL;
+    Vcb->PtrStreamFileObject->SectionObjectPointer = &(Vcb->SectionObject);
 
-    //Vcb->PtrStreamFileObject->Vpb = PtrVPB;
+    Vcb->PtrStreamFileObject->Vpb = PtrVPB;
+#endif // UDF_USE_SYSTEM_CACHE
 
     // Link this chap onto the global linked list of all VCB structures.
     // We consider that GlobalDataResource was acquired in past
@@ -954,9 +956,11 @@ UDFInitializeVCB(
     InsertTailList(&(UdfData.VcbQueue), &(Vcb->NextVCB));
 
     // Initialize caching for the stream file object.
-    //CcInitializeCacheMap(Vcb->PtrStreamFileObject, (PCC_FILE_SIZES)(&(Vcb->AllocationSize)),
-    //                            TRUE,       // We will use pinned access.
-    //                            &(UDFGlobalData.CacheMgrCallBacks), Vcb);
+#ifdef UDF_USE_SYSTEM_CACHE
+    CcInitializeCacheMap(Vcb->PtrStreamFileObject, (PCC_FILE_SIZES)(&(Vcb->AllocationSize)),
+                                TRUE,       // We will use pinned access.
+                                &(UdfData.CacheMgrCallBacks), Vcb);
+#endif // UDF_USE_SYSTEM_CACHE
 
     UDFReleaseResource(&(UdfData.GlobalDataResource));
 

@@ -1548,9 +1548,38 @@ UDFReadSectors(
     OUT PSIZE_T ReadBytes
     )
 {
+#ifdef UDF_USE_SYSTEM_CACHE
+    // Try System Cache first if available and conditions are met
+    if (Vcb->PtrStreamFileObject && 
+        Vcb->PtrStreamFileObject->PrivateCacheMap &&
+        !Direct &&
+        (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
+        
+        LARGE_INTEGER ByteOffset;
+        ULONG Length = BCount * Vcb->BlockSize;
+        PVOID CachedBuffer = NULL;
+        PBCB Bcb = NULL;
+        NTSTATUS Status;
+
+        // Calculate byte offset from LBA
+        ByteOffset.QuadPart = ((uint64)Lba) << Vcb->BlockSizeBits;
+        
+        // Use CcMapData for efficient System Cache access
+        if (CcMapData(Vcb->PtrStreamFileObject, &ByteOffset, Length, TRUE, &Bcb, &CachedBuffer)) {
+            RtlCopyMemory(Buffer, CachedBuffer, Length);
+            CcUnpinData(Bcb);
+            *ReadBytes = Length;
+            return STATUS_SUCCESS;
+        }
+    }
+#endif // UDF_USE_SYSTEM_CACHE
+
+    // Fall back to WCache if available
     if (Vcb->FastCache.ReadProc && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
         return WCacheReadBlocks__(IrpContext, &Vcb->FastCache, Vcb, Buffer, Lba, BCount, ReadBytes, Direct);
     }
+    
+    // Fall back to direct I/O
     return UDFTRead(IrpContext, Vcb, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
 } // end UDFReadSectors()
 
@@ -1694,6 +1723,40 @@ UDFWriteSectors(
             Vcb->LastLBA = Lba+BCount-1;
     }
 #endif //_BROWSE_UDF_
+
+#ifdef UDF_USE_SYSTEM_CACHE
+    // Try System Cache first if available and conditions are met
+    if (Vcb->PtrStreamFileObject && 
+        Vcb->PtrStreamFileObject->PrivateCacheMap &&
+        !Direct &&
+        (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
+        
+        LARGE_INTEGER ByteOffset;
+        ULONG Length = BCount * Vcb->BlockSize;
+        PVOID CachedBuffer = NULL;
+        PBCB Bcb = NULL;
+
+        // Calculate byte offset from LBA
+        ByteOffset.QuadPart = ((uint64)Lba) << Vcb->BlockSizeBits;
+        
+        // Use CcPinMappedData for efficient System Cache write access
+        if (CcPinMappedData(Vcb->PtrStreamFileObject, &ByteOffset, Length, TRUE, &Bcb)) {
+            // Get the cached buffer and copy our data to it
+            CachedBuffer = CcGetVirtualAddress(Bcb, ByteOffset, &ByteOffset, &Length);
+            if (CachedBuffer && Length >= BCount * Vcb->BlockSize) {
+                RtlCopyMemory(CachedBuffer, Buffer, BCount * Vcb->BlockSize);
+                CcSetDirtyPinnedData(Bcb, NULL);
+                CcUnpinData(Bcb);
+                *WrittenBytes = BCount * Vcb->BlockSize;
+#ifdef _BROWSE_UDF_
+                UDFClrZeroBits(Vcb->ZSBM_Bitmap, Lba, BCount);
+#endif //_BROWSE_UDF_
+                return STATUS_SUCCESS;
+            }
+            CcUnpinData(Bcb);
+        }
+    }
+#endif // UDF_USE_SYSTEM_CACHE
 
     if (Vcb->FastCache.WriteProc && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
         status = WCacheWriteBlocks__(IrpContext, &Vcb->FastCache, Vcb, Buffer, Lba, BCount, WrittenBytes, Direct);
