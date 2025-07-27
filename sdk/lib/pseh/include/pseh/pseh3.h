@@ -16,11 +16,6 @@
 extern "C" {
 #endif
 
-/* Helper macros for creating unique identifiers */
-#define _SEH3$_CONCAT(x, y) x ## y
-#define _SEH3$_MAKE_UNIQUE(x, y) _SEH3$_CONCAT(x, y)
-#define _SEH3$_UNIQUE_NAME(base) _SEH3$_MAKE_UNIQUE(base, __LINE__)
-
 /* CLANG must safe non-volatiles, because it uses a return-twice algorithm */
 #if defined(__clang__) && !defined(_SEH3$_FRAME_ALL_NONVOLATILES)
 #define _SEH3$_FRAME_ALL_NONVOLATILES 1
@@ -394,11 +389,11 @@ _Pragma("GCC diagnostic pop") \
         _SEH3$_DECLARE_FILTER_FUNC(_SEH3$_FilterFunction); \
 \
         /* Create a static data table that contains the jump target and filter function */ \
-        static const SEH3$_SCOPE_TABLE _SEH3$_UNIQUE_NAME(_SEH3$_ScopeTable) = { &&_SEH3$_l_HandlerTarget, _SEH3$_FILTER(&_SEH3$_FilterFunction, (__VA_ARGS__)), _SEH3$_TryLevel, _SEH3$_HANDLER_TYPE }; \
+        static const SEH3$_SCOPE_TABLE _SEH3$_ScopeTable = { &&_SEH3$_l_HandlerTarget, _SEH3$_FILTER(&_SEH3$_FilterFunction, (__VA_ARGS__)), _SEH3$_TryLevel, _SEH3$_HANDLER_TYPE }; \
 \
         /* Register the registration record. */ \
-        if (_SEH3$_TryLevel == 1) _SEH3$_RegisterFrame_(&_SEH3$_TrylevelFrame, &_SEH3$_UNIQUE_NAME(_SEH3$_ScopeTable)); \
-        else _SEH3$_RegisterTryLevel_(&_SEH3$_TrylevelFrame, &_SEH3$_UNIQUE_NAME(_SEH3$_ScopeTable)); \
+        if (_SEH3$_TryLevel == 1) _SEH3$_RegisterFrame_(&_SEH3$_TrylevelFrame, &_SEH3$_ScopeTable); \
+        else _SEH3$_RegisterTryLevel_(&_SEH3$_TrylevelFrame, &_SEH3$_ScopeTable); \
 \
         /* Define an empty inline finally function */ \
         _SEH3$_DEFINE_DUMMY_FINALLY(_SEH3$_FinallyFunction) \
@@ -441,11 +436,11 @@ _Pragma("GCC diagnostic pop") \
         _SEH3$_DECLARE_FILTER_FUNC(_SEH3$_FinallyFunction); \
 \
         /* Create a static data table that contains the finally function */ \
-        static const SEH3$_SCOPE_TABLE _SEH3$_UNIQUE_NAME(_SEH3$_ScopeTable) = { 0, _SEH3$_FINALLY(&_SEH3$_FinallyFunction), _SEH3$_TryLevel, _SEH3$_HANDLER_TYPE }; \
+        static const SEH3$_SCOPE_TABLE _SEH3$_ScopeTable = { 0, _SEH3$_FINALLY(&_SEH3$_FinallyFunction), _SEH3$_TryLevel, _SEH3$_HANDLER_TYPE }; \
 \
         /* Register the registration record. */ \
-        if (_SEH3$_TryLevel == 1) _SEH3$_RegisterFrame_(&_SEH3$_TrylevelFrame, &_SEH3$_UNIQUE_NAME(_SEH3$_ScopeTable)); \
-        else _SEH3$_RegisterTryLevel_(&_SEH3$_TrylevelFrame, &_SEH3$_UNIQUE_NAME(_SEH3$_ScopeTable)); \
+        if (_SEH3$_TryLevel == 1) _SEH3$_RegisterFrame_(&_SEH3$_TrylevelFrame, &_SEH3$_ScopeTable); \
+        else _SEH3$_RegisterTryLevel_(&_SEH3$_TrylevelFrame, &_SEH3$_ScopeTable); \
         _SEH3$_TrylevelFrame.ExceptionPointers = (PSEH3$_EXCEPTION_POINTERS)1; \
 \
         goto _SEH3$_l_DoTry; \
