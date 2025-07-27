@@ -7,69 +7,35 @@
 /*********************************************************************/
 
 // Fix for MinGW compilation error with multiple DbgCopyMemory usages
-// Use predefined unique functions with automatic selection
+// Use GCC statement expressions with unique static variables per usage
 #ifdef UDF_DBG
 #ifdef PROTECTED_MEM_RTL
 
-// Pre-define unique functions for all DbgCopyMemory usage points
-__inline VOID _DbgCopyMemory_1163(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
-__inline VOID _DbgCopyMemory_1620(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
-__inline VOID _DbgCopyMemory_1628(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
-__inline VOID _DbgCopyMemory_1996(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
-__inline VOID _DbgCopyMemory_2025(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
-__inline VOID _DbgCopyMemory_2192(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
-__inline VOID _DbgCopyMemory_2305(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
-__inline VOID _DbgCopyMemory_2481(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
-__inline VOID _DbgCopyMemory_2501(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
-__inline VOID _DbgCopyMemory_2564(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
-__inline VOID _DbgCopyMemory_3331(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
-__inline VOID _DbgCopyMemory_3468(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
+// Generate unique static variables to create separate SEH scopes
+#define _WCACHE_CONCAT2(x, y) x ## y
+#define _WCACHE_CONCAT(x, y) _WCACHE_CONCAT2(x, y)
+#define _WCACHE_UNIQUE(x) _WCACHE_CONCAT(x, __COUNTER__)
 
-// Pre-define unique functions for all DbgMoveMemory usage points
-__inline VOID _DbgMoveMemory_638(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlMoveMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
-__inline VOID _DbgMoveMemory_680(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlMoveMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
-__inline VOID _DbgMoveMemory_715(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlMoveMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
-__inline VOID _DbgMoveMemory_743(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY { RtlMoveMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
-}
+// Simple macros using GCC statement expressions with unique scopes
+#define DbgCopyMemory(d, s, l) \
+({ \
+    static int _WCACHE_UNIQUE(_scope_) __attribute__((unused)) = 0; \
+    _SEH2_TRY { \
+        RtlCopyMemory(d, s, l); \
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { \
+        BrutePoint(); \
+    } _SEH2_END; \
+})
 
-// Helper macros for selecting the right function based on line number
-#define _WCACHE_CONCAT(x, y) x ## y
-#define _WCACHE_MAKE_UNIQUE(x, y) _WCACHE_CONCAT(x, y)
-
-// Simple macros that automatically use the correct function for each line
-#define DbgCopyMemory(d, s, l) _WCACHE_MAKE_UNIQUE(_DbgCopyMemory_, __LINE__)(d, s, l)
-#define DbgMoveMemory(d, s, l) _WCACHE_MAKE_UNIQUE(_DbgMoveMemory_, __LINE__)(d, s, l)
+#define DbgMoveMemory(d, s, l) \
+({ \
+    static int _WCACHE_UNIQUE(_scope_) __attribute__((unused)) = 0; \
+    _SEH2_TRY { \
+        RtlMoveMemory(d, s, l); \
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { \
+        BrutePoint(); \
+    } _SEH2_END; \
+})
 
 #endif //PROTECTED_MEM_RTL
 #endif //UDF_DBG
