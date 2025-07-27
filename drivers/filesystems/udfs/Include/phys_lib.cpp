@@ -1559,18 +1559,28 @@ UDFReadSectors(
         ULONG Length = BCount * Vcb->BlockSize;
         PVOID CachedBuffer = NULL;
         PBCB Bcb = NULL;
-        NTSTATUS Status;
 
         // Calculate byte offset from LBA
         ByteOffset.QuadPart = ((uint64)Lba) << Vcb->BlockSizeBits;
         
+        UDFPrint(("UDF: Using System Cache for read: LBA=%x, Count=%x\n", Lba, BCount));
+        
         // Use CcMapData for efficient System Cache access
-        if (CcMapData(Vcb->PtrStreamFileObject, &ByteOffset, Length, TRUE, &Bcb, &CachedBuffer)) {
-            RtlCopyMemory(Buffer, CachedBuffer, Length);
-            CcUnpinData(Bcb);
-            *ReadBytes = Length;
-            return STATUS_SUCCESS;
-        }
+        _SEH2_TRY {
+            if (CcMapData(Vcb->PtrStreamFileObject, &ByteOffset, Length, TRUE, &Bcb, &CachedBuffer)) {
+                RtlCopyMemory(Buffer, CachedBuffer, Length);
+                CcUnpinData(Bcb);
+                *ReadBytes = Length;
+                UDFPrint(("UDF: System Cache read successful\n"));
+                return STATUS_SUCCESS;
+            }
+        } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+            // If System Cache access fails, fall through to other methods
+            UDFPrint(("UDF: System Cache read failed, falling back\n"));
+            if (Bcb) {
+                CcUnpinData(Bcb);
+            }
+        } _SEH2_END;
     }
 #endif // UDF_USE_SYSTEM_CACHE
 
@@ -1739,22 +1749,31 @@ UDFWriteSectors(
         // Calculate byte offset from LBA
         ByteOffset.QuadPart = ((uint64)Lba) << Vcb->BlockSizeBits;
         
+        UDFPrint(("UDF: Using System Cache for write: LBA=%x, Count=%x\n", Lba, BCount));
+        
         // Use CcPinMappedData for efficient System Cache write access
-        if (CcPinMappedData(Vcb->PtrStreamFileObject, &ByteOffset, Length, TRUE, &Bcb)) {
-            // Get the cached buffer and copy our data to it
-            CachedBuffer = CcGetVirtualAddress(Bcb, ByteOffset, &ByteOffset, &Length);
-            if (CachedBuffer && Length >= BCount * Vcb->BlockSize) {
-                RtlCopyMemory(CachedBuffer, Buffer, BCount * Vcb->BlockSize);
-                CcSetDirtyPinnedData(Bcb, NULL);
-                CcUnpinData(Bcb);
-                *WrittenBytes = BCount * Vcb->BlockSize;
+        _SEH2_TRY {
+            if (CcPinMappedData(Vcb->PtrStreamFileObject, &ByteOffset, Length, TRUE, &Bcb)) {
+                // Get the cached buffer and copy our data to it
+                CachedBuffer = CcGetVirtualAddress(Bcb, ByteOffset, &ByteOffset, &Length);
+                if (CachedBuffer && Length >= BCount * Vcb->BlockSize) {
+                    RtlCopyMemory(CachedBuffer, Buffer, BCount * Vcb->BlockSize);
+                    CcSetDirtyPinnedData(Bcb, NULL);
+                    CcUnpinData(Bcb);
+                    *WrittenBytes = BCount * Vcb->BlockSize;
 #ifdef _BROWSE_UDF_
-                UDFClrZeroBits(Vcb->ZSBM_Bitmap, Lba, BCount);
+                    UDFClrZeroBits(Vcb->ZSBM_Bitmap, Lba, BCount);
 #endif //_BROWSE_UDF_
-                return STATUS_SUCCESS;
+                    return STATUS_SUCCESS;
+                }
+                CcUnpinData(Bcb);
             }
-            CcUnpinData(Bcb);
-        }
+        } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+            // If System Cache access fails, fall through to other methods
+            if (Bcb) {
+                CcUnpinData(Bcb);
+            }
+        } _SEH2_END;
     }
 #endif // UDF_USE_SYSTEM_CACHE
 

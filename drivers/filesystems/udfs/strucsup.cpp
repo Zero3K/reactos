@@ -927,7 +927,12 @@ UDFInitializeVCB(
     // wish to guess at the initial amount of information we would like to
     // read from the disk until we have really determined that this a valid
     // logical volume (on disk) that we wish to mount.
-    // Vcb->FileSize = Vcb->AllocationSize = ??
+#ifdef UDF_USE_SYSTEM_CACHE
+    // Initialize volume stream file size for System Cache
+    // We'll set it to the full volume size which will be updated during mount
+    Vcb->AllocationSize.QuadPart = 0;  // Will be set properly during mount
+    Vcb->FileSize.QuadPart = 0;        // Will be set properly during mount  
+#endif // UDF_USE_SYSTEM_CACHE
 
     Vcb->VcbReference = 1;
 
@@ -957,9 +962,11 @@ UDFInitializeVCB(
 
     // Initialize caching for the stream file object.
 #ifdef UDF_USE_SYSTEM_CACHE
+    UDFPrint(("UDF: Initializing System Cache for volume stream\n"));
     CcInitializeCacheMap(Vcb->PtrStreamFileObject, (PCC_FILE_SIZES)(&(Vcb->AllocationSize)),
                                 TRUE,       // We will use pinned access.
                                 &(UdfData.CacheMgrCallBacks), Vcb);
+    UDFPrint(("UDF: System Cache initialized successfully\n"));
 #endif // UDF_USE_SYSTEM_CACHE
 
     UDFReleaseResource(&(UdfData.GlobalDataResource));
@@ -1350,6 +1357,25 @@ UDFCompleteMount(
 
         Vcb->VolumeDasdFcb->Header.AllocationSize.QuadPart =
         Vcb->VolumeDasdFcb->Header.ValidDataLength.QuadPart = Vcb->VolumeDasdFcb->Header.FileSize.QuadPart;
+
+#ifdef UDF_USE_SYSTEM_CACHE
+        // Update System Cache file sizes for the volume stream file object
+        if (Vcb->PtrStreamFileObject && Vcb->PtrStreamFileObject->PrivateCacheMap) {
+            CC_FILE_SIZES FileSizes;
+            
+            // Use LastPossibleLBA for the full volume size
+            Vcb->AllocationSize.QuadPart = ((uint64)Vcb->LastPossibleLBA + 1) << Vcb->BlockSizeBits;
+            Vcb->FileSize.QuadPart = Vcb->AllocationSize.QuadPart;
+            
+            // Set the file sizes for System Cache
+            FileSizes.AllocationSize = Vcb->AllocationSize;
+            FileSizes.FileSize = Vcb->FileSize;
+            FileSizes.ValidDataLength = Vcb->FileSize;
+            
+            // Update the cache map with new sizes
+            CcSetFileSizes(Vcb->PtrStreamFileObject, &FileSizes);
+        }
+#endif // UDF_USE_SYSTEM_CACHE
 
         // Point to the resource.
 

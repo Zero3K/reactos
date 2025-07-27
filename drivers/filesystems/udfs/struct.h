@@ -414,6 +414,9 @@ struct VCB {
     PFILE_OBJECT                        PtrStreamFileObject;
     // Required to use the Cache Manager.
     SECTION_OBJECT_POINTERS             SectionObject;
+    // Volume file size information for System Cache
+    LARGE_INTEGER                       AllocationSize;
+    LARGE_INTEGER                       FileSize;
 #endif // UDF_USE_SYSTEM_CACHE
     // Volume lock file object - used in Lock/Unlock routines
     PFILE_OBJECT                        VolumeLockFileObject;
