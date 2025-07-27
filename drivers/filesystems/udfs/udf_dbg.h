@@ -182,8 +182,18 @@ void DbgCopyMemoryImpl(PVOID d, PVOID s, ULONG l) {
     } _SEH2_END;
 }
 
+ULONG DbgCompareMemoryImpl(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY {
+        return RtlCompareMemory(d, s, l);
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
+        BrutePoint();
+    } _SEH2_END;
+    return -1;
+}
+
 #define DbgMoveMemory(d, s, l) DbgMoveMemoryImpl((d), (s), (l))
 #define DbgCopyMemory(d, s, l) DbgCopyMemoryImpl((d), (s), (l))
+#define DbgCompareMemory(d, s, l) DbgCompareMemoryImpl((d), (s), (l))
 
 #elif defined(__cplusplus)
 // Use lambdas for other C++ compilers to avoid SEH naming conflicts
@@ -204,6 +214,16 @@ void DbgCopyMemoryImpl(PVOID d, PVOID s, ULONG l) {
             BrutePoint(); \
         } _SEH2_END; \
     }()
+
+#define DbgCompareMemory(d, s, l) \
+    [&]() -> ULONG { \
+        _SEH2_TRY { \
+            return RtlCompareMemory(d, s, l); \
+        } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { \
+            BrutePoint(); \
+        } _SEH2_END; \
+        return -1; \
+    }()
 #else
 // C compilation - use original macro definitions
 #define DbgMoveMemory(d, s, l)   \
@@ -219,18 +239,18 @@ _SEH2_TRY {                               \
 } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {  \
     BrutePoint();                         \
 } _SEH2_END;
-#endif
 
-__inline
-ULONG
-DbgCompareMemory(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        return RtlCompareMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-    return -1;
-}
+#define DbgCompareMemory(d, s, l) \
+({ \
+    ULONG _result = -1; \
+    _SEH2_TRY { \
+        _result = RtlCompareMemory(d, s, l); \
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { \
+        BrutePoint(); \
+    } _SEH2_END; \
+    _result; \
+})
+#endif
 
 #else //PROTECTED_MEM_RTL
 
