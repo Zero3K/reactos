@@ -7,137 +7,69 @@
 /*********************************************************************/
 
 // Fix for MinGW compilation error with multiple DbgCopyMemory usages
-// Create unique inline functions to avoid SEH static variable naming conflicts
+// Use predefined unique functions with automatic selection
 #ifdef UDF_DBG
 #ifdef PROTECTED_MEM_RTL
 
-__inline VOID DbgCopyMemory1(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlCopyMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
+// Pre-define unique functions for all DbgCopyMemory usage points
+__inline VOID _DbgCopyMemory_1163(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
+}
+__inline VOID _DbgCopyMemory_1620(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
+}
+__inline VOID _DbgCopyMemory_1628(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
+}
+__inline VOID _DbgCopyMemory_1996(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
+}
+__inline VOID _DbgCopyMemory_2025(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
+}
+__inline VOID _DbgCopyMemory_2192(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
+}
+__inline VOID _DbgCopyMemory_2305(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
+}
+__inline VOID _DbgCopyMemory_2481(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
+}
+__inline VOID _DbgCopyMemory_2501(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
+}
+__inline VOID _DbgCopyMemory_2564(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
+}
+__inline VOID _DbgCopyMemory_3331(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
+}
+__inline VOID _DbgCopyMemory_3468(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlCopyMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
 }
 
-__inline VOID DbgCopyMemory2(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlCopyMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
+// Pre-define unique functions for all DbgMoveMemory usage points
+__inline VOID _DbgMoveMemory_638(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlMoveMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
+}
+__inline VOID _DbgMoveMemory_680(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlMoveMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
+}
+__inline VOID _DbgMoveMemory_715(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlMoveMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
+}
+__inline VOID _DbgMoveMemory_743(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY { RtlMoveMemory(d, s, l); } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { BrutePoint(); } _SEH2_END;
 }
 
-__inline VOID DbgCopyMemory3(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlCopyMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
+// Helper macros for selecting the right function based on line number
+#define _WCACHE_CONCAT(x, y) x ## y
+#define _WCACHE_MAKE_UNIQUE(x, y) _WCACHE_CONCAT(x, y)
 
-__inline VOID DbgCopyMemory4(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlCopyMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
-
-__inline VOID DbgCopyMemory5(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlCopyMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
-
-__inline VOID DbgCopyMemory6(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlCopyMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
-
-__inline VOID DbgCopyMemory7(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlCopyMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
-
-__inline VOID DbgCopyMemory8(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlCopyMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
-
-__inline VOID DbgCopyMemory9(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlCopyMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
-
-__inline VOID DbgCopyMemory10(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlCopyMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
-
-__inline VOID DbgCopyMemory11(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlCopyMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
-
-__inline VOID DbgCopyMemory12(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlCopyMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
-
-__inline VOID DbgMoveMemory1(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlMoveMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
-
-__inline VOID DbgMoveMemory2(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlMoveMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
-
-__inline VOID DbgMoveMemory3(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlMoveMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
-
-__inline VOID DbgMoveMemory4(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlMoveMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
+// Simple macros that automatically use the correct function for each line
+#define DbgCopyMemory(d, s, l) _WCACHE_MAKE_UNIQUE(_DbgCopyMemory_, __LINE__)(d, s, l)
+#define DbgMoveMemory(d, s, l) _WCACHE_MAKE_UNIQUE(_DbgMoveMemory_, __LINE__)(d, s, l)
 
 #endif //PROTECTED_MEM_RTL
 #endif //UDF_DBG
@@ -703,7 +635,7 @@ WCacheInsertRangeToList(
 #ifdef WCACHE_BOUND_CHECKS
             MyCheckArray(List, lastPos+offs+(*BlockCount)-lastPos-1);
 #endif //WCACHE_BOUND_CHECKS
-            DbgMoveMemory1(&(List[lastPos+offs]), &(List[lastPos]), ((*BlockCount) - lastPos) * sizeof(ULONG));
+            DbgMoveMemory(&(List[lastPos+offs]), &(List[lastPos]), ((*BlockCount) - lastPos) * sizeof(ULONG));
         }
         lastPos += offs;
         for(; firstPos<lastPos; firstPos++) {
@@ -745,7 +677,7 @@ WCacheInsertItemToList(
         MyCheckArray(List, firstPos+1+(*BlockCount)-firstPos-1);
 #endif //WCACHE_BOUND_CHECKS
 //        DbgMoveMemory(&(List[firstPos+1]), &(List[firstPos]), ((*BlockCount) - firstPos)*sizeof(ULONG));
-        DbgMoveMemory2(&(List[firstPos+1]), &(List[firstPos]), ((*BlockCount) - firstPos) * sizeof(ULONG));
+        DbgMoveMemory(&(List[firstPos+1]), &(List[firstPos]), ((*BlockCount) - firstPos) * sizeof(ULONG));
     }
 #ifdef WCACHE_BOUND_CHECKS
     MyCheckArray(List, firstPos);
@@ -780,7 +712,7 @@ WCacheRemoveRangeFromList(
 
     if (offs) {
         // move list tail
-        DbgMoveMemory3(&(List[lastPos-offs]), &(List[lastPos]), ((*BlockCount) - lastPos) * sizeof(ULONG));
+        DbgMoveMemory(&(List[lastPos-offs]), &(List[lastPos]), ((*BlockCount) - lastPos) * sizeof(ULONG));
         (*BlockCount) -= offs;
     }
 } // end WCacheRemoveRangeFromList()
@@ -808,7 +740,7 @@ WCacheRemoveItemFromList(
         return;
 
     // move list tail
-    DbgMoveMemory4(&(List[lastPos-1]), &(List[lastPos]), ((*BlockCount) - lastPos) * sizeof(ULONG));
+    DbgMoveMemory(&(List[lastPos-1]), &(List[lastPos]), ((*BlockCount) - lastPos) * sizeof(ULONG));
     (*BlockCount) --;
 } // end WCacheRemoveItemFromList()
 
@@ -1228,7 +1160,7 @@ WCacheUpdatePacket(
                             BS) != BS);
             }
             if (mod) {
-                DbgCopyMemory1(tmp_buff2 + (i << BSh),
+                DbgCopyMemory(tmp_buff2 + (i << BSh),
                             (PVOID)WCacheSectorAddr(block_array, Lba0),
                             BS);
             }
@@ -1685,7 +1617,7 @@ WCacheFlushBlocksRAM(
             PrevLba++;
             if (!WCacheGetModFlag(block_array, PrevLba - firstLba))
                 break;
-            DbgCopyMemory2(tmp_buff + (n << BSh),
+            DbgCopyMemory(tmp_buff + (n << BSh),
                         (PVOID)WCacheSectorAddr(block_array, PrevLba - firstLba),
                         BS);
             n++;
@@ -1693,7 +1625,7 @@ WCacheFlushBlocksRAM(
                 break;
         }
         if (n > 1) {
-            DbgCopyMemory3(tmp_buff,
+            DbgCopyMemory(tmp_buff,
                         (PVOID)WCacheSectorAddr(block_array, Lba - firstLba),
                         BS);
         } else {
@@ -2061,7 +1993,7 @@ WCachePreReadPacket__(
                 }
                 sector_added = TRUE;
                 if (!zero) {
-                    DbgCopyMemory4(addr, Cache->tmp_buff_r+(n<<BSh), BS);
+                    DbgCopyMemory(addr, Cache->tmp_buff_r+(n<<BSh), BS);
                 } else {
                     RtlZeroMemory(addr, BS);
                 }
@@ -2090,7 +2022,7 @@ WCachePreReadPacket__(
                     }
                 }
                 if (!zero && NT_SUCCESS(status)) {
-                    DbgCopyMemory5(addr, Cache->tmp_buff_r, BS);
+                    DbgCopyMemory(addr, Cache->tmp_buff_r, BS);
                 } else
                 if (Cache->RememberBB) {
                     RtlZeroMemory(addr, BS);
@@ -2257,7 +2189,7 @@ WCacheReadBlocks__(
                 status = STATUS_DEVICE_DATA_ERROR;
                 goto EO_WCache_R;
             }
-            DbgCopyMemory6(Buffer, addr, BS);
+            DbgCopyMemory(Buffer, addr, BS);
             Buffer += BS;
             *ReadBytes += BS;
             i++;
@@ -2370,7 +2302,7 @@ store_read_data_1:
                     status = STATUS_INSUFFICIENT_RESOURCES;
                     goto EO_WCache_R;
                 }
-                DbgCopyMemory7(block_array[i].Sector, Buffer, BS);
+                DbgCopyMemory(block_array[i].Sector, Buffer, BS);
                 Cache->FrameList[frame].BlockCount++;
                 i++;
                 Buffer += BS;
@@ -2546,7 +2478,7 @@ WCacheWriteBlocks__(
                 status = STATUS_DEVICE_DATA_ERROR;
                 goto EO_WCache_W;
             }
-            DbgCopyMemory8(addr, Buffer, BS);
+            DbgCopyMemory(addr, Buffer, BS);
             WCacheSetModFlag(block_array, i);
             Buffer += BS;
             *WrittenBytes += BS;
@@ -2566,7 +2498,7 @@ WCacheWriteBlocks__(
                 goto EO_WCache_W;
             }
 //            UDFPrint(("addr:%x:Buffer:%x:BS:%x:BCount:%x\n",block_array[i].Sector, Buffer, BS, BCount));
-            DbgCopyMemory9(block_array[i].Sector, Buffer, BS);
+            DbgCopyMemory(block_array[i].Sector, Buffer, BS);
             WCacheSetModFlag(block_array, i);
             i++;
             Buffer += BS;
@@ -2629,7 +2561,7 @@ WCacheWriteBlocks__(
                 goto EO_WCache_W;
             }
 //            UDFPrint(("addr:%x:Buffer:%x:BS:%x:BCount:%x\n",block_array[i].Sector, Buffer, BS, BCount));
-            DbgCopyMemory10(block_array[i].Sector, Buffer, BS);
+            DbgCopyMemory(block_array[i].Sector, Buffer, BS);
             WCacheSetModFlag(block_array, i);
             i++;
             Buffer += BS;
@@ -3396,7 +3328,7 @@ WCCL_retry_1:
                 frame = Lba >> Cache->BlocksPerFrameSh;
                 firstLba = frame << Cache->BlocksPerFrameSh;
                 block_array = Cache->FrameList[frame].Frame;
-                DbgCopyMemory11(tmp_buff + (i << BSh),
+                DbgCopyMemory(tmp_buff + (i << BSh),
                               (PVOID)WCacheSectorAddr(block_array, Lba-firstLba),
                               BS);
                 reloc_tab[i] = Lba;
@@ -3533,7 +3465,7 @@ WCachePurgeAllR(
         mod = WCacheGetModFlag(block_array, Lba - firstLba);
         // pack/reloc/write
         if (mod) {
-            DbgCopyMemory12(tmp_buff + (RelocCount << BSh),
+            DbgCopyMemory(tmp_buff + (RelocCount << BSh),
                           (PVOID)WCacheSectorAddr(block_array, Lba-firstLba),
                           BS);
             reloc_tab[RelocCount] = Lba;
