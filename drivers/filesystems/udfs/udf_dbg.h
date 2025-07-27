@@ -165,8 +165,8 @@ VOID DebugFreePool(PVOID addr);
 #ifdef PROTECTED_MEM_RTL
 
 #if defined(__MINGW32__) || defined(__MINGW64__)
-// MinGW-specific solution: avoid SEH entirely and use simpler approach
-__forceinline void DbgMoveMemoryImpl(PVOID d, PVOID s, ULONG l) {
+// MinGW-specific solution: use regular functions (not inline) to avoid SEH conflicts
+void DbgMoveMemoryImpl(PVOID d, PVOID s, ULONG l) {
     _SEH2_TRY {
         RtlMoveMemory(d, s, l);
     } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
@@ -174,7 +174,7 @@ __forceinline void DbgMoveMemoryImpl(PVOID d, PVOID s, ULONG l) {
     } _SEH2_END;
 }
 
-__forceinline void DbgCopyMemoryImpl(PVOID d, PVOID s, ULONG l) {
+void DbgCopyMemoryImpl(PVOID d, PVOID s, ULONG l) {
     _SEH2_TRY {
         RtlCopyMemory(d, s, l);
     } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
