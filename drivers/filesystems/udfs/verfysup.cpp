@@ -217,6 +217,12 @@ UDFVerifyVcb(
         Status = STATUS_WRONG_VOLUME;
         break;
 
+    case VcbMountInProgress:
+    case VcbMounted:
+
+        // Volume is in good state, do nothing
+        break;
+
     case VcbInvalid:
     case VcbDismountInProgress:
 

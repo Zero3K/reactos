@@ -242,7 +242,7 @@ Return Value:
     //  Now do the type specific structures.
     //
 
-    switch (Fcb->Header.NodeTypeCode) {
+    switch (Fcb->NodeIdentifier.NodeTypeCode) {
 
     case UDF_NODE_TYPE_FCB:
 
