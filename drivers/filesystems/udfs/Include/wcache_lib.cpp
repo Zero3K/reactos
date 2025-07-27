@@ -6,40 +6,6 @@
 
 /*********************************************************************/
 
-// Fix for MinGW compilation error with multiple DbgCopyMemory usages
-// Use GCC statement expressions with unique static variables per usage
-#ifdef UDF_DBG
-#ifdef PROTECTED_MEM_RTL
-
-// Generate unique static variables to create separate SEH scopes
-#define _WCACHE_CONCAT2(x, y) x ## y
-#define _WCACHE_CONCAT(x, y) _WCACHE_CONCAT2(x, y)
-#define _WCACHE_UNIQUE(x) _WCACHE_CONCAT(x, __COUNTER__)
-
-// Simple macros using GCC statement expressions with unique scopes
-#define DbgCopyMemory(d, s, l) \
-({ \
-    static int _WCACHE_UNIQUE(_scope_) __attribute__((unused)) = 0; \
-    _SEH2_TRY { \
-        RtlCopyMemory(d, s, l); \
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { \
-        BrutePoint(); \
-    } _SEH2_END; \
-})
-
-#define DbgMoveMemory(d, s, l) \
-({ \
-    static int _WCACHE_UNIQUE(_scope_) __attribute__((unused)) = 0; \
-    _SEH2_TRY { \
-        RtlMoveMemory(d, s, l); \
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { \
-        BrutePoint(); \
-    } _SEH2_END; \
-})
-
-#endif //PROTECTED_MEM_RTL
-#endif //UDF_DBG
-
 NTSTATUS
 __fastcall
 WCacheCheckLimits(
