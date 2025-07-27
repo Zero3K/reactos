@@ -164,30 +164,41 @@ VOID DebugFreePool(PVOID addr);
 
 #ifdef PROTECTED_MEM_RTL
 
-// Generate unique variable names to avoid SEH naming conflicts
-#define _UDF_CONCAT2(x, y) x ## y
-#define _UDF_CONCAT(x, y) _UDF_CONCAT2(x, y)
-#define _UDF_UNIQUE(x) _UDF_CONCAT(x, __COUNTER__)
+#ifdef __cplusplus
+// Use lambdas for C++ compilation to avoid SEH naming conflicts
+#define DbgMoveMemory(d, s, l) \
+    [&]() { \
+        _SEH2_TRY { \
+            RtlMoveMemory(d, s, l); \
+        } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { \
+            BrutePoint(); \
+        } _SEH2_END; \
+    }()
 
+#define DbgCopyMemory(d, s, l) \
+    [&]() { \
+        _SEH2_TRY { \
+            RtlCopyMemory(d, s, l); \
+        } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) { \
+            BrutePoint(); \
+        } _SEH2_END; \
+    }()
+#else
+// C compilation - use original macro definitions
 #define DbgMoveMemory(d, s, l)   \
-({ \
-    static int _UDF_UNIQUE(_scope_) __attribute__((unused)) = 0; \
-    _SEH2_TRY {                               \
-        RtlMoveMemory(d, s, l);               \
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {  \
-        BrutePoint();                         \
-    } _SEH2_END; \
-})
+_SEH2_TRY {                               \
+    RtlMoveMemory(d, s, l);               \
+} _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {  \
+    BrutePoint();                         \
+} _SEH2_END;
 
 #define DbgCopyMemory(d, s, l)   \
-({ \
-    static int _UDF_UNIQUE(_scope_) __attribute__((unused)) = 0; \
-    _SEH2_TRY {                               \
-        RtlCopyMemory(d, s, l);               \
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {  \
-        BrutePoint();                         \
-    } _SEH2_END; \
-})
+_SEH2_TRY {                               \
+    RtlCopyMemory(d, s, l);               \
+} _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {  \
+    BrutePoint();                         \
+} _SEH2_END;
+#endif
 
 __inline
 ULONG
