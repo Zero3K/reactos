@@ -165,31 +165,10 @@ VOID DebugFreePool(PVOID addr);
 #ifdef PROTECTED_MEM_RTL
 
 #if defined(__MINGW32__) || defined(__MINGW64__)
-// MinGW-specific solution: use regular functions (not inline) to avoid SEH conflicts
-void DbgMoveMemoryImpl(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlMoveMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
-
-void DbgCopyMemoryImpl(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        RtlCopyMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-}
-
-ULONG DbgCompareMemoryImpl(PVOID d, PVOID s, ULONG l) {
-    _SEH2_TRY {
-        return RtlCompareMemory(d, s, l);
-    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-    } _SEH2_END;
-    return -1;
-}
+// MinGW-specific solution: use separate functions defined in udf_dbg.cpp to avoid SEH conflicts
+void DbgMoveMemoryImpl(PVOID d, PVOID s, ULONG l);
+void DbgCopyMemoryImpl(PVOID d, PVOID s, ULONG l);
+ULONG DbgCompareMemoryImpl(PVOID d, PVOID s, ULONG l);
 
 #define DbgMoveMemory(d, s, l) DbgMoveMemoryImpl((d), (s), (l))
 #define DbgCopyMemory(d, s, l) DbgCopyMemoryImpl((d), (s), (l))

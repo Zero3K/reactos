@@ -435,4 +435,33 @@ DbgWaitForSingleObject_(
     }
     return RC;
 }
+
+#if (defined(__MINGW32__) || defined(__MINGW64__)) && defined(PROTECTED_MEM_RTL)
+// MinGW-specific functions to avoid SEH naming conflicts
+void DbgMoveMemoryImpl(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY {
+        RtlMoveMemory(d, s, l);
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
+        BrutePoint();
+    } _SEH2_END;
+}
+
+void DbgCopyMemoryImpl(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY {
+        RtlCopyMemory(d, s, l);
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
+        BrutePoint();
+    } _SEH2_END;
+}
+
+ULONG DbgCompareMemoryImpl(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY {
+        return RtlCompareMemory(d, s, l);
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
+        BrutePoint();
+    } _SEH2_END;
+    return -1;
+}
+#endif
+
 #endif // UDF_DBG
