@@ -107,6 +107,38 @@ __inline VOID DbgCopyMemory12(PVOID d, PVOID s, ULONG l) {
     } _SEH2_END;
 }
 
+__inline VOID DbgMoveMemory1(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY {
+        RtlMoveMemory(d, s, l);
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
+        BrutePoint();
+    } _SEH2_END;
+}
+
+__inline VOID DbgMoveMemory2(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY {
+        RtlMoveMemory(d, s, l);
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
+        BrutePoint();
+    } _SEH2_END;
+}
+
+__inline VOID DbgMoveMemory3(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY {
+        RtlMoveMemory(d, s, l);
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
+        BrutePoint();
+    } _SEH2_END;
+}
+
+__inline VOID DbgMoveMemory4(PVOID d, PVOID s, ULONG l) {
+    _SEH2_TRY {
+        RtlMoveMemory(d, s, l);
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
+        BrutePoint();
+    } _SEH2_END;
+}
+
 #endif //PROTECTED_MEM_RTL
 #endif //UDF_DBG
 
@@ -671,7 +703,7 @@ WCacheInsertRangeToList(
 #ifdef WCACHE_BOUND_CHECKS
             MyCheckArray(List, lastPos+offs+(*BlockCount)-lastPos-1);
 #endif //WCACHE_BOUND_CHECKS
-            DbgMoveMemory(&(List[lastPos+offs]), &(List[lastPos]), ((*BlockCount) - lastPos) * sizeof(ULONG));
+            DbgMoveMemory1(&(List[lastPos+offs]), &(List[lastPos]), ((*BlockCount) - lastPos) * sizeof(ULONG));
         }
         lastPos += offs;
         for(; firstPos<lastPos; firstPos++) {
@@ -713,7 +745,7 @@ WCacheInsertItemToList(
         MyCheckArray(List, firstPos+1+(*BlockCount)-firstPos-1);
 #endif //WCACHE_BOUND_CHECKS
 //        DbgMoveMemory(&(List[firstPos+1]), &(List[firstPos]), ((*BlockCount) - firstPos)*sizeof(ULONG));
-        DbgMoveMemory(&(List[firstPos+1]), &(List[firstPos]), ((*BlockCount) - firstPos) * sizeof(ULONG));
+        DbgMoveMemory2(&(List[firstPos+1]), &(List[firstPos]), ((*BlockCount) - firstPos) * sizeof(ULONG));
     }
 #ifdef WCACHE_BOUND_CHECKS
     MyCheckArray(List, firstPos);
@@ -748,7 +780,7 @@ WCacheRemoveRangeFromList(
 
     if (offs) {
         // move list tail
-        DbgMoveMemory(&(List[lastPos-offs]), &(List[lastPos]), ((*BlockCount) - lastPos) * sizeof(ULONG));
+        DbgMoveMemory3(&(List[lastPos-offs]), &(List[lastPos]), ((*BlockCount) - lastPos) * sizeof(ULONG));
         (*BlockCount) -= offs;
     }
 } // end WCacheRemoveRangeFromList()
@@ -776,7 +808,7 @@ WCacheRemoveItemFromList(
         return;
 
     // move list tail
-    DbgMoveMemory(&(List[lastPos-1]), &(List[lastPos]), ((*BlockCount) - lastPos) * sizeof(ULONG));
+    DbgMoveMemory4(&(List[lastPos-1]), &(List[lastPos]), ((*BlockCount) - lastPos) * sizeof(ULONG));
     (*BlockCount) --;
 } // end WCacheRemoveItemFromList()
 
