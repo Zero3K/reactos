@@ -1280,7 +1280,7 @@ UDFGetBlockSize(
                 ASSERT(FALSE);
             }
         } else {
-            ASSERT(FALSE);
+            try_return(RC);
         }
         Vcb->LastPossibleLBA = Vcb->LastLBA;
     }
