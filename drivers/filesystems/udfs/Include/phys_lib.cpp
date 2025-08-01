@@ -1277,10 +1277,15 @@ UDFGetBlockSize(
                                     DiskGeometryEx.Geometry.TracksPerCylinder *
                                     DiskGeometryEx.Geometry.SectorsPerTrack - 1);
             if (Vcb->LastLBA == 0x7fffffff) {
-                ASSERT(FALSE);
+                // Geometry calculation resulted in problematic value, use reasonable maximum
+                UDFPrint(("UDFGetBlockSize: Geometry calculation overflow, capping LastLBA\n"));
+                Vcb->LastLBA = 0x10000000; // Cap to ~512GB worth of sectors
             }
         } else {
-            ASSERT(FALSE);
+            // IOCTL_CDROM_GET_DRIVE_GEOMETRY_EX failed for non-disk device
+            // This can happen with large VHD files. Use a reasonable default.
+            UDFPrint(("UDFGetBlockSize: IOCTL_CDROM_GET_DRIVE_GEOMETRY_EX failed, using default LastLBA\n"));
+            Vcb->LastLBA = 0x10000000; // Default to ~512GB worth of sectors at 2048 bytes/sector
         }
         Vcb->LastPossibleLBA = Vcb->LastLBA;
     }
