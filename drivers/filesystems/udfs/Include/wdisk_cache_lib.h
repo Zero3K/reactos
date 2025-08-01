@@ -80,8 +80,8 @@ typedef struct _WDISK_ERROR_CONTEXT {
     };
 } WDISK_ERROR_CONTEXT, *PWDISK_ERROR_CONTEXT;
 
-typedef NTSTATUS     (*PWC_ERROR_HANDLER) (IN PVOID Context,
-                                           IN PWDISK_ERROR_CONTEXT ErrorInfo);
+typedef NTSTATUS     (*PWDISK_ERROR_HANDLER) (IN PVOID Context,
+                                              IN PWDISK_ERROR_CONTEXT ErrorInfo);
 
 // WinDiskCache structure - lightweight cache implementation
 // This is designed to be a simplified interface for WinDiskCache from
@@ -103,7 +103,7 @@ typedef struct _WDISK_CACHE {
     PREAD_BLOCK         ReadProc;
     PCHECK_BLOCK        CheckUsedProc;
     PUPDATE_RELOC       UpdateRelocProc;
-    PWC_ERROR_HANDLER   ErrorHandlerProc;
+    PWDISK_ERROR_HANDLER   ErrorHandlerProc;
     
     // WinDiskCache specific context (placeholder for external implementation)
     PVOID               WDiskContext;
@@ -146,7 +146,7 @@ NTSTATUS WDiskCacheInit__(IN PWDISK_CACHE Cache,
                           IN PREAD_BLOCK_ASYNC ReadProcAsync,
                           IN PCHECK_BLOCK CheckUsedProc,
                           IN PUPDATE_RELOC UpdateRelocProc,
-                          IN PWC_ERROR_HANDLER ErrorHandlerProc);
+                          IN PWDISK_ERROR_HANDLER ErrorHandlerProc);
 
 // Write blocks through WinDiskCache
 NTSTATUS WDiskCacheWriteBlocks__(IN PIRP_CONTEXT IrpContext,
