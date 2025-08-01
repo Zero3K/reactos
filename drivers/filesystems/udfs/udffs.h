@@ -161,7 +161,7 @@ typedef FILE_ID                     *PFILE_ID;
 #ifdef UDF_USE_WCACHE
 #include "wcache.h"
 #elif defined(UDF_USE_WDISK_CACHE)
-#include "wdisk_cache.h"
+#include "wcache.h"  // wcache.h now contains the compatibility layer
 #endif
 
 #include "Include/regtools.h"
