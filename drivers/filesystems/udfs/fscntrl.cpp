@@ -484,7 +484,32 @@ UDFMountVolume(
                           UDFUpdateVAT,
                           UDFWCacheErrorHandler);
         if (!NT_SUCCESS(RC)) try_return(RC);
-#endif //UDF_USE_WCACHE
+#elif defined(UDF_USE_WDISK_CACHE)
+        // Initialize WinDiskCache
+        Mode = WDISK_MODE_ROM;
+        RC = WDiskCacheInit__(&(Vcb->FastCache),
+                              Vcb->WCacheMaxFrames,
+                              Vcb->WCacheMaxBlocks,
+                              Vcb->WriteBlockSize,
+                              5, Vcb->BlockSizeBits,
+                              Vcb->WCacheBlocksPerFrameSh,
+                              0/*Vcb->FirstLBA*/, Vcb->LastPossibleLBA, Mode,
+                                  0/*WDISK_CACHE_WHOLE_PACKET*/ |
+                                  (Vcb->DoNotCompareBeforeWrite ? WDISK_DO_NOT_COMPARE : 0) |
+                                  WDISK_NO_WRITE_THROUGH,
+                              Vcb->WCacheFramesToKeepFree,
+//                              UDFTWrite, UDFTRead,
+                              UDFTWriteVerify, UDFTReadVerify,
+#ifdef UDF_ASYNC_IO
+                              UDFTWriteAsync, UDFTReadAsync,
+#else  //UDF_ASYNC_IO
+                              NULL, NULL,
+#endif //UDF_ASYNC_IO
+                              UDFIsBlockAllocated,
+                              UDFUpdateVAT,
+                              UDFWCacheErrorHandler);
+        if (!NT_SUCCESS(RC)) try_return(RC);
+#endif //UDF_USE_WCACHE or UDF_USE_WDISK_CACHE
 
         RC = UDFVInit(Vcb);
         if (!NT_SUCCESS(RC)) try_return(RC);
@@ -533,7 +558,9 @@ UDFMountVolume(
             }
 #ifdef UDF_USE_WCACHE
             WCacheSetMode__(&(Vcb->FastCache), Mode);
-#endif //UDF_USE_WCACHE
+#elif defined(UDF_USE_WDISK_CACHE)
+            WDiskCacheSetMode__(&(Vcb->FastCache), Mode);
+#endif //UDF_USE_WCACHE or UDF_USE_WDISK_CACHE
 
             // Complete mount operations: create root FCB
             UDFAcquireResourceExclusive(&(Vcb->BitMapResource1),TRUE);

@@ -42,6 +42,10 @@
 // Test case: Running 'git clone https://github.com/reactos/reactos' under ReactOS results in an error.
 //#define UDF_USE_WCACHE
 
+// WinDiskCache - lightweight cache implementation using WinDiskCache from https://github.com/ogir-ok/WinDiskCache
+// This is designed to be a lighter alternative to WCache with fewer code requirements
+//#define UDF_USE_WDISK_CACHE
+
 #define UDF_ALLOW_FRAG_AD
 
 #ifndef UDF_LIMIT_DIR_SIZE
@@ -154,7 +158,11 @@ typedef FILE_ID                     *PFILE_ID;
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
+#ifdef UDF_USE_WCACHE
 #include "wcache.h"
+#elif defined(UDF_USE_WDISK_CACHE)
+#include "wdisk_cache.h"
+#endif
 
 #include "Include/regtools.h"
 #include "struct.h"
@@ -362,6 +370,7 @@ UDFFreePool(
 #define UDF_FILE_MEM                                    (0x00000201)
 #define UDF_FILE_MEMH                                   (0x00000202)
 #define UDF_FILE_WCACHE                                 (0x00000203)
+#define UDF_FILE_WDISK_CACHE                            (0x00000204)
 
 #define UDF_FILE_UDF_INFO                               (0x00000100)
 #define UDF_FILE_UDF_INFO_ALLOC                         (0x00000101)

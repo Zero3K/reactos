@@ -139,10 +139,19 @@ NTSTATUS MyCloneUnicodeString(IN PUNICODE_STRING Str1,
     ExAllocateFromZone(&(UDFGlobalData.FileInfoZoneHeader))
 */
 
+#ifdef UDF_USE_WCACHE
 #define UDFIsDataCached(Vcb,Lba,BCount) \
     ( WCacheIsInitialized__(&((Vcb)->FastCache)) &&        \
      (KeGetCurrentIrql() < DISPATCH_LEVEL) && \
       WCacheIsCached__(&((Vcb)->FastCache),Lba, BCount) )
+#elif defined(UDF_USE_WDISK_CACHE)
+#define UDFIsDataCached(Vcb,Lba,BCount) \
+    ( WDiskCacheIsInitialized__(&((Vcb)->FastCache)) &&        \
+     (KeGetCurrentIrql() < DISPATCH_LEVEL) && \
+      WDiskCacheIsCached__(&((Vcb)->FastCache),Lba, BCount) )
+#else
+#define UDFIsDataCached(Vcb,Lba,BCount) (FALSE)
+#endif
 
 BOOLEAN  UDFIsDirInfoCached(IN PVCB Vcb,
                             IN PUDF_FILE_INFO DirInfo);
