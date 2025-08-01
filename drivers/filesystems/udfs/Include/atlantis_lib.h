@@ -260,9 +260,9 @@ NTSTATUS AtlantisWriteBlocks__(IN PIRP_CONTEXT IrpContext,
                               OUT PSIZE_T WrittenBytes,
                               IN BOOLEAN CachedOnly);
 
-NTSTATUS AtlantisFlushAll__(IN PIRP_CONTEXT IrpContext,
-                           IN PATLANTIS_CACHE Cache,
-                           IN PVOID Context);
+VOID AtlantisFlushAll__(IN PIRP_CONTEXT IrpContext,
+                       IN PATLANTIS_CACHE Cache,
+                       IN PVOID Context);
 
 NTSTATUS AtlantisFlushBlocks__(IN PIRP_CONTEXT IrpContext,
                               IN PATLANTIS_CACHE Cache,
@@ -296,20 +296,20 @@ NTSTATUS AtlantisDirect__(IN PIRP_CONTEXT IrpContext,
                          OUT PCHAR* CachedBlock,
                          IN BOOLEAN CachedOnly);
 
-VOID AtlantisStartDirect__(IN PATLANTIS_CACHE Cache,
-                          IN PVOID Context,
-                          IN BOOLEAN ForWrite);
+NTSTATUS AtlantisStartDirect__(IN PATLANTIS_CACHE Cache,
+                             IN PVOID Context,
+                             IN BOOLEAN ForWrite);
 
-VOID AtlantisEODirect__(IN PATLANTIS_CACHE Cache,
-                       IN PVOID Context);
+NTSTATUS AtlantisEODirect__(IN PATLANTIS_CACHE Cache,
+                           IN PVOID Context);
 
 BOOLEAN AtlantisIsCached__(IN PATLANTIS_CACHE Cache,
                           IN lba_t Lba,
                           IN ULONG BCount);
 
-NTSTATUS AtlantisPurgeAll__(IN PIRP_CONTEXT IrpContext,
-                           IN PATLANTIS_CACHE Cache,
-                           IN PVOID Context);
+VOID AtlantisPurgeAll__(IN PIRP_CONTEXT IrpContext,
+                       IN PATLANTIS_CACHE Cache,
+                       IN PVOID Context);
 
 // Compatibility macros to map WCache calls to Atlantis calls when UDF_USE_ATLANTIS_CACHE is defined
 #ifdef UDF_USE_ATLANTIS_CACHE

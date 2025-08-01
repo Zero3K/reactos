@@ -615,7 +615,7 @@ AtlantisWriteBlocks__(
 }
 
 // Flush all cached data with complete implementation
-NTSTATUS
+VOID
 AtlantisFlushAll__(
     IN PIRP_CONTEXT IrpContext,
     IN PATLANTIS_CACHE Cache,
@@ -666,7 +666,7 @@ AtlantisFlushAll__(
     
     UDFPrint(("AtlantisFlushAll__: Flushed %u blocks\n", FlushedBlocks));
     
-    return STATUS_SUCCESS;  // Return success even if some blocks failed
+    return;  // Void function - no return value
 }
 
 // Flush specific blocks with complete implementation
@@ -953,7 +953,7 @@ AtlantisDirect__(
 }
 
 // Start direct operations
-VOID
+NTSTATUS
 AtlantisStartDirect__(
     IN PATLANTIS_CACHE Cache,
     IN PVOID Context,
@@ -967,10 +967,11 @@ AtlantisStartDirect__(
             ExAcquireResourceSharedLite(&Cache->ACacheLock, TRUE);
         }
     }
+    return STATUS_SUCCESS;
 }
 
 // End direct operations
-VOID
+NTSTATUS
 AtlantisEODirect__(
     IN PATLANTIS_CACHE Cache,
     IN PVOID Context
@@ -979,6 +980,7 @@ AtlantisEODirect__(
     if (AtlantisIsInitialized__(Cache)) {
         ExReleaseResourceLite(&Cache->ACacheLock);
     }
+    return STATUS_SUCCESS;
 }
 
 // Check if blocks are cached with complete implementation
@@ -1015,7 +1017,7 @@ AtlantisIsCached__(
 }
 
 // Purge all cache data with complete implementation
-NTSTATUS
+VOID
 AtlantisPurgeAll__(
     IN PIRP_CONTEXT IrpContext,
     IN PATLANTIS_CACHE Cache,
@@ -1058,7 +1060,7 @@ AtlantisPurgeAll__(
     
     UDFPrint(("AtlantisPurgeAll__: Purged %u blocks\n", PurgedBlocks));
     
-    return STATUS_SUCCESS;
+    return;  // Void function - no return value
 }
 
 #endif // UDF_USE_ATLANTIS_CACHE

@@ -7,6 +7,11 @@
 #ifndef __CDRW_WCACHE_LIB_H__
 #define __CDRW_WCACHE_LIB_H__
 
+// When using Atlantis cache, include only Atlantis definitions
+#ifdef UDF_USE_ATLANTIS_CACHE
+#include "atlantis_lib.h"
+#else
+
 extern "C" {
 
 #include "platform.h"
@@ -336,5 +341,7 @@ ULONG    WCacheChFlags__(IN PW_CACHE Cache,
 // complete async request (callback)
 NTSTATUS WCacheCompleteAsync__(IN PVOID WContext,
                                IN NTSTATUS Status);
+
+#endif // UDF_USE_ATLANTIS_CACHE
 
 #endif // __CDRW_WCACHE_LIB_H__
