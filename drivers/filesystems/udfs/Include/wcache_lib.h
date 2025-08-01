@@ -186,7 +186,7 @@ NTSTATUS WCacheStartDirect__(IN PW_CACHE Cache, IN PVOID Context, IN BOOLEAN For
 
 BOOLEAN WCacheIsCached__(IN PW_CACHE Cache, IN lba_t Lba, IN ULONG BCount);
 
-NTSTATUS WCacheSyncReloc__(IN PW_CACHE Cache, IN PVOID Context, IN lba_t Lba, IN ULONG BCount, IN lba_t NewLba);
+VOID WCacheSyncReloc__(IN PW_CACHE Cache, IN PVOID Context);
 NTSTATUS WCacheDiscardBlocks__(IN PW_CACHE Cache, IN PVOID Context, IN lba_t Lba, IN ULONG BCount);
 NTSTATUS WCacheCompleteAsync__(IN PW_CACHE Cache, IN PVOID Context, IN struct _W_CACHE_ASYNC* WContext);
 NTSTATUS WCacheChFlags__(IN PW_CACHE Cache, IN ULONG SetFlags, IN ULONG ClrFlags);

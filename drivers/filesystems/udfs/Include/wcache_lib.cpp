@@ -1309,13 +1309,43 @@ WCacheGetWriteBlockCount__(IN PW_CACHE Cache)
 }
 
 // Synchronize relocation
-NTSTATUS
-WCacheSyncReloc__(IN PW_CACHE Cache, IN PVOID Context, IN lba_t Lba, IN ULONG BCount, IN lba_t NewLba)
+VOID
+WCacheSyncReloc__(IN PW_CACHE Cache, IN PVOID Context)
 {
-    if (Cache->UpdateRelocProc) {
-        return Cache->UpdateRelocProc(Context, Lba, BCount, NewLba);
+    ULONG frame;
+    lba_t firstLba;
+    lba_t* List = Cache->CachedBlocksList;
+    lba_t Lba;
+    PW_CACHE_ENTRY block_array;
+    BOOLEAN mod;
+    ULONG MaxReloc = Cache->PacketSize;
+    PULONG reloc_tab = Cache->reloc_tab;
+    ULONG RelocCount = 0;
+    BOOLEAN IncompletePacket;
+
+    IncompletePacket = (Cache->WriteCount >= MaxReloc) ? FALSE : TRUE;
+    // enumerate modified blocks
+    for(ULONG i=0; IncompletePacket && (i<Cache->BlockCount); i++) {
+
+        Lba = List[i];
+        frame = Lba >> Cache->BlocksPerFrameSh;
+        firstLba = frame << Cache->BlocksPerFrameSh;
+        block_array = Cache->FrameList[frame].Frame;
+        if (!block_array) {
+            return;
+        }
+        // check if modified
+        mod = WCacheGetModFlag(block_array, Lba - firstLba);
+        // update relocation table for modified sectors
+        if (mod && (Cache->CheckUsedProc(Context, Lba) & WCACHE_BLOCK_USED)) {
+            reloc_tab[RelocCount] = Lba;
+            RelocCount++;
+            if (RelocCount >= Cache->WriteCount) {
+                Cache->UpdateRelocProc(Context, NULL, reloc_tab, RelocCount);
+                break;
+            }
+        }
     }
-    return STATUS_SUCCESS;
 }
 
 // Discard blocks from cache
