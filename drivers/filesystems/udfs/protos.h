@@ -832,6 +832,13 @@ extern NTSTATUS UDFWCacheErrorHandler(
     IN PWCACHE_ERROR_CONTEXT ErrorInfo
     );
 
+#ifdef UDF_USE_ATLANTIS_CACHE
+extern NTSTATUS UDFAtlantisErrorHandler(
+    IN PVOID Context,
+    IN PATLANTIS_ERROR_CONTEXT ErrorInfo
+    );
+#endif // UDF_USE_ATLANTIS_CACHE
+
 extern NTSTATUS NTAPI UDFFilterCallbackAcquireForCreateSection(
     IN PFS_FILTER_CALLBACK_DATA CallbackData,
     IN PVOID *CompletionContext

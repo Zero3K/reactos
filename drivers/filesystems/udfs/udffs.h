@@ -42,6 +42,10 @@
 // Test case: Running 'git clone https://github.com/reactos/reactos' under ReactOS results in an error.
 //#define UDF_USE_WCACHE
 
+// Alternative cache implementation using Atlantis library
+// Provides similar functionality to WCache but with less code complexity
+//#define UDF_USE_ATLANTIS_CACHE
+
 #define UDF_ALLOW_FRAG_AD
 
 #ifndef UDF_LIMIT_DIR_SIZE
@@ -154,7 +158,12 @@ typedef FILE_ID                     *PFILE_ID;
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
+#ifdef UDF_USE_WCACHE
 #include "wcache.h"
+#endif // UDF_USE_WCACHE
+#ifdef UDF_USE_ATLANTIS_CACHE
+#include "atlantis_cache.h"
+#endif // UDF_USE_ATLANTIS_CACHE
 
 #include "Include/regtools.h"
 #include "struct.h"

@@ -35,6 +35,7 @@ list(APPEND SOURCE
     verfysup.cpp
     volinfo.cpp
     wcache.cpp
+    atlantis_cache.cpp
     write.cpp
     strucsup.cpp
     filobsup.cpp

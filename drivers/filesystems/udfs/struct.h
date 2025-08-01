@@ -532,7 +532,12 @@ struct VCB {
     UCHAR           SyncCacheState;
 
     // W-cache
+#ifdef UDF_USE_WCACHE
     W_CACHE         FastCache;
+#endif // UDF_USE_WCACHE
+#ifdef UDF_USE_ATLANTIS_CACHE
+    ATLANTIS_CACHE  FastCache;
+#endif // UDF_USE_ATLANTIS_CACHE
     ULONG           WCacheMaxFrames;
     ULONG           WCacheMaxBlocks;
     ULONG           WCacheBlocksPerFrameSh;

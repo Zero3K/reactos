@@ -486,6 +486,33 @@ UDFMountVolume(
         if (!NT_SUCCESS(RC)) try_return(RC);
 #endif //UDF_USE_WCACHE
 
+#ifdef UDF_USE_ATLANTIS_CACHE
+        // Initialize Atlantis cache - simplified alternative to WCache
+        Mode = ATLANTIS_MODE_ROM;
+        RC = AtlantisInit__(&(Vcb->FastCache),
+                           Vcb->WCacheMaxFrames,
+                           Vcb->WCacheMaxBlocks,
+                           Vcb->WriteBlockSize,
+                           5, Vcb->BlockSizeBits,
+                           Vcb->WCacheBlocksPerFrameSh,
+                           0/*Vcb->FirstLBA*/, Vcb->LastPossibleLBA, Mode,
+                               0/*ATLANTIS_CACHE_WHOLE_PACKET*/ |
+                               (Vcb->DoNotCompareBeforeWrite ? ATLANTIS_DO_NOT_COMPARE : 0) |
+                               (Vcb->CacheChainedIo ? ATLANTIS_CHAINED_IO : 0) |
+                               ATLANTIS_MARK_BAD_BLOCKS | ATLANTIS_RO_BAD_BLOCKS,  // this will be cleared after mount
+                           Vcb->WCacheFramesToKeepFree,
+                           UDFTWriteVerify, UDFTReadVerify,
+#ifdef UDF_ASYNC_IO
+                           UDFTWriteAsync, UDFTReadAsync,
+#else  //UDF_ASYNC_IO
+                           NULL, NULL,
+#endif //UDF_ASYNC_IO
+                           UDFIsBlockAllocated,
+                           UDFUpdateVAT,
+                           UDFAtlantisErrorHandler);
+        if (!NT_SUCCESS(RC)) try_return(RC);
+#endif //UDF_USE_ATLANTIS_CACHE
+
         RC = UDFVInit(Vcb);
         if (!NT_SUCCESS(RC)) try_return(RC);
 
@@ -534,6 +561,9 @@ UDFMountVolume(
 #ifdef UDF_USE_WCACHE
             WCacheSetMode__(&(Vcb->FastCache), Mode);
 #endif //UDF_USE_WCACHE
+#ifdef UDF_USE_ATLANTIS_CACHE
+            AtlantisSetMode__(&(Vcb->FastCache), Mode);
+#endif //UDF_USE_ATLANTIS_CACHE
 
             // Complete mount operations: create root FCB
             UDFAcquireResourceExclusive(&(Vcb->BitMapResource1),TRUE);
