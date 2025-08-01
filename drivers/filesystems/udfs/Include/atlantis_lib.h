@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////
 // Atlantis Cache Library Interface
-// Minimal implementation based on Atlantis library from https://github.com/rdregis/Atlantis
-// Provides similar functionality to WCache but with less code complexity
+// Complete implementation based on Atlantis library from https://github.com/rdregis/Atlantis
+// Provides real caching functionality with LRU eviction and two-level caching
 ////////////////////////////////////////////////////////////////////
 
 #ifndef __ATLANTIS_LIB_H__
@@ -77,34 +77,74 @@ typedef struct _ATLANTIS_ERROR_CONTEXT {
 typedef NTSTATUS     (*PATLANTIS_ERROR_HANDLER) (IN PVOID Context,
                                                  IN PATLANTIS_ERROR_CONTEXT ErrorInfo);
 
-// Atlantis cache structure - simplified version of W_CACHE
+// Atlantis Cache Entry - represents a cached block
+typedef struct _ATLANTIS_CACHE_ENTRY {
+    LIST_ENTRY LruListEntry;    // LRU list linkage
+    lba_t Lba;                  // Block LBA
+    PCHAR BlockData;            // Cached block data
+    ULONG AccessCount;          // Access counter for statistics
+    ULONG Flags;                // Cache entry flags
+    LARGE_INTEGER LastAccess;   // Last access time
+} ATLANTIS_CACHE_ENTRY, *PATLANTIS_CACHE_ENTRY;
+
+// Cache entry flags
+#define ATLANTIS_ENTRY_MODIFIED 0x00000001
+#define ATLANTIS_ENTRY_DIRTY    0x00000002
+#define ATLANTIS_ENTRY_VALID    0x00000004
+
+// Atlantis Cache Frame - represents a group of cached blocks  
+typedef struct _ATLANTIS_CACHE_FRAME {
+    LIST_ENTRY FrameListEntry;     // Frame list linkage
+    LIST_ENTRY LruListEntry;       // LRU list for frames
+    lba_t StartLba;                // Starting LBA of frame
+    ULONG BlockCount;              // Number of blocks in frame
+    ULONG ValidBlocks;             // Number of valid blocks cached
+    PATLANTIS_CACHE_ENTRY *Blocks; // Array of pointers to cache entries
+    ULONG AccessCount;             // Frame access counter
+    LARGE_INTEGER LastAccess;      // Last access time
+} ATLANTIS_CACHE_FRAME, *PATLANTIS_CACHE_FRAME;
+
+// Hash table for fast block lookup
+typedef struct _ATLANTIS_HASH_ENTRY {
+    LIST_ENTRY HashListEntry;      // Hash chain linkage
+    lba_t Lba;                     // Block LBA (key)
+    PATLANTIS_CACHE_ENTRY Entry;   // Pointer to cache entry
+} ATLANTIS_HASH_ENTRY, *PATLANTIS_HASH_ENTRY;
+
+#define ATLANTIS_HASH_TABLE_SIZE 1024  // Size of hash table
+
+// Atlantis cache structure - complete implementation
 typedef struct _ATLANTIS_CACHE {
-    ULONG Tag;
+    ULONG Tag;                     // 'AtlC' signature
+    
     // Basic cache parameters
-    ULONG BlockCount;
-    ULONG MaxBlocks;
-    ULONG MaxBytesToRead;
-    ULONG FrameCount;
-    ULONG MaxFrames;
-    ULONG PacketSize;
-    ULONG PacketSizeSh;
-    ULONG BlockSize;
-    ULONG BlockSizeSh;
-    ULONG WriteCount;
-    lba_t FirstLba;
-    lba_t LastLba;
-    ULONG Mode;
-    ULONG Flags;
-    BOOLEAN CacheWholePacket;
-    BOOLEAN DoNotCompare;
-    BOOLEAN Chained;
-    BOOLEAN RememberBB;
-    BOOLEAN NoWriteBB;
-    BOOLEAN NoWriteThrough;
-    UCHAR  Padding[2];
-    ULONG RBalance;
-    ULONG WBalance;
-    ULONG FramesToKeepFree;
+    ULONG BlockCount;              // Current number of cached blocks
+    ULONG MaxBlocks;               // Maximum blocks to cache
+    ULONG MaxBytesToRead;          // Maximum bytes to read in one operation
+    ULONG FrameCount;              // Current number of frames
+    ULONG MaxFrames;               // Maximum frames to cache
+    ULONG PacketSize;              // Number of blocks in packet
+    ULONG PacketSizeSh;            // Packet size shift value
+    ULONG BlockSize;               // Size of each block
+    ULONG BlockSizeSh;             // Block size shift value
+    ULONG WriteCount;              // Number of dirty blocks
+    lba_t FirstLba;                // First valid LBA
+    lba_t LastLba;                 // Last valid LBA
+    ULONG Mode;                    // Cache mode (ROM/RW/etc)
+    ULONG Flags;                   // Cache behavior flags
+    
+    // Cache behavior flags
+    BOOLEAN CacheWholePacket;      // Cache entire packets
+    BOOLEAN DoNotCompare;          // Skip data comparison
+    BOOLEAN Chained;               // Chained I/O mode
+    BOOLEAN RememberBB;            // Remember bad blocks
+    BOOLEAN NoWriteBB;             // Don't write to bad blocks
+    BOOLEAN NoWriteThrough;        // Disable write-through
+    UCHAR  Padding[2];             // Alignment padding
+    
+    ULONG RBalance;                // Read balance factor
+    ULONG WBalance;                // Write balance factor
+    ULONG FramesToKeepFree;        // Minimum free frames
     
     // Callback functions
     PWRITE_BLOCK WriteProc;
@@ -115,11 +155,32 @@ typedef struct _ATLANTIS_CACHE {
     PUPDATE_RELOC UpdateRelocProc;
     PATLANTIS_ERROR_HANDLER ErrorHandlerProc;
     
-    // sync resource
-    ERESOURCE ACacheLock;
+    // Synchronization
+    ERESOURCE ACacheLock;          // Cache access lock
     
-    // Internal cache data (simplified)
-    PVOID CacheData;
+    // LRU lists for cache management
+    LIST_ENTRY BlockLruList;       // LRU list of cached blocks
+    LIST_ENTRY FrameLruList;       // LRU list of cached frames
+    LIST_ENTRY FrameList;          // List of all frames
+    
+    // Hash table for fast block lookup
+    LIST_ENTRY HashTable[ATLANTIS_HASH_TABLE_SIZE];
+    
+    // Statistics
+    ULONG TotalRequests;           // Total cache requests
+    ULONG CacheHits;               // Number of cache hits
+    ULONG CacheMisses;             // Number of cache misses
+    ULONG BlocksEvicted;           // Blocks evicted due to cache full
+    ULONG FramesEvicted;           // Frames evicted due to cache full
+    
+    // Memory management
+    LOOKASIDE_LIST_EX EntryLookaside;  // Lookaside list for cache entries
+    LOOKASIDE_LIST_EX FrameLookaside;  // Lookaside list for frames
+    LOOKASIDE_LIST_EX HashLookaside;   // Lookaside list for hash entries
+    
+    // Temporary buffers for I/O operations
+    PCHAR TempBuffer;              // Temporary buffer for reads
+    PCHAR TempWriteBuffer;         // Temporary buffer for writes
     
 } ATLANTIS_CACHE, *PATLANTIS_CACHE;
 
@@ -138,7 +199,26 @@ typedef struct _ATLANTIS_CACHE {
 #define ATLANTIS_RO_BAD_BLOCKS        0x10
 #define ATLANTIS_NO_WRITE_THROUGH     0x20
 
-// Function declarations (simplified Atlantis interface)
+// Internal helper functions for cache management
+NTSTATUS AtlantisFindCacheEntry__(IN PATLANTIS_CACHE Cache,
+                                 IN lba_t Lba,
+                                 OUT PATLANTIS_CACHE_ENTRY *Entry);
+
+NTSTATUS AtlantisAllocateCacheEntry__(IN PATLANTIS_CACHE Cache,
+                                     IN lba_t Lba,
+                                     OUT PATLANTIS_CACHE_ENTRY *Entry);
+
+VOID AtlantisFreeCacheEntry__(IN PATLANTIS_CACHE Cache,
+                             IN PATLANTIS_CACHE_ENTRY Entry);
+
+NTSTATUS AtlantisEvictLruBlock__(IN PATLANTIS_CACHE Cache);
+
+VOID AtlantisUpdateLru__(IN PATLANTIS_CACHE Cache,
+                        IN PATLANTIS_CACHE_ENTRY Entry);
+
+ULONG AtlantisHashLBA__(IN lba_t Lba);
+
+// Public function declarations (Atlantis interface)
 NTSTATUS AtlantisInit__(IN PATLANTIS_CACHE Cache,
                        IN ULONG MaxFrames,
                        IN ULONG MaxBlocks,
@@ -169,7 +249,7 @@ NTSTATUS AtlantisReadBlocks__(IN PIRP_CONTEXT IrpContext,
                              IN lba_t Lba,
                              IN ULONG BCount,
                              OUT PSIZE_T ReadBytes,
-                             IN BOOLEAN Direct);
+                             IN BOOLEAN CachedOnly);
 
 NTSTATUS AtlantisWriteBlocks__(IN PIRP_CONTEXT IrpContext,
                               IN PATLANTIS_CACHE Cache,

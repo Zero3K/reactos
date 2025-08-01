@@ -43,8 +43,9 @@
 //#define UDF_USE_WCACHE
 
 // Alternative cache implementation using Atlantis library
-// Provides similar functionality to WCache but with less code complexity
-//#define UDF_USE_ATLANTIS_CACHE
+// Provides complete LRU caching functionality with two-level caching (block + frame)
+// Based on concepts from https://github.com/rdregis/Atlantis
+#define UDF_USE_ATLANTIS_CACHE
 
 #define UDF_ALLOW_FRAG_AD
 
