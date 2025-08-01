@@ -715,10 +715,6 @@ VOID WDiskCacheRelease__(IN PWDISK_CACHE Cache)
     
     Cache->Initialized = FALSE;
 }
-    
-    Cache->Initialized = FALSE;
-    RtlZeroMemory(Cache, sizeof(WDISK_CACHE));
-}
 
 // Check if WinDiskCache is initialized
 BOOLEAN WDiskCacheIsInitialized__(IN PWDISK_CACHE Cache)
