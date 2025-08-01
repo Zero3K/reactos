@@ -776,6 +776,27 @@ WCachePurgeAllR(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context)
     WCachePurgeAllRW(IrpContext, Cache, Context);
 }
 
+// Public purge all function - dispatches to appropriate internal function based on cache mode
+VOID
+WCachePurgeAll__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context)
+{
+    if (!(Cache->ReadProc)) return;
+    ExAcquireResourceExclusiveLite(&(Cache->WCacheLock), TRUE);
+
+    switch(Cache->Mode) {
+    case WCACHE_MODE_RAM:
+    case WCACHE_MODE_ROM:
+    case WCACHE_MODE_RW:
+        WCachePurgeAllRW(IrpContext, Cache, Context);
+        break;
+    case WCACHE_MODE_R:
+        WCachePurgeAllR(IrpContext, Cache, Context);
+        break;
+    }
+
+    ExReleaseResourceForThreadLite(&(Cache->WCacheLock), ExGetCurrentResourceThread());
+}
+
 // Validation function for debugging
 BOOLEAN
 ValidateFrameBlocksList(IN PW_CACHE Cache, IN lba_t Lba)

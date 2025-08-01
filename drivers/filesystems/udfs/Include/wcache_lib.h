@@ -176,6 +176,8 @@ NTSTATUS WCacheFlushAll__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOI
 NTSTATUS WCacheFlushBlocks__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context, 
     IN lba_t Lba, IN ULONG BCount);
 
+VOID WCachePurgeAll__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context);
+
 NTSTATUS WCacheDirect__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context, 
     IN lba_t Lba, IN BOOLEAN Modified, OUT PCHAR* CachedBlock, IN BOOLEAN CachedOnly);
 
