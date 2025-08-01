@@ -7,7 +7,6 @@
 /*********************************************************************/
 
 NTSTATUS
-__fastcall
 WCacheCheckLimits(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,
@@ -17,7 +16,6 @@ WCacheCheckLimits(
     );
 
 NTSTATUS
-__fastcall
 WCacheCheckLimitsRAM(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,
@@ -27,7 +25,6 @@ WCacheCheckLimitsRAM(
     );
 
 NTSTATUS
-__fastcall
 WCacheCheckLimitsRW(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,
@@ -37,7 +34,6 @@ WCacheCheckLimitsRW(
     );
 
 NTSTATUS
-__fastcall
 WCacheCheckLimitsR(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,
@@ -47,7 +43,6 @@ WCacheCheckLimitsR(
     );
 
 VOID
-__fastcall
 WCachePurgeAllRW(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,
@@ -55,7 +50,6 @@ WCachePurgeAllRW(
     );
 
 VOID
-__fastcall
 WCacheFlushAllRW(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,
@@ -63,14 +57,13 @@ WCacheFlushAllRW(
     );
 
 VOID
-__fastcall
 WCachePurgeAllR(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,
     IN PVOID Context
     );
 
-NTSTATUS __fastcall WCacheDecodeFlags(IN PW_CACHE Cache,
+NTSTATUS WCacheDecodeFlags(IN PW_CACHE Cache,
                              IN ULONG Flags);
 
 #define ASYNC_STATE_NONE      0
@@ -389,7 +382,6 @@ WCacheRandom(VOID)
   Internal routine
  */
 lba_t
-__fastcall
 WCacheFindLbaToRelease(
     IN PW_CACHE Cache
     )
@@ -406,7 +398,6 @@ WCacheFindLbaToRelease(
   Internal routine
  */
 lba_t
-__fastcall
 WCacheFindModifiedLbaToRelease(
     IN PW_CACHE Cache
     )
@@ -423,7 +414,6 @@ WCacheFindModifiedLbaToRelease(
   Internal routine
  */
 lba_t
-__fastcall
 WCacheFindFrameToRelease(
     IN PW_CACHE Cache
     )
@@ -437,14 +427,9 @@ WCacheFindFrameToRelease(
 
     if (!(Cache->FrameCount))
         return 0;
-    /*
-    return(Cache->CachedFramesList[((ULONG)WCacheRandom() % Cache->FrameCount)]);
-    */
 
     for(i=0; i<Cache->FrameCount; i++) {
-
         j = Cache->CachedFramesList[i];
-
         mod |= (Cache->FrameList[j].UpdateCount != 0);
         uc = Cache->FrameList[j].UpdateCount*32 + Cache->FrameList[j].AccessCount;
 
@@ -453,6 +438,7 @@ WCacheFindFrameToRelease(
             frame = j;
         }
     }
+    
     if (!mod) {
         frame = Cache->CachedFramesList[((ULONG)WCacheRandom() % Cache->FrameCount)];
         lba = frame << Cache->BlocksPerFrameSh;
@@ -460,8 +446,8 @@ WCacheFindFrameToRelease(
     } else {
         lba = frame << Cache->BlocksPerFrameSh;
         WcPrint(("WC:-frm(mod) %x\n", lba));
+        // Decay counters for all frames
         for(i=0; i<Cache->FrameCount; i++) {
-
             j = Cache->CachedFramesList[i];
             Cache->FrameList[j].UpdateCount = (Cache->FrameList[j].UpdateCount*2)/3;
             Cache->FrameList[j].AccessCount = (Cache->FrameList[j].AccessCount*3)/4;
@@ -499,9 +485,6 @@ WCacheGetSortedListIndex(
     ULONG pos;
     ULONG left;
     ULONG right;
-
-    if (!BlockCount)
-        return 0;
 
     left = 0;
     right = BlockCount - 1;
@@ -543,7 +526,6 @@ WCacheGetSortedListIndex(
   Internal routine
  */
 VOID
-__fastcall
 WCacheInsertRangeToList(
     IN lba_t* List,           // pointer to sorted (ASC) array of ULONGs
     IN PULONG BlockCount,     // pointer to number of items in array (pointed by List)
@@ -592,7 +574,6 @@ WCacheInsertRangeToList(
   Internal routine
  */
 VOID
-__fastcall
 WCacheInsertItemToList(
     IN lba_t* List,           // pointer to sorted (ASC) array of lba_t's
     IN PULONG BlockCount,     // pointer to number of items in array (pointed by List)
@@ -630,7 +611,6 @@ WCacheInsertItemToList(
   Internal routine
  */
 VOID
-__fastcall
 WCacheRemoveRangeFromList(
     IN lba_t* List,           // pointer to sorted (ASC) array of ULONGs
     IN PULONG BlockCount,     // pointer to number of items in array (pointed by List)
@@ -659,7 +639,6 @@ WCacheRemoveRangeFromList(
   Internal routine
  */
 VOID
-__fastcall
 WCacheRemoveItemFromList(
     IN lba_t* List,           // pointer to sorted (ASC) array of ULONGs
     IN PULONG BlockCount,     // pointer to number of items in array (pointed by List)
@@ -686,7 +665,6 @@ WCacheRemoveItemFromList(
   Internal routine
  */
 PW_CACHE_ENTRY
-__fastcall
 WCacheInitFrame(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,        // pointer to the Cache Control structure
@@ -737,7 +715,6 @@ WCacheInitFrame(
   Internal routine
  */
 VOID
-__fastcall
 WCacheRemoveFrame(
     IN PW_CACHE Cache,        // pointer to the Cache Control structure
     IN PVOID Context,         // user's context (currently unused)
@@ -1260,7 +1237,6 @@ WCacheUpdatePacketComplete(
   Internal routine
  */
 NTSTATUS
-__fastcall
 WCacheCheckLimits(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,        // pointer to the Cache Control structure
@@ -1322,7 +1298,6 @@ WCacheCheckLimits(
   Internal routine
  */
 NTSTATUS
-__fastcall
 WCacheCheckLimitsRW(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,        // pointer to the Cache Control structure
@@ -1501,7 +1476,6 @@ Try_Another_Block:
 } // end WCacheCheckLimitsRW()
 
 NTSTATUS
-__fastcall
 WCacheFlushBlocksRAM(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,        // pointer to the Cache Control structure
@@ -1596,7 +1570,6 @@ WCacheFlushBlocksRAM(
   Internal routine
  */
 NTSTATUS
-__fastcall
 WCacheCheckLimitsRAM(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,        // pointer to the Cache Control structure
@@ -1731,7 +1704,6 @@ Try_Another_Frame:
   Internal routine
  */
 NTSTATUS
-__fastcall
 WCachePurgeAllRAM(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,        // pointer to the Cache Control structure
@@ -1781,7 +1753,6 @@ WCachePurgeAllRAM(
   Internal routine
  */
 NTSTATUS
-__fastcall
 WCacheFlushAllRAM(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,        // pointer to the Cache Control structure
@@ -2618,7 +2589,6 @@ WCachePurgeAll__(
   Internal routine
  */
 VOID
-__fastcall
 WCachePurgeAllRW(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,        // pointer to the Cache Control structure
@@ -2687,7 +2657,6 @@ WCachePurgeAllRW(
   Internal routine
  */
 VOID
-__fastcall
 WCacheFlushAllRW(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,        // pointer to the Cache Control structure
@@ -3193,7 +3162,6 @@ WCacheIsCached__(
   Internal routine
  */
 NTSTATUS
-__fastcall
 WCacheCheckLimitsR(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,        // pointer to the Cache Control structure
@@ -3319,7 +3287,6 @@ WCCL_retry_1:
   Internal routine
  */
 VOID
-__fastcall
 WCachePurgeAllR(
     IN PIRP_CONTEXT IrpContext,
     IN PW_CACHE Cache,        // pointer to the Cache Control structure
@@ -3617,7 +3584,6 @@ WCacheCompleteAsync__(
   Internal routine
  */
 NTSTATUS
-__fastcall
 WCacheDecodeFlags(
     IN PW_CACHE Cache,        // pointer to the Cache Control structure
     IN ULONG Flags            // cache mode flags
