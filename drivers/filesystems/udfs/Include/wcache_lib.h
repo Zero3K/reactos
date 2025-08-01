@@ -187,11 +187,6 @@ typedef struct _W_CACHE {
     PCHAR tmp_buff_r;
     PULONG reloc_tab;
 
-    // Sequential access tracking for intelligent prefetching
-    lba_t LastAccessLba;
-    ULONG SequentialCount;
-    ULONG PrefetchAhead;
-
 } W_CACHE, *PW_CACHE;
 
 #define WCACHE_INVALID_LBA  ((lba_t)(-1))
