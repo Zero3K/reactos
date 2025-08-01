@@ -779,7 +779,11 @@ try_exit:   NOTHING;
     } _SEH2_FINALLY {
 
         if (CacheLocked) {
+#ifdef UDF_USE_WCACHE
             WCacheEODirect__(&(Vcb->FastCache), Vcb);
+#elif defined(UDF_USE_WDISK_CACHE)
+            WDiskCacheEODirect__(&(Vcb->FastCache), Vcb);
+#endif
         }
 
         // Post IRP if required

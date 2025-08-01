@@ -523,14 +523,22 @@ UDFFlushVolume(
             if (Vcb->VerifyOnWrite) {
                 UDFPrint(("UDF: Flushing cache for verify\n"));
                 //WCacheFlushAll__(&(Vcb->FastCache), Vcb);
+#ifdef UDF_USE_WCACHE
                 WCacheFlushBlocks__(IrpContext, &Vcb->FastCache, Vcb, 0, Vcb->LastLBA);
+#elif defined(UDF_USE_WDISK_CACHE)
+                WDiskCacheFlushBlocks__(IrpContext, &Vcb->FastCache, Vcb, 0, Vcb->LastLBA);
+#endif
                 UDFVFlush(Vcb);
             }
             // umount (this is internal operation, NT will "dismount" volume later)
             UDFUmount__(IrpContext, Vcb);
 
             UDFPreClrModified(Vcb);
+#ifdef UDF_USE_WCACHE
             WCacheFlushAll__(IrpContext, &Vcb->FastCache, Vcb);
+#elif defined(UDF_USE_WDISK_CACHE)
+            WDiskCacheFlushAll__(IrpContext, &Vcb->FastCache, Vcb);
+#endif
             UDFClrModified(Vcb);
         }
 

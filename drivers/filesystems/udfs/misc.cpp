@@ -1552,8 +1552,13 @@ UDFDeleteVCB(
     _SEH2_TRY {
         UDFPrint(("UDF: Flushing buffers\n"));
         UDFVRelease(Vcb);
+#ifdef UDF_USE_WCACHE
         WCacheFlushAll__(IrpContext, &Vcb->FastCache, Vcb);
         WCacheRelease__(&Vcb->FastCache);
+#elif defined(UDF_USE_WDISK_CACHE)
+        WDiskCacheFlushAll__(IrpContext, &Vcb->FastCache, Vcb);
+        WDiskCacheRelease__(&Vcb->FastCache);
+#endif
 
     } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
         BrutePoint();

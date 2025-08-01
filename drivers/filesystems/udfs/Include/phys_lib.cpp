@@ -190,7 +190,11 @@ UDFTIOVerify(
     }
     if (Flags & PH_LOCK_CACHE) {
         UDFReleaseResource(&(Vcb->IoResource));
+#ifdef UDF_USE_WCACHE
         WCacheStartDirect__(&(Vcb->FastCache), Vcb, TRUE);
+#elif defined(UDF_USE_WDISK_CACHE)
+        WDiskCacheStartDirect__(&(Vcb->FastCache), Vcb, TRUE);
+#endif
         UDFAcquireResourceExclusive(&(Vcb->IoResource), TRUE);
     }
 
@@ -288,7 +292,13 @@ UDFTIOVerify(
         }
 
         if (!zero) {
+#ifdef UDF_USE_WCACHE
             if (WCacheIsCached__(&(Vcb->FastCache), lba0+i, 1)) {
+#elif defined(UDF_USE_WDISK_CACHE)
+            if (WDiskCacheIsCached__(&(Vcb->FastCache), lba0+i, 1)) {
+#else
+            if (FALSE) {
+#endif
                 // even if block is cached, we have to verify if it is readable
                 if (!packet_ok && !UDFVIsStored(Vcb, lba0+i)) {
 
@@ -300,7 +310,11 @@ UDFTIOVerify(
                     }
 
                 }
+#ifdef UDF_USE_WCACHE
                 RC = WCacheDirect__(IrpContext, &Vcb->FastCache, _Vcb, lba0+i, FALSE, &cached_block, TRUE/* cached only */);
+#elif defined(UDF_USE_WDISK_CACHE)
+                RC = WDiskCacheDirect__(IrpContext, &Vcb->FastCache, _Vcb, lba0+i, FALSE, &cached_block, TRUE/* cached only */);
+#endif
             } else {
                 cached_block = NULL;
                 if (!packet_ok) {
@@ -431,7 +445,11 @@ do_remap:
 
     UDFReleaseResource(&(Vcb->IoResource));
     if (Flags & PH_LOCK_CACHE) {
+#ifdef UDF_USE_WCACHE
         WCacheEODirect__(&(Vcb->FastCache), Vcb);
+#elif defined(UDF_USE_WDISK_CACHE)
+        WDiskCacheEODirect__(&(Vcb->FastCache), Vcb);
+#endif
     }
 
     return RC;
@@ -1565,7 +1583,11 @@ UDFReadSectors(
     )
 {
     if (Vcb->FastCache.ReadProc && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
+#ifdef UDF_USE_WCACHE
         return WCacheReadBlocks__(IrpContext, &Vcb->FastCache, Vcb, Buffer, Lba, BCount, ReadBytes, Direct);
+#elif defined(UDF_USE_WDISK_CACHE)
+        return WDiskCacheReadBlocks__(IrpContext, &Vcb->FastCache, Vcb, Buffer, Lba, BCount, ReadBytes, Direct);
+#endif
     }
     return UDFTRead(IrpContext, Vcb, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
 } // end UDFReadSectors()
@@ -1594,12 +1616,20 @@ UDFReadInSector(
 
     (*ReadBytes) = 0;
     if (Vcb->FastCache.ReadProc && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
+#ifdef UDF_USE_WCACHE
         status = WCacheDirect__(IrpContext, &Vcb->FastCache, Vcb, Lba, FALSE, &tmp_buff, Direct);
+#elif defined(UDF_USE_WDISK_CACHE)
+        status = WDiskCacheDirect__(IrpContext, &Vcb->FastCache, Vcb, Lba, FALSE, &tmp_buff, Direct);
+#endif
         if (NT_SUCCESS(status)) {
             (*ReadBytes) += l;
             RtlCopyMemory(Buffer, tmp_buff+i, l);
         }
+#ifdef UDF_USE_WCACHE
         if (!Direct) WCacheEODirect__(&Vcb->FastCache, Vcb);
+#elif defined(UDF_USE_WDISK_CACHE)
+        if (!Direct) WDiskCacheEODirect__(&Vcb->FastCache, Vcb);
+#endif
     } else {
         if (Direct) {
             return STATUS_INVALID_PARAMETER;
@@ -1712,7 +1742,11 @@ UDFWriteSectors(
 #endif //_BROWSE_UDF_
 
     if (Vcb->FastCache.WriteProc && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
+#ifdef UDF_USE_WCACHE
         status = WCacheWriteBlocks__(IrpContext, &Vcb->FastCache, Vcb, Buffer, Lba, BCount, WrittenBytes, Direct);
+#elif defined(UDF_USE_WDISK_CACHE)
+        status = WDiskCacheWriteBlocks__(IrpContext, &Vcb->FastCache, Vcb, Buffer, Lba, BCount, WrittenBytes, Direct);
+#endif
         ASSERT(NT_SUCCESS(status));
 #ifdef _BROWSE_UDF_
         UDFClrZeroBits(Vcb->ZSBM_Bitmap, Lba, BCount);
@@ -1763,7 +1797,11 @@ UDFWriteInSector(
 #ifdef _BROWSE_UDF_
     if (Vcb->FastCache.WriteProc && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
 #endif //_BROWSE_UDF_
+#ifdef UDF_USE_WCACHE
         status = WCacheDirect__(IrpContext, &Vcb->FastCache, Vcb, Lba, TRUE, &tmp_buff, Direct);
+#elif defined(UDF_USE_WDISK_CACHE)
+        status = WDiskCacheDirect__(IrpContext, &Vcb->FastCache, Vcb, Lba, TRUE, &tmp_buff, Direct);
+#endif
         if (NT_SUCCESS(status)) {
 #ifdef _BROWSE_UDF_
             UDFClrZeroBit(Vcb->ZSBM_Bitmap, Lba);
@@ -1771,7 +1809,11 @@ UDFWriteInSector(
             (*WrittenBytes) += l;
             RtlCopyMemory(tmp_buff+i, Buffer, l);
         }
+#ifdef UDF_USE_WCACHE
         if (!Direct) WCacheEODirect__(&(Vcb->FastCache), Vcb);
+#elif defined(UDF_USE_WDISK_CACHE)
+        if (!Direct) WDiskCacheEODirect__(&(Vcb->FastCache), Vcb);
+#endif
 #ifdef _BROWSE_UDF_
     } else {
         // If Direct = TRUE we should never get here, but...
