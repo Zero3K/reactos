@@ -1,5 +1,7 @@
 ////////////////////////////////////////////////////////////////////
-// Copyright (C) Alexander Telyatnikov, Ivan Keliukh, Yegor Anchishkin, SKIF Software, 1999-2013. Kiev, Ukraine
+// Atlantis Cache System - WCache Implementation - Atlantis Backend
+// Copyright (C) Rogerio Regis, adapted for ReactOS
+// Original Copyright (C) Alexander Telyatnikov, Ivan Keliukh, Yegor Anchishkin, SKIF Software, 1999-2013. Kiev, Ukraine
 // All rights reserved
 // This file was released under the GPLv2 on June 2015.
 ////////////////////////////////////////////////////////////////////
@@ -8,4 +10,4 @@
 // define the file specific bug-check id
 #define         UDF_BUG_CHECK_ID                UDF_FILE_WCACHE
 
-#include "Include/wcache_lib.cpp"
+#include "Include/wcache_lib_atlantis.cpp"
