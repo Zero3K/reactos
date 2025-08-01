@@ -388,10 +388,14 @@ WCacheRemoveItemFromList(IN PULONG List, IN PULONG ListCount, IN lba_t Lba)
     ((*((PULONG)(&(block_array[i].Sector)))) & 0x40000000)
 
 #define WCacheSectorAddr(block_array, i) \
-    (block_array[i].Sector & 0x3fffffff)
+    ((ULONG_PTR)(block_array[i].Sector) & WCACHE_ADDR_MASK)
 
 #define WCacheFreeSector(frame, offs) \
-    if (WCacheSectorAddr(frame, offs)) MyFreePool__((PVOID)WCacheSectorAddr(frame, offs))
+{                          \
+    MyFreePool__((PVOID)WCacheSectorAddr(block_array, offs)); \
+    block_array[offs].Sector = NULL; \
+    Cache->FrameList[frame].BlockCount--; \
+}
 
 // Initialize frame structure - updated signature
 PW_CACHE_ENTRY
@@ -507,7 +511,13 @@ NTSTATUS
 WCacheRaiseIoError(IN PW_CACHE Cache, IN PVOID Context, IN NTSTATUS Status, IN lba_t Lba, IN ULONG BCount, IN PVOID Buffer, IN ULONG Op, IN PW_CACHE_ENTRY block_array)
 {
     if (Cache->ErrorHandlerProc) {
-        return Cache->ErrorHandlerProc(Context, Status, Lba, BCount, Buffer, Op);
+        WCACHE_ERROR_CONTEXT ec;
+        ec.WCErrorCode = (Op == WCACHE_W_OP) ? WCACHE_ERROR_WRITE : WCACHE_ERROR_READ;
+        ec.Status = Status;
+        ec.ReadWrite.Lba = Lba;
+        ec.ReadWrite.BCount = BCount;
+        ec.ReadWrite.Buffer = Buffer;
+        return Cache->ErrorHandlerProc(Context, &ec);
     }
     return Status;
 }
@@ -535,7 +545,7 @@ WCacheUpdatePacket(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Conte
         tmp_buff = (PCHAR)(WContext->Buffer);
         tmp_buff2 = (PCHAR)(WContext->Buffer2);
         if (!Chained) {
-            mod = (DbgCompareMemory(tmp_buff2, tmp_buff, PS) != PS);
+            mod = (RtlCompareMemory(tmp_buff2, tmp_buff, PS) != PS);
         }
         goto try_write;
     }
@@ -605,10 +615,10 @@ WCacheUpdatePacket(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Conte
     for (i = 0; i < PSs; i++, Lba0++) {
         if (WCacheGetModFlag(block_array, Lba0) || (!read && WCacheSectorAddr(block_array, Lba0))) {
             if (!mod) {
-                mod = (DbgCompareMemory(tmp_buff2 + (i << BSh), (PVOID)WCacheSectorAddr(block_array, Lba0), BS) != BS);
+                mod = (RtlCompareMemory(tmp_buff2 + (i << BSh), (PVOID)WCacheSectorAddr(block_array, Lba0), BS) != BS);
             }
             if (mod) {
-                DbgCopyMemory(tmp_buff2 + (i << BSh), (PVOID)WCacheSectorAddr(block_array, Lba0), BS);
+                RtlCopyMemory(tmp_buff2 + (i << BSh), (PVOID)WCacheSectorAddr(block_array, Lba0), BS);
             }
         }
     }
@@ -723,7 +733,7 @@ WCacheCheckLimitsRW(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Cont
         // Flush and remove some frames
         lba_t Lba = WCacheFindFrameToRelease(Cache);
         if (Lba != WCACHE_INVALID_LBA) {
-            WCacheFlushBlocks(IrpContext, Cache, Context, Lba, Cache->BlocksPerFrame);
+            WCacheFlushBlocks__(IrpContext, Cache, Context, Lba, Cache->BlocksPerFrame);
         }
     }
     return STATUS_SUCCESS;
@@ -764,7 +774,7 @@ WCacheFlushAllRW(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context
     for (i = 0; i < Cache->WriteCount; i++) {
         Lba = Cache->CachedModifiedBlocksList[i];
         if (Lba != WCACHE_INVALID_LBA) {
-            WCacheFlushBlocks(IrpContext, Cache, Context, Lba, 1);  
+            WCacheFlushBlocks__(IrpContext, Cache, Context, Lba, 1);  
         }
     }
 }
@@ -875,7 +885,7 @@ WCachePreReadPacket__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Co
             if (!WCacheSectorAddr(block_array, offs)) {
                 PVOID sector = MyAllocatePoolTag__(NonPagedPool, Cache->BlockSize, MEM_WCBUF_TAG);
                 if (sector) {
-                    DbgCopyMemory(sector, Cache->tmp_buff + (i * Cache->BlockSize), Cache->BlockSize);
+                    RtlCopyMemory(sector, Cache->tmp_buff + (i * Cache->BlockSize), Cache->BlockSize);
                     block_array[offs].Sector = (ULONG)sector;
                     WCacheInsertItemToList(Cache->CachedBlocksList, &(Cache->BlockCount), CurrentLba);
                 }
@@ -942,14 +952,14 @@ WCacheReadBlocks__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Conte
                 // Try again after pre-read
                 block_array = Cache->FrameList[frame_addr].Frame;
                 if (block_array && WCacheSectorAddr(block_array, offs)) {
-                    DbgCopyMemory(Buffer + (i << BSh), (PVOID)WCacheSectorAddr(block_array, offs), BS);
+                    RtlCopyMemory(Buffer + (i << BSh), (PVOID)WCacheSectorAddr(block_array, offs), BS);
                 } else {
                     RtlZeroMemory(Buffer + (i << BSh), BS);
                 }
             }
         } else {
             // Copy from cache
-            DbgCopyMemory(Buffer + (i << BSh), (PVOID)WCacheSectorAddr(block_array, offs), BS);
+            RtlCopyMemory(Buffer + (i << BSh), (PVOID)WCacheSectorAddr(block_array, offs), BS);
         }
         
         *ReadBytes += BS;
@@ -1012,7 +1022,7 @@ WCacheWriteBlocks__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Cont
         }
         
         // Copy data to cache
-        DbgCopyMemory((PVOID)WCacheSectorAddr(block_array, offs), Buffer + (i << BSh), BS);
+        RtlCopyMemory((PVOID)WCacheSectorAddr(block_array, offs), Buffer + (i << BSh), BS);
         WCacheSetModFlag(block_array, offs);
         WCacheInsertItemToList(Cache->CachedModifiedBlocksList, &(Cache->WriteCount), CurrentLba);
         

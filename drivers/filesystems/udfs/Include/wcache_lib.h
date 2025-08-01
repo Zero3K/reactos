@@ -72,6 +72,20 @@ typedef struct _W_CACHE_ENTRY {
     };
 } W_CACHE_ENTRY, *PW_CACHE_ENTRY;
 
+// Memory type and address masks
+#define CACHED_BLOCK_MEMORY_TYPE PagedPool
+#define MAX_TRIES_FOR_NA         3
+
+#ifdef _WIN64
+    #define WCACHE_ADDR_MASK     0xfffffffffffffff8
+#else
+    #define WCACHE_ADDR_MASK     0xfffffff8
+#endif
+#define WCACHE_FLAG_MASK     0x00000007
+#define WCACHE_FLAG_MODIFIED 0x00000001
+#define WCACHE_FLAG_ZERO     0x00000002
+#define WCACHE_FLAG_BAD      0x00000004
+
 typedef struct _W_CACHE_FRAME {
     PW_CACHE_ENTRY Frame;
     ULONG BlockCount;
@@ -140,6 +154,8 @@ typedef struct _W_CACHE {
     PWC_ERROR_HANDLER ErrorHandlerProc;
     struct _W_CACHE_ASYNC* AsyncEntryList;
     PCHAR tmp_buff;
+    PCHAR tmp_buff_r;
+    PULONG reloc_tab;
     ERESOURCE WCacheLock;
     PFAST_MUTEX FastMutex;
 } W_CACHE, *PW_CACHE;
@@ -173,6 +189,7 @@ NTSTATUS WCacheWriteBlocks__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN P
     IN PCHAR Buffer, IN lba_t Lba, IN ULONG BCount, OUT PSIZE_T WrittenBytes, IN BOOLEAN CachedOnly);
 
 NTSTATUS WCacheFlushAll__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context);
+NTSTATUS WCacheFlushAllRAM(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context);
 NTSTATUS WCacheFlushBlocks__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context, 
     IN lba_t Lba, IN ULONG BCount);
 
