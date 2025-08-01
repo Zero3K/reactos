@@ -1232,10 +1232,20 @@ UDFGetBlockSize(
             try_return(RC = STATUS_UNRECOGNIZED_VOLUME);
         }
     } else {
-        RC = UDFPhSendIOCTL(IOCTL_CDROM_GET_DRIVE_GEOMETRY_EX,DeviceObject,
-            &DiskGeometryEx,sizeof(DISK_GEOMETRY_EX),
+        // For non-disk devices, try disk geometry first (handles VHDs properly)
+        // then fall back to CDROM geometry for optical drives
+        RC = UDFPhSendIOCTL(IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,DeviceObject,
+            0,NULL,
             &DiskGeometryEx,sizeof(DISK_GEOMETRY_EX),
             TRUE,NULL );
+        
+        // If disk IOCTL failed with invalid device request, try CDROM IOCTL
+        if (RC == STATUS_INVALID_DEVICE_REQUEST) {
+            RC = UDFPhSendIOCTL(IOCTL_CDROM_GET_DRIVE_GEOMETRY_EX,DeviceObject,
+                &DiskGeometryEx,sizeof(DISK_GEOMETRY_EX),
+                &DiskGeometryEx,sizeof(DISK_GEOMETRY_EX),
+                TRUE,NULL );
+        }
 
         if (RC == STATUS_DEVICE_NOT_READY) {
             // probably, the device is really busy, may be by CD/DVD recording
@@ -1244,6 +1254,12 @@ UDFGetBlockSize(
         }
 
         Vcb->BlockSize = (NT_SUCCESS(RC)) ? DiskGeometryEx.Geometry.BytesPerSector : 2048;
+        
+        if (NT_SUCCESS(RC)) {
+            UDFPrint(("UDFGetBlockSize: Successfully obtained geometry for non-disk device\n"));
+        } else {
+            UDFPrint(("UDFGetBlockSize: Both disk and CDROM geometry IOCTLs failed, using default block size\n"));
+        }
     }
 
 #endif //_BROWSE_UDF_
@@ -1282,9 +1298,9 @@ UDFGetBlockSize(
                 Vcb->LastLBA = 0x10000000; // Cap to ~512GB worth of sectors
             }
         } else {
-            // IOCTL_CDROM_GET_DRIVE_GEOMETRY_EX failed for non-disk device
-            // This can happen with large VHD files. Use a reasonable default.
-            UDFPrint(("UDFGetBlockSize: IOCTL_CDROM_GET_DRIVE_GEOMETRY_EX failed, using default LastLBA\n"));
+            // Both disk and CDROM geometry IOCTLs failed for non-disk device
+            // This can happen with large VHD files or unsupported devices. Use a reasonable default.
+            UDFPrint(("UDFGetBlockSize: Geometry IOCTLs failed, using default LastLBA\n"));
             Vcb->LastLBA = 0x10000000; // Default to ~512GB worth of sectors at 2048 bytes/sector
         }
         Vcb->LastPossibleLBA = Vcb->LastLBA;
