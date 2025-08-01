@@ -118,6 +118,11 @@ static inline VOID WCacheSetMode__(IN PW_CACHE Cache, IN ULONG Mode) {
 #define WC_ERROR_WRITE               WDISK_ERROR_WRITE
 #define WC_ERROR_INTERNAL            WDISK_ERROR_INTERNAL
 
+// Block status constants (for PCHECK_BLOCK return values)
+#define WCACHE_BLOCK_USED            0x01
+#define WCACHE_BLOCK_ZERO            0x02
+#define WCACHE_BLOCK_BAD             0x04
+
 #elif defined(UDF_USE_WCACHE)
 
 // Include WCache header
