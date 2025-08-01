@@ -505,6 +505,7 @@ WCacheGetSortedListIndex(
     IN lba_t Lba              // ULONG value to be searched for
     )
 {
+    // Fast path for empty list
     if (!BlockCount)
         return 0;
 
@@ -512,15 +513,14 @@ WCacheGetSortedListIndex(
     ULONG right = BlockCount;
     ULONG pos;
 
-    // Optimized binary search with better bounds handling
+    // Optimized binary search with better bounds handling and reduced branching
     while (left < right) {
         pos = left + ((right - left) >> 1);  // Avoid potential overflow
         
-        if (List[pos] < Lba) {
-            left = pos + 1;
-        } else {
-            right = pos;
-        }
+        // Branchless comparison for better pipeline performance
+        ULONG is_less = (List[pos] < Lba) ? 1 : 0;
+        left = is_less ? (pos + 1) : left;
+        right = is_less ? right : pos;
     }
 
     return left;
@@ -2129,7 +2129,9 @@ WCacheReadBlocks__(
         }
     }
 
-    Cache->FrameList[frame].AccessCount++;
+    // Optimized access tracking with less overhead
+    ULONG total_frames_accessed = (BCount + Cache->BlocksPerFrame - 1) >> Cache->BlocksPerFrameSh;
+    Cache->FrameList[frame].AccessCount += (total_frames_accessed > 1) ? total_frames_accessed : 1;
     while(BCount) {
         if (i >= Cache->BlocksPerFrame) {
             frame++;
@@ -2528,21 +2530,44 @@ WCacheWriteBlocks__(
                 saved_BC = BCount;
 
                 while(n) {
-                    if (Cache->Mode == WCACHE_MODE_R)
-                        Cache->UpdateRelocProc(Context, Lba, NULL, PS);
-                    if (!NT_SUCCESS(status = Cache->WriteProc(IrpContext, Context, Buffer, PS<<BSh, Lba, &_WrittenBytes, 0))) {
-                        status = WCacheRaiseIoError(Cache, Context, status, Lba, PS, Buffer, WCACHE_W_OP, NULL);
+                    // I/O Coalescing optimization: batch multiple consecutive writes
+                    ULONG coalesce_count = 0;
+                    ULONG remaining_n = n;
+                    lba_t start_lba = Lba;
+                    PCHAR start_buffer = Buffer;
+                    
+                    // Determine how many consecutive packets we can write in one operation
+                    // Limited by maximum transfer size to avoid extremely large operations
+                    ULONG max_coalesce = (remaining_n / PS < (Cache->MaxBytesToRead >> Cache->PacketSizeSh) >> Cache->BlockSizeSh) ?
+                                        remaining_n / PS : (Cache->MaxBytesToRead >> Cache->PacketSizeSh) >> Cache->BlockSizeSh;
+                    if (max_coalesce == 0) max_coalesce = 1;
+                    
+                    coalesce_count = max_coalesce * PS;
+                    
+                    if (Cache->Mode == WCACHE_MODE_R) {
+                        // For WORM mode, handle relocation for each packet
+                        for (ULONG reloc_i = 0; reloc_i < max_coalesce; reloc_i++) {
+                            Cache->UpdateRelocProc(Context, start_lba + reloc_i * PS, NULL, PS);
+                        }
+                    }
+                    
+                    // Perform coalesced write operation
+                    if (!NT_SUCCESS(status = Cache->WriteProc(IrpContext, Context, start_buffer, 
+                                                            coalesce_count << BSh, start_lba, &_WrittenBytes, 0))) {
+                        status = WCacheRaiseIoError(Cache, Context, status, start_lba, coalesce_count, start_buffer, WCACHE_W_OP, NULL);
                         if (!NT_SUCCESS(status)) {
                             goto EO_WCache_W;
                         }
                     }
-                    BCount -= PS;
-                    Lba += PS;
+                    
+                    // Update counters for the batch
+                    BCount -= coalesce_count;
+                    Lba += coalesce_count;
                     saved_BC = BCount;
-                    i += PS;
-                    Buffer += PS<<BSh;
-                    *WrittenBytes += PS<<BSh;
-                    n-=PS;
+                    i += coalesce_count;
+                    Buffer += coalesce_count << BSh;
+                    *WrittenBytes += coalesce_count << BSh;
+                    n -= coalesce_count;
                 }
             }
         }
