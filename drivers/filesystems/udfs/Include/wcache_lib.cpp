@@ -6,6 +6,10 @@
 
 /*********************************************************************/
 
+#ifndef MEM_WCBUF_TAG
+#define MEM_WCBUF_TAG         'fbCW'
+#endif
+
 NTSTATUS __fastcall
 WCacheCheckLimits(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context, IN lba_t ReqLba, IN ULONG BCount);
 
@@ -886,7 +890,7 @@ WCachePreReadPacket__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Co
                 PVOID sector = MyAllocatePoolTag__(NonPagedPool, Cache->BlockSize, MEM_WCBUF_TAG);
                 if (sector) {
                     RtlCopyMemory(sector, Cache->tmp_buff + (i * Cache->BlockSize), Cache->BlockSize);
-                    block_array[offs].Sector = (ULONG)sector;
+                    block_array[offs].Sector = (PCHAR)sector;
                     WCacheInsertItemToList(Cache->CachedBlocksList, &(Cache->BlockCount), CurrentLba);
                 }
             }
@@ -1017,7 +1021,7 @@ WCacheWriteBlocks__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Cont
             sector = MyAllocatePoolTag__(NonPagedPool, BS, MEM_WCBUF_TAG);
             if (!sector) return STATUS_INSUFFICIENT_RESOURCES;
             
-            block_array[offs].Sector = (ULONG)sector;
+            block_array[offs].Sector = (PCHAR)sector;
             WCacheInsertItemToList(Cache->CachedBlocksList, &(Cache->BlockCount), CurrentLba);
         }
         
