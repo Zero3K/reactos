@@ -174,9 +174,9 @@ typedef struct _ATLANTIS_CACHE {
     ULONG FramesEvicted;           // Frames evicted due to cache full
     
     // Memory management
-    LOOKASIDE_LIST_EX EntryLookaside;  // Lookaside list for cache entries
-    LOOKASIDE_LIST_EX FrameLookaside;  // Lookaside list for frames
-    LOOKASIDE_LIST_EX HashLookaside;   // Lookaside list for hash entries
+    NPAGED_LOOKASIDE_LIST EntryLookaside;  // Lookaside list for cache entries
+    NPAGED_LOOKASIDE_LIST FrameLookaside;  // Lookaside list for frames
+    NPAGED_LOOKASIDE_LIST HashLookaside;   // Lookaside list for hash entries
     
     // Temporary buffers for I/O operations
     PCHAR TempBuffer;              // Temporary buffer for reads

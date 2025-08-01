@@ -81,23 +81,23 @@ AtlantisAllocateCacheEntry__(
     }
     
     // Allocate cache entry
-    NewEntry = (PATLANTIS_CACHE_ENTRY)ExAllocateFromLookasideListEx(&Cache->EntryLookaside);
+    NewEntry = (PATLANTIS_CACHE_ENTRY)ExAllocateFromNPagedLookasideList(&Cache->EntryLookaside);
     if (!NewEntry) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     
     // Allocate hash entry
-    HashEntry = (PATLANTIS_HASH_ENTRY)ExAllocateFromLookasideListEx(&Cache->HashLookaside);
+    HashEntry = (PATLANTIS_HASH_ENTRY)ExAllocateFromNPagedLookasideList(&Cache->HashLookaside);
     if (!HashEntry) {
-        ExFreeToLookasideListEx(&Cache->EntryLookaside, NewEntry);
+        ExFreeToNPagedLookasideList(&Cache->EntryLookaside, NewEntry);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     
     // Allocate block data
     NewEntry->BlockData = (PCHAR)ExAllocatePoolWithTag(PagedPool, Cache->BlockSize, 'AtlB');
     if (!NewEntry->BlockData) {
-        ExFreeToLookasideListEx(&Cache->HashLookaside, HashEntry);
-        ExFreeToLookasideListEx(&Cache->EntryLookaside, NewEntry);
+        ExFreeToNPagedLookasideList(&Cache->HashLookaside, HashEntry);
+        ExFreeToNPagedLookasideList(&Cache->EntryLookaside, NewEntry);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     
@@ -153,7 +153,7 @@ AtlantisFreeCacheEntry__(
         
         if (HashEntry->Entry == Entry) {
             RemoveEntryList(&HashEntry->HashListEntry);
-            ExFreeToLookasideListEx(&Cache->HashLookaside, HashEntry);
+            ExFreeToNPagedLookasideList(&Cache->HashLookaside, HashEntry);
             break;
         }
     }
@@ -164,7 +164,7 @@ AtlantisFreeCacheEntry__(
     }
     
     // Free cache entry
-    ExFreeToLookasideListEx(&Cache->EntryLookaside, Entry);
+    ExFreeToNPagedLookasideList(&Cache->EntryLookaside, Entry);
     
     Cache->BlockCount--;
 }
@@ -325,20 +325,23 @@ AtlantisInit__(
     }
     
     // Initialize lookaside lists for memory management
-    ExInitializeLookasideListEx(&Cache->EntryLookaside,
-                               NULL, NULL, PagedPool, 0,
-                               sizeof(ATLANTIS_CACHE_ENTRY),
-                               'AtlE', 0);
+    ExInitializeNPagedLookasideList(&Cache->EntryLookaside,
+                                   NULL, NULL, 
+                                   POOL_NX_ALLOCATION | POOL_RAISE_IF_ALLOCATION_FAILURE,
+                                   sizeof(ATLANTIS_CACHE_ENTRY),
+                                   'AtlE', 0);
                                
-    ExInitializeLookasideListEx(&Cache->FrameLookaside,
-                               NULL, NULL, PagedPool, 0,
-                               sizeof(ATLANTIS_CACHE_FRAME),
-                               'AtlF', 0);
+    ExInitializeNPagedLookasideList(&Cache->FrameLookaside,
+                                   NULL, NULL,
+                                   POOL_NX_ALLOCATION | POOL_RAISE_IF_ALLOCATION_FAILURE,
+                                   sizeof(ATLANTIS_CACHE_FRAME),
+                                   'AtlF', 0);
                                
-    ExInitializeLookasideListEx(&Cache->HashLookaside,
-                               NULL, NULL, PagedPool, 0,
-                               sizeof(ATLANTIS_HASH_ENTRY),
-                               'AtlH', 0);
+    ExInitializeNPagedLookasideList(&Cache->HashLookaside,
+                                   NULL, NULL,
+                                   POOL_NX_ALLOCATION | POOL_RAISE_IF_ALLOCATION_FAILURE,
+                                   sizeof(ATLANTIS_HASH_ENTRY),
+                                   'AtlH', 0);
     
     // Allocate temporary buffers for I/O
     Cache->TempBuffer = (PCHAR)ExAllocatePoolWithTag(PagedPool, 
@@ -628,7 +631,7 @@ AtlantisFlushAll__(
     ULONG FlushedBlocks = 0;
     
     if (!AtlantisIsInitialized__(Cache)) {
-        return STATUS_INVALID_PARAMETER;
+        return;
     }
     
     UDFPrint(("AtlantisFlushAll__: Flushing all dirty blocks\n"));
@@ -774,9 +777,9 @@ AtlantisRelease__(
     }
     
     // Delete lookaside lists
-    ExDeleteLookasideListEx(&Cache->EntryLookaside);
-    ExDeleteLookasideListEx(&Cache->FrameLookaside);
-    ExDeleteLookasideListEx(&Cache->HashLookaside);
+    ExDeleteNPagedLookasideList(&Cache->EntryLookaside);
+    ExDeleteNPagedLookasideList(&Cache->FrameLookaside);
+    ExDeleteNPagedLookasideList(&Cache->HashLookaside);
     
     Cache->Tag = 0;
     Cache->BlockCount = 0;
@@ -1030,7 +1033,7 @@ AtlantisPurgeAll__(
     ULONG i;
     
     if (!AtlantisIsInitialized__(Cache)) {
-        return STATUS_INVALID_PARAMETER;
+        return;
     }
     
     UDFPrint(("AtlantisPurgeAll__: Purging all cached data\n"));
