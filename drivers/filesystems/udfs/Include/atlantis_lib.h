@@ -204,7 +204,7 @@ VOID AtlantisDiscardBlocks__(IN PATLANTIS_CACHE Cache,
                             IN lba_t Lba,
                             IN ULONG BCount);
 
-VOID AtlantisChFlags__(IN PATLANTIS_CACHE Cache,
+ULONG AtlantisChFlags__(IN PATLANTIS_CACHE Cache,
                       IN ULONG SetFlags,
                       IN ULONG ClrFlags);
 
@@ -230,6 +230,52 @@ BOOLEAN AtlantisIsCached__(IN PATLANTIS_CACHE Cache,
 NTSTATUS AtlantisPurgeAll__(IN PIRP_CONTEXT IrpContext,
                            IN PATLANTIS_CACHE Cache,
                            IN PVOID Context);
+
+// Compatibility macros to map WCache calls to Atlantis calls when UDF_USE_ATLANTIS_CACHE is defined
+#ifdef UDF_USE_ATLANTIS_CACHE
+#define WCacheInit__                AtlantisInit__
+#define WCacheSetMode__             AtlantisSetMode__
+#define WCacheReadBlocks__          AtlantisReadBlocks__
+#define WCacheWriteBlocks__         AtlantisWriteBlocks__
+#define WCacheFlushAll__            AtlantisFlushAll__
+#define WCacheFlushBlocks__         AtlantisFlushBlocks__
+#define WCacheRelease__             AtlantisRelease__
+#define WCacheIsInitialized__       AtlantisIsInitialized__
+#define WCacheGetWriteBlockCount__  AtlantisGetWriteBlockCount__
+#define WCacheSyncReloc__           AtlantisSyncReloc__
+#define WCacheDiscardBlocks__       AtlantisDiscardBlocks__
+#define WCacheChFlags__             AtlantisChFlags__
+#define WCacheDirect__              AtlantisDirect__
+#define WCacheStartDirect__         AtlantisStartDirect__
+#define WCacheEODirect__            AtlantisEODirect__
+#define WCacheIsCached__            AtlantisIsCached__
+#define WCachePurgeAll__            AtlantisPurgeAll__
+
+// Map cache structure type
+#define W_CACHE                     ATLANTIS_CACHE
+#define PW_CACHE                    PATLANTIS_CACHE
+
+// Map error context and handler types
+#define WCACHE_ERROR_CONTEXT        ATLANTIS_ERROR_CONTEXT
+#define PWCACHE_ERROR_CONTEXT       PATLANTIS_ERROR_CONTEXT
+#define PWC_ERROR_HANDLER           PATLANTIS_ERROR_HANDLER
+
+// Map cache mode constants
+#define WCACHE_MODE_ROM             ATLANTIS_MODE_ROM
+#define WCACHE_MODE_RW              ATLANTIS_MODE_RW
+#define WCACHE_MODE_R               ATLANTIS_MODE_R
+#define WCACHE_MODE_RAM             ATLANTIS_MODE_RAM
+#define WCACHE_MODE_EWR             ATLANTIS_MODE_EWR
+
+// Map cache flag constants
+#define WCACHE_CACHE_WHOLE_PACKET   ATLANTIS_CACHE_WHOLE_PACKET
+#define WCACHE_DO_NOT_COMPARE       ATLANTIS_DO_NOT_COMPARE
+#define WCACHE_CHAINED_IO           ATLANTIS_CHAINED_IO
+#define WCACHE_MARK_BAD_BLOCKS      ATLANTIS_MARK_BAD_BLOCKS
+#define WCACHE_RO_BAD_BLOCKS        ATLANTIS_RO_BAD_BLOCKS
+#define WCACHE_NO_WRITE_THROUGH     ATLANTIS_NO_WRITE_THROUGH
+
+#endif // UDF_USE_ATLANTIS_CACHE
 
 } // extern "C"
 

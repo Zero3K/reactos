@@ -307,21 +307,26 @@ AtlantisDiscardBlocks__(
 }
 
 // Change cache flags (simplified implementation)
-VOID
+ULONG
 AtlantisChFlags__(
     IN PATLANTIS_CACHE Cache,
     IN ULONG SetFlags,
     IN ULONG ClrFlags
     )
 {
+    ULONG OldFlags = 0;
+    
     if (!AtlantisIsInitialized__(Cache)) {
-        return;
+        return 0;
     }
     
     ExAcquireResourceExclusiveLite(&Cache->ACacheLock, TRUE);
+    OldFlags = Cache->Flags;
     Cache->Flags |= SetFlags;
     Cache->Flags &= ~ClrFlags;
     ExReleaseResourceLite(&Cache->ACacheLock);
+    
+    return OldFlags;
 }
 
 // Direct cache access (simplified implementation)
