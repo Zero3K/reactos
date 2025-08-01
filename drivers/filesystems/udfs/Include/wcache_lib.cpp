@@ -221,38 +221,40 @@ WCacheInit__(
 #define WCLOCK_RES   1
 
     _SEH2_TRY {
-        // check input parameters
-        if (Mode == WCACHE_MODE_R) {
-            UDFPrint(("Disable Async-Write for WORM media\n"));
-            WriteProcAsync = NULL;
-        }
-        if ((MaxBlocks % PacketSize) || !MaxBlocks) {
-            UDFPrint(("Total number of sectors must be packet-size-aligned\n"));
-            try_return(RC = STATUS_INVALID_PARAMETER);
-        }
-        if (BlocksPerFrame % PacketSize) {
-            UDFPrint(("Number of sectors per Frame must be packet-size-aligned\n"));
-            try_return(RC = STATUS_INVALID_PARAMETER);
-        }
+        // Validate basic parameters
         if (!ReadProc) {
             UDFPrint(("Read routine pointer must be valid\n"));
             try_return(RC = STATUS_INVALID_PARAMETER);
         }
-        if (FirstLba >= LastLba) {
-            UDFPrint(("Invalid cached area parameters: (%x - %x)\n",FirstLba, LastLba));
+        if (!MaxFrames || !MaxBlocks) {
+            UDFPrint(("Frame and block counts must be non-zero\n"));
             try_return(RC = STATUS_INVALID_PARAMETER);
         }
-        if (!MaxFrames) {
-            UDFPrint(("Total frame number must be non-zero\n",FirstLba, LastLba));
+        if (FirstLba >= LastLba) {
+            UDFPrint(("Invalid cached area parameters: (%x - %x)\n", FirstLba, LastLba));
             try_return(RC = STATUS_INVALID_PARAMETER);
         }
         if (Mode > WCACHE_MODE_MAX) {
-            UDFPrint(("Invalid media mode. Should be 0-%x\n",WCACHE_MODE_MAX));
+            UDFPrint(("Invalid media mode. Should be 0-%x\n", WCACHE_MODE_MAX));
             try_return(RC = STATUS_INVALID_PARAMETER);
         }
-        if (FramesToKeepFree >= MaxFrames/2) {
-            UDFPrint(("Invalid FramesToKeepFree (%x). Should be Less or equal to MaxFrames/2 (%x)\n", FramesToKeepFree, MaxFrames/2));
+        
+        // Validate alignment requirements
+        if ((MaxBlocks % PacketSize) || (BlocksPerFrame % PacketSize)) {
+            UDFPrint(("Block counts must be packet-size-aligned\n"));
             try_return(RC = STATUS_INVALID_PARAMETER);
+        }
+        
+        if (FramesToKeepFree >= MaxFrames/2) {
+            UDFPrint(("Invalid FramesToKeepFree (%x). Should be <= MaxFrames/2 (%x)\n", 
+                     FramesToKeepFree, MaxFrames/2));
+            try_return(RC = STATUS_INVALID_PARAMETER);
+        }
+        
+        // Mode-specific adjustments  
+        if (Mode == WCACHE_MODE_R) {
+            UDFPrint(("Disable Async-Write for WORM media\n"));
+            WriteProcAsync = NULL;
         }
         // check 'features'
         if (!WriteProc) {
@@ -372,14 +374,14 @@ try_exit: NOTHING;
 } // end WCacheInit__()
 
 /*
-  WCacheRandom() - just a random generator
-  Returns random LONGLONG number
+  WCacheRandom() - simple pseudo-random generator for cache eviction
+  Returns random LONGLONG number  
   Internal routine
  */
 LONGLONG
 WCacheRandom(VOID)
 {
-    WCache_random = (WCache_random * 0x8088405 + 1);
+    WCache_random = (WCache_random * 1103515245 + 12345);
     return WCache_random;
 } // end WCacheRandom()
 
