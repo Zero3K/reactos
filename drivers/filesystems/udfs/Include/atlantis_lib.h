@@ -113,11 +113,19 @@ typedef struct _ATLANTIS_HASH_ENTRY {
 
 #define ATLANTIS_HASH_TABLE_SIZE 1024  // Size of hash table
 
-// Atlantis cache structure - complete implementation
+// Atlantis cache structure - complete implementation with WCache compatibility
 typedef struct _ATLANTIS_CACHE {
     ULONG Tag;                     // 'AtlC' signature
     
+    // WCache compatibility members (must match W_CACHE structure layout)
+    PATLANTIS_CACHE_FRAME FrameList;       // pointer to list of Frames
+    lba_t* CachedBlocksList;               // sorted list of cached blocks
+    lba_t* CachedFramesList;               // sorted list of cached frames  
+    lba_t* CachedModifiedBlocksList;       // sorted list of cached modified blocks
+    
     // Basic cache parameters
+    ULONG BlocksPerFrame;          // Blocks per frame (for WCache compatibility)
+    ULONG BlocksPerFrameSh;        // Blocks per frame shift
     ULONG BlockCount;              // Current number of cached blocks
     ULONG MaxBlocks;               // Maximum blocks to cache
     ULONG MaxBytesToRead;          // Maximum bytes to read in one operation
@@ -161,7 +169,7 @@ typedef struct _ATLANTIS_CACHE {
     // LRU lists for cache management
     LIST_ENTRY BlockLruList;       // LRU list of cached blocks
     LIST_ENTRY FrameLruList;       // LRU list of cached frames
-    LIST_ENTRY FrameList;          // List of all frames
+    LIST_ENTRY AllFramesList;      // List of all frames (renamed to avoid conflict)
     
     // Hash table for fast block lookup
     LIST_ENTRY HashTable[ATLANTIS_HASH_TABLE_SIZE];
@@ -184,12 +192,21 @@ typedef struct _ATLANTIS_CACHE {
     
 } ATLANTIS_CACHE, *PATLANTIS_CACHE;
 
+// Cache frame structure (WCache compatibility)
+typedef struct _ATLANTIS_CACHE_FRAME {
+    PATLANTIS_CACHE_ENTRY Frame;   // Pointer to first cache entry in frame
+    ULONG BlockCount;              // Number of blocks in frame
+    ULONG UpdateCount;             // Number of updates in cache frame
+    ULONG AccessCount;             // Number of accesses to cache frame
+} ATLANTIS_CACHE_FRAME, *PATLANTIS_CACHE_FRAME;
+
 // Cache modes (matching WCache modes)
 #define ATLANTIS_MODE_ROM      0x00000000  // read only (CD-ROM)
 #define ATLANTIS_MODE_RW       0x00000001  // rewritable (CD-RW)
 #define ATLANTIS_MODE_R        0x00000002  // WORM (CD-R)
 #define ATLANTIS_MODE_RAM      0x00000003  // random writable device (HDD)
 #define ATLANTIS_MODE_EWR      0x00000004  // ERASE-cycle required (MO)
+#define ATLANTIS_MODE_MAX      ATLANTIS_MODE_RAM  // Maximum mode value
 
 // Cache flags
 #define ATLANTIS_CACHE_WHOLE_PACKET   0x01
@@ -334,6 +351,10 @@ VOID AtlantisPurgeAll__(IN PIRP_CONTEXT IrpContext,
 // Map cache structure type
 #define W_CACHE                     ATLANTIS_CACHE
 #define PW_CACHE                    PATLANTIS_CACHE
+#define W_CACHE_ENTRY               ATLANTIS_CACHE_ENTRY
+#define PW_CACHE_ENTRY              PATLANTIS_CACHE_ENTRY
+#define W_CACHE_FRAME               ATLANTIS_CACHE_FRAME
+#define PW_CACHE_FRAME              PATLANTIS_CACHE_FRAME
 
 // Map error context and handler types
 #define WCACHE_ERROR_CONTEXT        ATLANTIS_ERROR_CONTEXT
@@ -346,6 +367,7 @@ VOID AtlantisPurgeAll__(IN PIRP_CONTEXT IrpContext,
 #define WCACHE_MODE_R               ATLANTIS_MODE_R
 #define WCACHE_MODE_RAM             ATLANTIS_MODE_RAM
 #define WCACHE_MODE_EWR             ATLANTIS_MODE_EWR
+#define WCACHE_MODE_MAX             ATLANTIS_MODE_MAX
 
 // Map cache flag constants
 #define WCACHE_CACHE_WHOLE_PACKET   ATLANTIS_CACHE_WHOLE_PACKET

@@ -317,7 +317,7 @@ AtlantisInit__(
     // Initialize LRU lists
     InitializeListHead(&Cache->BlockLruList);
     InitializeListHead(&Cache->FrameLruList);
-    InitializeListHead(&Cache->FrameList);
+    InitializeListHead(&Cache->AllFramesList);
     
     // Initialize hash table
     for (i = 0; i < ATLANTIS_HASH_TABLE_SIZE; i++) {
