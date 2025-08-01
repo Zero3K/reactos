@@ -77,6 +77,13 @@ NTSTATUS WCacheDecodeFlags(IN PW_CACHE Cache,
 #define ASYNC_CMD_READ        1
 #define ASYNC_CMD_UPDATE      2
 
+#define WCacheValidateBlockCount(Cache, BCount) \
+    ((BCount) <= (Cache)->MaxBlocks)
+
+#define WCacheCheckCacheSpace(Cache, List, ReqLba, BCount) \
+    (((Cache)->BlockCount + WCacheGetSortedListIndex((Cache)->BlockCount, (List), (ReqLba)) + \
+      (BCount) - WCacheGetSortedListIndex((Cache)->BlockCount, (List), (ReqLba)+(BCount))) <= (Cache)->MaxBlocks)
+
 #define WCACHE_MAX_CHAIN      (0x10)
 
 #define MEM_WCCTX_TAG         'xtCW'
@@ -1311,7 +1318,6 @@ WCacheCheckLimitsRW(
     lba_t* List = Cache->CachedBlocksList;
     lba_t lastLba;
     lba_t Lba;
-//    PCHAR tmp_buff = Cache->tmp_buff;
     ULONG firstPos;
     ULONG lastPos;
     ULONG BSh = Cache->BlockSizeSh;
@@ -1323,7 +1329,6 @@ WCacheCheckLimitsRW(
     NTSTATUS status;
     SIZE_T ReadBytes;
     ULONG FreeFrameCount = 0;
-//    PVOID addr;
     PW_CACHE_ASYNC FirstWContext = NULL;
     PW_CACHE_ASYNC PrevWContext = NULL;
     ULONG chain_count = 0;
@@ -1415,7 +1420,7 @@ Try_Another_Frame:
     }
 
     // check if we try to read too much data
-    if (BCount > Cache->MaxBlocks) {
+    if (!WCacheValidateBlockCount(Cache, BCount)) {
         WCacheUpdatePacketComplete(IrpContext, Cache, Context, &FirstWContext, &PrevWContext);
         return STATUS_INVALID_PARAMETER;
     }
@@ -1583,18 +1588,11 @@ WCacheCheckLimitsRAM(
     lba_t* List = Cache->CachedBlocksList;
     lba_t lastLba;
     lba_t Lba;
-//    PCHAR tmp_buff = Cache->tmp_buff;
     ULONG firstPos;
     ULONG lastPos;
-//    ULONG BSh = Cache->BlockSizeSh;
-//    ULONG BS = Cache->BlockSize;
-//    ULONG PS = BS << Cache->PacketSizeSh; // packet size (bytes)
     ULONG PSs = Cache->PacketSize;
-//    ULONG try_count = 0;
     PW_CACHE_ENTRY block_array;
-//    NTSTATUS status;
     ULONG FreeFrameCount = 0;
-//    PVOID addr;
 
     if (Cache->FrameCount >= Cache->MaxFrames) {
         FreeFrameCount = Cache->FramesToKeepFree;
@@ -1659,13 +1657,12 @@ Try_Another_Frame:
     }
 
     // check if we try to read too much data
-    if (BCount > Cache->MaxBlocks) {
+    if (!WCacheValidateBlockCount(Cache, BCount)) {
         return STATUS_INVALID_PARAMETER;
     }
 
     // remove(flush) packet
-    while((Cache->BlockCount + WCacheGetSortedListIndex(Cache->BlockCount, List, ReqLba) +
-           BCount - WCacheGetSortedListIndex(Cache->BlockCount, List, ReqLba+BCount)) > Cache->MaxBlocks) {
+    while(!WCacheCheckCacheSpace(Cache, List, ReqLba, BCount)) {
 //        try_count = 0;
 //Try_Another_Block:
 
@@ -2886,7 +2883,6 @@ WCacheFlushBlocks__(
     if ((Lba < Cache->FirstLba) ||
        (Lba+BCount-1 > Cache->LastLba)) {
         UDFPrint(("LBA %#x (%x) is beyond cacheable area\n", Lba, BCount));
-        BrutePoint();
         status = STATUS_INVALID_PARAMETER;
         goto EO_WCache_F;
     }
@@ -2949,7 +2945,6 @@ WCacheDirect__(
     if ((Lba < Cache->FirstLba) ||
        (Lba > Cache->LastLba)) {
         UDFPrint(("LBA %#x is beyond cacheable area\n", Lba));
-        BrutePoint();
         status = STATUS_INVALID_PARAMETER;
         goto EO_WCache_D;
     }
@@ -2959,7 +2954,6 @@ WCacheDirect__(
     // check if we have enough space to store requested block
     if (!CachedOnly &&
        !NT_SUCCESS(status = WCacheCheckLimits(IrpContext, Cache, Context, Lba, 1))) {
-        BrutePoint();
         goto EO_WCache_D;
     }
 
