@@ -1272,7 +1272,6 @@ WCacheRelease__(IN PW_CACHE Cache)
 {
     ULONG i;
     lba_t frame_addr;
-    PW_CACHE_ENTRY block_array;
     
     if (!Cache) return STATUS_SUCCESS;
     
