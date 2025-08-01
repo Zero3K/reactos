@@ -4,6 +4,9 @@
 // This file was released under the GPLv2 on June 2015.
 ////////////////////////////////////////////////////////////////////
 
+// Only compile WCache implementation when UDF_USE_WCACHE is defined
+#ifdef UDF_USE_WCACHE
+
 /*********************************************************************/
 
 NTSTATUS
@@ -3683,3 +3686,5 @@ ValidateFrameBlocksList(
 
     return (BlockCount == RangeSize);
 }
+
+#endif // UDF_USE_WCACHE
