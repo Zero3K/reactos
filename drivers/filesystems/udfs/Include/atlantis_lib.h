@@ -355,6 +355,11 @@ VOID AtlantisPurgeAll__(IN PIRP_CONTEXT IrpContext,
 #define WCACHE_RO_BAD_BLOCKS        ATLANTIS_RO_BAD_BLOCKS
 #define WCACHE_NO_WRITE_THROUGH     ATLANTIS_NO_WRITE_THROUGH
 
+// Map cache block status constants (used by CheckUsedProc callback)
+#define WCACHE_BLOCK_USED           0x01
+#define WCACHE_BLOCK_ZERO           0x02
+#define WCACHE_BLOCK_BAD            0x04
+
 #endif // UDF_USE_ATLANTIS_CACHE
 
 } // extern "C"
