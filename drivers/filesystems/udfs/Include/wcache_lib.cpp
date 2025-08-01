@@ -394,7 +394,7 @@ WCacheRemoveItemFromList(IN PULONG List, IN PULONG ListCount, IN lba_t Lba)
 #define WCacheSectorAddr(block_array, i) \
     ((ULONG_PTR)(block_array[i].Sector) & WCACHE_ADDR_MASK)
 
-#define WCacheFreeSector(frame, offs) \
+#define WCacheFreeSector(Cache, block_array, frame, offs) \
 {                          \
     MyFreePool__((PVOID)WCacheSectorAddr(block_array, offs)); \
     block_array[offs].Sector = NULL; \
@@ -451,7 +451,9 @@ WCacheRemoveFrame(IN PW_CACHE Cache, IN PVOID Context, IN lba_t frame_addr)
     
     // Free all cached sectors in frame
     for (i = 0; i < Cache->BlocksPerFrame; i++) {
-        WCacheFreeSector(frm->Frame, i);
+        if (WCacheSectorAddr(frm->Frame, i)) {
+            WCacheFreeSector(Cache, frm->Frame, frame_addr, i);
+        }
     }
      
     MyFreePool__(frm->Frame);
@@ -648,13 +650,13 @@ try_write:
 
 // Free packet resources  
 VOID
-WCacheFreePacket(IN PW_CACHE Cache, IN PVOID Context, IN PW_CACHE_ENTRY block_array, IN lba_t firstLba, IN ULONG PSs)
+WCacheFreePacket(IN PW_CACHE Cache, IN ULONG frame, IN PW_CACHE_ENTRY block_array, IN ULONG offs, IN ULONG PSs)
 {
     ULONG i;
-    for (i = 0; i < PSs; i++) {
-        WCacheFreeSector(block_array, i);
-        WCacheClrModFlag(block_array, i);
-        WCacheClrBadFlag(block_array, i);
+    for (i = 0; i < PSs; i++, offs++) {
+        if (WCacheSectorAddr(block_array, offs)) {
+            WCacheFreeSector(Cache, block_array, frame, offs);
+        }
     }
 }
 
@@ -821,24 +823,26 @@ ValidateFrameBlocksList(IN PW_CACHE Cache, IN lba_t Lba)
 
 // Flush blocks from RAM cache
 NTSTATUS
-WCacheFlushBlocksRAM(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context, 
+WCacheFlushBlocksRAM(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context, IN ULONG frame,
     IN PW_CACHE_ENTRY block_array, IN PULONG List, IN ULONG firstPos, IN ULONG lastPos, IN BOOLEAN FreeBlocks)
 {
     NTSTATUS status = STATUS_SUCCESS;
     SIZE_T WrittenBytes;
     ULONG i;
     lba_t Lba;
+    ULONG offs;
     
     for (i = firstPos; i < lastPos; i++) {
         Lba = List[i];
-        if (WCacheSectorAddr(block_array, Lba - (Lba & ~(Cache->BlocksPerFrame-1)))) {
+        offs = Lba - (Lba & ~(Cache->BlocksPerFrame-1));
+        if (WCacheSectorAddr(block_array, offs)) {
             status = Cache->WriteProc(IrpContext, Context, 
-                (PVOID)WCacheSectorAddr(block_array, Lba - (Lba & ~(Cache->BlocksPerFrame-1))), 
+                (PVOID)WCacheSectorAddr(block_array, offs), 
                 Cache->BlockSize, Lba, &WrittenBytes, 0);
             if (!NT_SUCCESS(status)) break;
             
             if (FreeBlocks) {
-                WCacheFreeSector(block_array, Lba - (Lba & ~(Cache->BlocksPerFrame-1)));
+                WCacheFreeSector(Cache, block_array, frame, offs);
             }
         }
     }
@@ -1053,7 +1057,7 @@ WCacheFlushAll__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context
 }
 
 // Flush all RAM blocks
-VOID
+NTSTATUS
 WCacheFlushAllRAM(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context)
 {
     ULONG i;
@@ -1064,11 +1068,12 @@ WCacheFlushAllRAM(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Contex
         frame_addr = Cache->CachedFramesList[i] >> Cache->BlocksPerFrameSh;
         block_array = Cache->FrameList[frame_addr].Frame;
         if (block_array) {
-            WCacheFlushBlocksRAM(IrpContext, Cache, Context, block_array, 
+            WCacheFlushBlocksRAM(IrpContext, Cache, Context, frame_addr, block_array, 
                 Cache->CachedBlocksList, 0, Cache->BlockCount, FALSE);
         }
     }
     Cache->WriteCount = 0;
+    return STATUS_SUCCESS;
 }
 
 // Flush specific blocks in RW mode
@@ -1194,7 +1199,7 @@ WCacheDirect__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context,
         }
         
         // Add to cache
-        block_array[i].Sector = (ULONG)addr;
+        block_array[i].Sector = addr;
         WCacheInsertItemToList(Cache->CachedBlocksList, &(Cache->BlockCount), Lba);
         if (Modified) {
             WCacheInsertItemToList(Cache->CachedModifiedBlocksList, &(Cache->WriteCount), Lba);
@@ -1377,7 +1382,7 @@ WCacheDiscardBlocks__(IN PW_CACHE Cache, IN PVOID Context, IN lba_t Lba, IN ULON
         
         block_array = Cache->FrameList[frame_addr].Frame;
         if (block_array && WCacheSectorAddr(block_array, offs)) {
-            WCacheFreeSector(block_array, offs);
+            WCacheFreeSector(Cache, block_array, frame_addr, offs);
             WCacheClrModFlag(block_array, offs);
             WCacheRemoveItemFromList(Cache->CachedBlocksList, &(Cache->BlockCount), CurrentLba);
             WCacheRemoveItemFromList(Cache->CachedModifiedBlocksList, &(Cache->WriteCount), CurrentLba);
