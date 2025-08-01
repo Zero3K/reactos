@@ -7,6 +7,6 @@
 #ifndef __CDRW_WCACHE_H__
 #define __CDRW_WCACHE_H__
 
-#include "Include/wcache_lib.h"
+#include "Include/cache_compat.h"
 
 #endif // __CDRW_WCACHE_H__
