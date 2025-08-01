@@ -1,0 +1,5 @@
+CacheFileName=.\frutas.txt
+MaxRecordSize=32
+maxReadBufferLength=1024
+CacheRecordSize=500
+CacheFileSize=4

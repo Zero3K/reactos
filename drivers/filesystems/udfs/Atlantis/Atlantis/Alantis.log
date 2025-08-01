@@ -1,0 +1,45 @@
+[2021/03/26-17:03:13.125][9288]Atlantis::MgrCacheFile::initialize Info: File size:536118, Amount Blocks files: 32, Max block length: 16798
+[2021/03/26-17:03:13.127][9288]Atlantis::MgrCacheFile::initialize Info: FileCacheInfo:
+[2021/03/26-17:03:13.128][9288]Atlantis::MgrCacheFile::initialize Info: Index: 0, Initial Key: 0, Block Position:0, Block size: 16704
+[2021/03/26-17:03:13.128][9288]Atlantis::MgrCacheFile::initialize Info: Index: 1, Initial Key: 923, Block Position:16704, Block size: 16743
+[2021/03/26-17:03:13.128][9288]Atlantis::MgrCacheFile::initialize Info: Index: 2, Initial Key: 1754, Block Position:33447, Block size: 16757
+[2021/03/26-17:03:13.128][9288]Atlantis::MgrCacheFile::initialize Info: Index: 3, Initial Key: 2578, Block Position:50204, Block size: 16750
+[2021/03/26-17:03:13.129][9288]Atlantis::MgrCacheFile::initialize Info: Index: 4, Initial Key: 3402, Block Position:66954, Block size: 16757
+[2021/03/26-17:03:13.129][9288]Atlantis::MgrCacheFile::initialize Info: Index: 5, Initial Key: 4226, Block Position:83711, Block size: 16757
+[2021/03/26-17:03:13.129][9288]Atlantis::MgrCacheFile::initialize Info: Index: 6, Initial Key: 5050, Block Position:100468, Block size: 16750
+[2021/03/26-17:03:13.129][9288]Atlantis::MgrCacheFile::initialize Info: Index: 7, Initial Key: 5874, Block Position:117218, Block size: 16757
+[2021/03/26-17:03:13.129][9288]Atlantis::MgrCacheFile::initialize Info: Index: 8, Initial Key: 6698, Block Position:133975, Block size: 16757
+[2021/03/26-17:03:13.130][9288]Atlantis::MgrCacheFile::initialize Info: Index: 9, Initial Key: 7522, Block Position:150732, Block size: 16750
+[2021/03/26-17:03:13.130][9288]Atlantis::MgrCacheFile::initialize Info: Index: 10, Initial Key: 8346, Block Position:167482, Block size: 16757
+[2021/03/26-17:03:13.130][9288]Atlantis::MgrCacheFile::initialize Info: Index: 11, Initial Key: 9170, Block Position:184239, Block size: 16757
+[2021/03/26-17:03:13.130][9288]Atlantis::MgrCacheFile::initialize Info: Index: 12, Initial Key: 9994, Block Position:200996, Block size: 16758
+[2021/03/26-17:03:13.130][9288]Atlantis::MgrCacheFile::initialize Info: Index: 13, Initial Key: 10745, Block Position:217754, Block size: 16750
+[2021/03/26-17:03:13.131][9288]Atlantis::MgrCacheFile::initialize Info: Index: 14, Initial Key: 11495, Block Position:234504, Block size: 16750
+[2021/03/26-17:03:13.131][9288]Atlantis::MgrCacheFile::initialize Info: Index: 15, Initial Key: 12245, Block Position:251254, Block size: 16750
+[2021/03/26-17:03:13.131][9288]Atlantis::MgrCacheFile::initialize Info: Index: 16, Initial Key: 12995, Block Position:268004, Block size: 16750
+[2021/03/26-17:03:13.131][9288]Atlantis::MgrCacheFile::initialize Info: Index: 17, Initial Key: 13745, Block Position:284754, Block size: 16770
+[2021/03/26-17:03:13.132][9288]Atlantis::MgrCacheFile::initialize Info: Index: 18, Initial Key: 14496, Block Position:301524, Block size: 16750
+[2021/03/26-17:03:13.132][9288]Atlantis::MgrCacheFile::initialize Info: Index: 19, Initial Key: 15246, Block Position:318274, Block size: 16750
+[2021/03/26-17:03:13.132][9288]Atlantis::MgrCacheFile::initialize Info: Index: 20, Initial Key: 15996, Block Position:335024, Block size: 16750
+[2021/03/26-17:03:13.132][9288]Atlantis::MgrCacheFile::initialize Info: Index: 21, Initial Key: 16746, Block Position:351774, Block size: 16750
+[2021/03/26-17:03:13.132][9288]Atlantis::MgrCacheFile::initialize Info: Index: 22, Initial Key: 17496, Block Position:368524, Block size: 16777
+[2021/03/26-17:03:13.132][9288]Atlantis::MgrCacheFile::initialize Info: Index: 23, Initial Key: 18247, Block Position:385301, Block size: 16750
+[2021/03/26-17:03:13.132][9288]Atlantis::MgrCacheFile::initialize Info: Index: 24, Initial Key: 18997, Block Position:402051, Block size: 16750
+[2021/03/26-17:03:13.133][9288]Atlantis::MgrCacheFile::initialize Info: Index: 25, Initial Key: 19747, Block Position:418801, Block size: 16750
+[2021/03/26-17:03:13.133][9288]Atlantis::MgrCacheFile::initialize Info: Index: 26, Initial Key: 20497, Block Position:435551, Block size: 16750
+[2021/03/26-17:03:13.133][9288]Atlantis::MgrCacheFile::initialize Info: Index: 27, Initial Key: 21247, Block Position:452301, Block size: 16750
+[2021/03/26-17:03:13.133][9288]Atlantis::MgrCacheFile::initialize Info: Index: 28, Initial Key: 21997, Block Position:469051, Block size: 16750
+[2021/03/26-17:03:13.134][9288]Atlantis::MgrCacheFile::initialize Info: Index: 29, Initial Key: 22747, Block Position:485801, Block size: 16770
+[2021/03/26-17:03:13.134][9288]Atlantis::MgrCacheFile::initialize Info: Index: 30, Initial Key: 23498, Block Position:502571, Block size: 16750
+[2021/03/26-17:03:13.134][9288]Atlantis::MgrCacheFile::initialize Info: Index: 31, Initial Key: 24248, Block Position:519321, Block size: 16797
+25000 Not found
+25001 Not found
+25002 Not found
+25003 Not found
+25004 Not found
+25005 Not found
+25006 Not found
+25007 Not found
+25008 Not found
+[2021/03/26-17:04:05.247][9288]Atlantis::BigFile::~BigFile Info: GetValue Request: 50007, Request found in cache: 5552, Request Inserted into cache: 44446, RequestNotFound: 9
+[2021/03/26-17:04:05.341][9288]Atlantis::MgrCacheFile::~MgrCacheFile Info: Blocks found in cache: 45707, Blocks inserted in cache: 7226

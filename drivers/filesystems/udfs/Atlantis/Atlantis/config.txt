@@ -1,0 +1,18 @@
+#Configurarion for cache file
+
+CacheFileName=.\frutas1.txt
+MaxRecordSize=32
+MaxReadBufferLength=25000
+CacheRecordSize=5000
+CacheFileSize=5
+
+LogFileName=.\Alantis.log
+
+# Parameter to warmup records (experimental)
+ExecuteWarmUp=true
+WarmUpMaxRecord=10000
+WarmUpMinKey=1
+WarmUpMaxKey=24999
+
+#If "CacheFileName" no exist generate it?
+GenerateFile=true

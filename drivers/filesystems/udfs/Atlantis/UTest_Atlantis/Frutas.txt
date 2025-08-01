@@ -1,0 +1,13 @@
+1 abacaxi
+2 caja
+3 banana
+4 maracuja
+5 siriguela
+6 uva
+7 morango
+8 manga
+9 pitaia
+10 caju
+11 mexerica
+12 goiaba
+13 laranja
