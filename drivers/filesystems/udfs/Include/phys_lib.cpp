@@ -1232,10 +1232,20 @@ UDFGetBlockSize(
             try_return(RC = STATUS_UNRECOGNIZED_VOLUME);
         }
     } else {
-        RC = UDFPhSendIOCTL(IOCTL_CDROM_GET_DRIVE_GEOMETRY_EX,DeviceObject,
-            &DiskGeometryEx,sizeof(DISK_GEOMETRY_EX),
+        // For non-disk devices, try disk geometry first (handles VHDs properly)
+        // then fall back to CDROM geometry for optical drives
+        RC = UDFPhSendIOCTL(IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,DeviceObject,
+            0,NULL,
             &DiskGeometryEx,sizeof(DISK_GEOMETRY_EX),
             TRUE,NULL );
+        
+        // If disk IOCTL failed with invalid device request, try CDROM IOCTL
+        if (RC == STATUS_INVALID_DEVICE_REQUEST) {
+            RC = UDFPhSendIOCTL(IOCTL_CDROM_GET_DRIVE_GEOMETRY_EX,DeviceObject,
+                &DiskGeometryEx,sizeof(DISK_GEOMETRY_EX),
+                &DiskGeometryEx,sizeof(DISK_GEOMETRY_EX),
+                TRUE,NULL );
+        }
 
         if (RC == STATUS_DEVICE_NOT_READY) {
             // probably, the device is really busy, may be by CD/DVD recording
@@ -1244,6 +1254,12 @@ UDFGetBlockSize(
         }
 
         Vcb->BlockSize = (NT_SUCCESS(RC)) ? DiskGeometryEx.Geometry.BytesPerSector : 2048;
+        
+        if (NT_SUCCESS(RC)) {
+            UDFPrint(("UDFGetBlockSize: Successfully obtained geometry for non-disk device\n"));
+        } else {
+            UDFPrint(("UDFGetBlockSize: Both disk and CDROM geometry IOCTLs failed, using default block size\n"));
+        }
     }
 
 #endif //_BROWSE_UDF_
