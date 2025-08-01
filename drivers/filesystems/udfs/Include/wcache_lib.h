@@ -179,8 +179,8 @@ NTSTATUS WCacheFlushBlocks__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN P
 NTSTATUS WCacheDirect__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context, 
     IN lba_t Lba, IN BOOLEAN Modified, OUT PCHAR* CachedBlock, IN BOOLEAN CachedOnly);
 
-NTSTATUS WCacheEODirect__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context);
-NTSTATUS WCacheStartDirect__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context, IN BOOLEAN ForWrite);
+NTSTATUS WCacheEODirect__(IN PW_CACHE Cache, IN PVOID Context);
+NTSTATUS WCacheStartDirect__(IN PW_CACHE Cache, IN PVOID Context, IN BOOLEAN ForWrite);
 
 BOOLEAN WCacheIsCached__(IN PW_CACHE Cache, IN lba_t Lba, IN ULONG BCount);
 

@@ -1191,7 +1191,7 @@ EO_WCache_D:
 
 // End direct I/O - release cache lock
 NTSTATUS
-WCacheEODirect__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context)
+WCacheEODirect__(IN PW_CACHE Cache, IN PVOID Context)
 {
     ExReleaseResourceLite(&(Cache->WCacheLock));
     return STATUS_SUCCESS;
@@ -1199,7 +1199,7 @@ WCacheEODirect__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context
 
 // Start direct I/O - acquire cache lock
 NTSTATUS
-WCacheStartDirect__(IN PIRP_CONTEXT IrpContext, IN PW_CACHE Cache, IN PVOID Context, IN BOOLEAN ForWrite)
+WCacheStartDirect__(IN PW_CACHE Cache, IN PVOID Context, IN BOOLEAN ForWrite)
 {
     ExAcquireResourceExclusiveLite(&(Cache->WCacheLock), TRUE);
     return STATUS_SUCCESS;
