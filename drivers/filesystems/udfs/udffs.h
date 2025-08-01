@@ -44,7 +44,7 @@
 
 // WinDiskCache - lightweight cache implementation using WinDiskCache from https://github.com/ogir-ok/WinDiskCache
 // This is designed to be a lighter alternative to WCache with fewer code requirements
-//#define UDF_USE_WDISK_CACHE
+#define UDF_USE_WDISK_CACHE
 
 #define UDF_ALLOW_FRAG_AD
 
