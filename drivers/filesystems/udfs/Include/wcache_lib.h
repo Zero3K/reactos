@@ -171,10 +171,6 @@ typedef struct _W_CACHE {
     ULONG RBalance;
     ULONG WBalance;
     ULONG FramesToKeepFree;
-    // Sequential access tracking for intelligent prefetching
-    lba_t LastAccessLba;
-    ULONG SequentialCount;
-    ULONG PrefetchAhead;
     // callbacks
     PWRITE_BLOCK WriteProc;
     PREAD_BLOCK ReadProc;
@@ -190,6 +186,11 @@ typedef struct _W_CACHE {
     PCHAR tmp_buff;
     PCHAR tmp_buff_r;
     PULONG reloc_tab;
+
+    // Sequential access tracking for intelligent prefetching
+    lba_t LastAccessLba;
+    ULONG SequentialCount;
+    ULONG PrefetchAhead;
 
 } W_CACHE, *PW_CACHE;
 
