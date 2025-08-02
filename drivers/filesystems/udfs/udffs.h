@@ -38,7 +38,7 @@
 
 //#define UDF_ASYNC_IO
 
-// WCACHE was replaced with Windows Cache Manager approach
+// Custom cache was replaced with Windows Cache Manager approach
 
 #define UDF_ALLOW_FRAG_AD
 
@@ -152,6 +152,7 @@ typedef FILE_ID                     *PFILE_ID;
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
+// Windows Cache Manager is used instead of custom cache system
 #include "wcache.h"
 
 #include "Include/regtools.h"
@@ -359,7 +360,8 @@ UDFFreePool(
 #define UDF_FILE_DLD                                    (0x00000200)
 #define UDF_FILE_MEM                                    (0x00000201)
 #define UDF_FILE_MEMH                                   (0x00000202)
-#define UDF_FILE_WCACHE                                 (0x00000203)
+// Windows Cache Manager file constants (was UDF_FILE_CACHE)
+#define UDF_FILE_CACHE_MGR                             (0x00000203)
 
 #define UDF_FILE_UDF_INFO                               (0x00000100)
 #define UDF_FILE_UDF_INFO_ALLOC                         (0x00000101)

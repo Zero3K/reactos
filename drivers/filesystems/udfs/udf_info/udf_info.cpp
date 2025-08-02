@@ -4952,7 +4952,7 @@ UDFRecordVAT(
     // drop VAT
     DbgFreePool(Vat);
     len = VatLen;
-    // the operation of resize can modifiy WriteCount in WCache due to movement
+    // Windows Cache Manager handles cache consistency automatically during operations
     // of the data from FE. That's why we should remember PacketOffset now
     if (to_read < VatLen) {
         status = UDFResizeFile__(IrpContext, Vcb, VatFileInfo, len = hdrLen + VatLen);

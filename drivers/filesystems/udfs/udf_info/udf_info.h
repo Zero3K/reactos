@@ -10,7 +10,7 @@
 #include "ecma_167.h"
 #include "osta_misc.h"
 #include "udf_rel.h"
-#include "wcache.h"
+// Windows Cache Manager is used instead of custom cache
 
 // memory re-allocation (returns new buffer size)
 uint32    UDFMemRealloc(IN int8* OldBuff,     // old buffer

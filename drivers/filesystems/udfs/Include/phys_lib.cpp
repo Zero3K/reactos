@@ -288,7 +288,7 @@ UDFTIOVerify(
         }
 
         if (!zero) {
-            // Simplified without wcache - always read if not in packet or not verified
+            // Simplified without custom cache - always read if not in packet or not verified
             cached_block = NULL;
             if (!packet_ok && !UDFVIsStored(Vcb, lba0+i)) {
 
@@ -1399,7 +1399,7 @@ try_exit:   NOTHING;
             if (!(Vcb->LastPossibleLBA >> i))
                 break;
         }
-        // WCache configuration removed
+        // Windows Cache Manager configuration used instead
 
 #endif //_BROWSE_UDF_
 
@@ -1541,7 +1541,7 @@ UDFReadSectors(
     OUT PSIZE_T ReadBytes
     )
 {
-    // Always use direct I/O now that wcache is removed
+    // Always use direct I/O now that Windows Cache Manager is used
     return UDFTRead(IrpContext, Vcb, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
 } // end UDFReadSectors()
 
@@ -1568,7 +1568,7 @@ UDFReadInSector(
     SIZE_T _ReadBytes;
 
     (*ReadBytes) = 0;
-    // Always use non-cached path now that wcache is removed
+    // Always use non-cached path now that Windows Cache Manager is used
     if (Direct) {
         return STATUS_INVALID_PARAMETER;
     }
@@ -1678,7 +1678,7 @@ UDFWriteSectors(
     }
 #endif //_BROWSE_UDF_
 
-    // Always use direct I/O now that wcache is removed
+    // Always use direct I/O now that Windows Cache Manager is used
     status = UDFTWrite(IrpContext, Vcb, Buffer, BCount<<Vcb->BlockSizeBits, Lba, WrittenBytes);
     ASSERT(NT_SUCCESS(status));
 #ifdef _BROWSE_UDF_
@@ -1720,7 +1720,7 @@ UDFWriteInSector(
 
     (*WrittenBytes) = 0;
 #ifdef _BROWSE_UDF_
-    // Always use non-cached path now that wcache is removed
+    // Always use non-cached path now that Windows Cache Manager is used
     // If Direct = TRUE we should never get here, but...
     if (Direct) {
         BrutePoint();

@@ -36,7 +36,8 @@
 #define         UDF_HANDLE_HW_RO            L"HandleHWReadOnly"
 #define         UDF_HANDLE_SOFT_RO          L"HandleSoftReadOnly"
 #define         UDF_COMPARE_BEFORE_WRITE    L"CompareBeforeWrite"
-#define         UDF_CACHE_SIZE_MULTIPLIER   L"WCacheSizeMultiplier"
+// Windows Cache Manager configuration (was custom cache size multiplier)
+#define         UDF_CACHE_SIZE_MULTIPLIER   L"CacheSizeMultiplier"
 #define         UDF_CHAINED_IO              L"CacheChainedIo"
 #define         UDF_FORCE_HW_RO             L"ForceHWReadOnly"
 #define         UDF_IGNORE_SEQUENTIAL_IO    L"IgnoreSequantialIo"

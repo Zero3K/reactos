@@ -441,7 +441,7 @@ try_exit: NOTHING;
             // Release internal cache
             UDFPrint(("UDFVerifyVolume: delete NewVcb\n"));
             // Windows Cache Manager cleanup - no manual flush/release needed
-            // WCacheFlushAll__ and WCacheRelease__ are handled automatically
+            // Windows Cache Manager handles flushing and releasing automatically
             UDFCleanupVCB(NewVcb);
             MyFreePool__(NewVcb);
         }

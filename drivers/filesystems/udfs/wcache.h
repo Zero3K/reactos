@@ -4,11 +4,11 @@
 // This file was released under the GPLv2 on June 2015.
 ////////////////////////////////////////////////////////////////////
 
-#ifndef __CDRW_WCACHE_H__
-#define __CDRW_WCACHE_H__
+#ifndef __UDF_CACHE_H__
+#define __UDF_CACHE_H__
 
-// Cache Manager callbacks - similar to BTRFS implementation
+// Windows Cache Manager callbacks - used instead of old custom cache system
 void init_cache();
 extern CACHE_MANAGER_CALLBACKS cache_callbacks;
 
-#endif // __CDRW_WCACHE_H__
+#endif // __UDF_CACHE_H__
