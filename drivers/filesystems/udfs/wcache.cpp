@@ -9,7 +9,7 @@
 CACHE_MANAGER_CALLBACKS cache_callbacks;
 
 static BOOLEAN __stdcall acquire_for_lazy_write(PVOID Context, BOOLEAN Wait) {
-    PFILE_OBJECT FileObject = Context;
+    PFILE_OBJECT FileObject = (PFILE_OBJECT)Context;
     FCB* fcb = (FCB*)FileObject->FsContext;
 
     UDFPrint(("UDF: acquire_for_lazy_write(%p, %u)\n", Context, Wait));
@@ -17,7 +17,7 @@ static BOOLEAN __stdcall acquire_for_lazy_write(PVOID Context, BOOLEAN Wait) {
     if (!ExAcquireResourceSharedLite(&fcb->Vcb->VcbResource, Wait))
         return FALSE;
 
-    if (!ExAcquireResourceExclusiveLite(&fcb->NTRequiredFCB->MainResource, Wait)) {
+    if (!ExAcquireResourceExclusiveLite(fcb->Header.Resource, Wait)) {
         ExReleaseResourceLite(&fcb->Vcb->VcbResource);
         return FALSE;
     }
@@ -28,12 +28,12 @@ static BOOLEAN __stdcall acquire_for_lazy_write(PVOID Context, BOOLEAN Wait) {
 }
 
 static void __stdcall release_from_lazy_write(PVOID Context) {
-    PFILE_OBJECT FileObject = Context;
+    PFILE_OBJECT FileObject = (PFILE_OBJECT)Context;
     FCB* fcb = (FCB*)FileObject->FsContext;
 
     UDFPrint(("UDF: release_from_lazy_write(%p)\n", Context));
 
-    ExReleaseResourceLite(&fcb->NTRequiredFCB->MainResource);
+    ExReleaseResourceLite(fcb->Header.Resource);
     ExReleaseResourceLite(&fcb->Vcb->VcbResource);
 
     if (IoGetTopLevelIrp() == (PIRP)FSRTL_CACHE_TOP_LEVEL_IRP)
@@ -41,12 +41,12 @@ static void __stdcall release_from_lazy_write(PVOID Context) {
 }
 
 static BOOLEAN __stdcall acquire_for_read_ahead(PVOID Context, BOOLEAN Wait) {
-    PFILE_OBJECT FileObject = Context;
+    PFILE_OBJECT FileObject = (PFILE_OBJECT)Context;
     FCB* fcb = (FCB*)FileObject->FsContext;
 
     UDFPrint(("UDF: acquire_for_read_ahead(%p, %u)\n", Context, Wait));
 
-    if (!ExAcquireResourceSharedLite(&fcb->NTRequiredFCB->MainResource, Wait))
+    if (!ExAcquireResourceSharedLite(fcb->Header.Resource, Wait))
         return FALSE;
 
     IoSetTopLevelIrp((PIRP)FSRTL_CACHE_TOP_LEVEL_IRP);
@@ -55,12 +55,12 @@ static BOOLEAN __stdcall acquire_for_read_ahead(PVOID Context, BOOLEAN Wait) {
 }
 
 static void __stdcall release_from_read_ahead(PVOID Context) {
-    PFILE_OBJECT FileObject = Context;
+    PFILE_OBJECT FileObject = (PFILE_OBJECT)Context;
     FCB* fcb = (FCB*)FileObject->FsContext;
 
     UDFPrint(("UDF: release_from_read_ahead(%p)\n", Context));
 
-    ExReleaseResourceLite(&fcb->NTRequiredFCB->MainResource);
+    ExReleaseResourceLite(fcb->Header.Resource);
 
     if (IoGetTopLevelIrp() == (PIRP)FSRTL_CACHE_TOP_LEVEL_IRP)
         IoSetTopLevelIrp(NULL);
