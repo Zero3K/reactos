@@ -484,7 +484,10 @@ UdfsCacheWriteBlocks(
                 IrpContext, Cache, Context, Buffer, Lba, BCount, WrittenBytes);
             
         } else {
-            // Regular write path for random I/O
+            // Enhanced random write path with aggressive batching
+            PUDFS_CACHE_ENTRY BatchEntries[UDFS_CACHE_BATCH_SIZE];
+            ULONG BatchCount = 0;
+            
             for (i = 0; i < BCount; i++) {
                 lba_t CurrentLba = Lba + i;
                 PUDFS_CACHE_ENTRY Entry;
@@ -521,7 +524,20 @@ UdfsCacheWriteBlocks(
                         UdfsCacheAddToDirtyList(Cache, Entry);
                     }
                     
+                    // Collect for potential batch processing
+                    BatchEntries[BatchCount++] = Entry;
                     TotalBytesWritten += Cache->BlockSize;
+                    
+                    // Process batch if full (but don't flush aggressively for random I/O)
+                    if (BatchCount >= UDFS_CACHE_BATCH_SIZE) {
+                        // For random writes, only flush if memory pressure is critical
+                        if (UdfsCacheShouldFlushDuringWrite(Cache)) {
+                            NTSTATUS BatchStatus = UdfsCacheBatchFlushBlocks(
+                                IrpContext, Cache, Context, BatchEntries, BatchCount);
+                            // Don't fail the entire operation if batch flush fails
+                        }
+                        BatchCount = 0;
+                    }
                 }
                 
                 CurrentBuffer += Cache->BlockSize;
@@ -741,7 +757,7 @@ UdfsCacheRelease(
     RtlZeroMemory(Cache, sizeof(UDFS_CACHE));
 }
 
-// Check if cache needs flushing due to memory pressure (more conservative during writes)
+// Check if cache needs flushing due to memory pressure (extremely conservative during writes)
 BOOLEAN
 UdfsCacheShouldFlushDuringWrite(
     IN PUDFS_CACHE Cache
@@ -751,9 +767,9 @@ UdfsCacheShouldFlushDuringWrite(
         return FALSE;
     }
     
-    // Only flush during writes if we're really running out of space
-    // Use 90% threshold instead of 100% to maintain write-back benefits
-    return (Cache->DirtyCount >= (Cache->MaxDirtyCount * 9 / 10));
+    // Only flush during writes if we're critically low on space
+    // Use 95% threshold to preserve write-back benefits as much as possible
+    return (Cache->DirtyCount >= (Cache->MaxDirtyCount * 95 / 100));
 }
 
 // Check if cache needs flushing
@@ -820,8 +836,9 @@ UdfsCacheIsSequentialWrite(
         return FALSE;
     }
     
-    // Check if current LBA is adjacent to last write
-    return (Lba == Cache->LastWriteLba + 1);
+    // Check if current LBA is adjacent to last write, or within coalescing distance
+    return (Lba == Cache->LastWriteLba + 1) || 
+           (Lba > Cache->LastWriteLba && (Lba - Cache->LastWriteLba) <= 4);
 }
 
 // Update sequential write state

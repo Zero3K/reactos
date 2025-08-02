@@ -81,13 +81,13 @@ typedef struct _UDFS_CACHE {
 #define UDFS_CACHE_MODE_RO   0x00000000  // Read only
 #define UDFS_CACHE_MODE_RW   0x00000001  // Read/Write
 
-// Performance tuning constants - optimized for modern drive performance
-#define UDFS_CACHE_DEFAULT_DIRTY_THRESHOLD    256  // Default max dirty blocks before flush (512KB)
-#define UDFS_CACHE_DEFAULT_FLUSH_INTERVAL     30000 // Default flush interval (30 seconds)
-#define UDFS_CACHE_BATCH_SIZE                 64   // Number of blocks to batch together (128KB)
-#define UDFS_CACHE_MIN_BATCH_SIZE             8    // Minimum blocks for batching
-#define UDFS_CACHE_SEQUENTIAL_THRESHOLD       4    // Number of sequential writes to trigger optimization
-#define UDFS_CACHE_MAX_COALESCE_DISTANCE      32   // Maximum LBA distance for write coalescing
+// Performance tuning constants - aggressively optimized for maximum write-back performance
+#define UDFS_CACHE_DEFAULT_DIRTY_THRESHOLD    2048 // Default max dirty blocks before flush (4MB)
+#define UDFS_CACHE_DEFAULT_FLUSH_INTERVAL     120000 // Default flush interval (120 seconds)
+#define UDFS_CACHE_BATCH_SIZE                 256  // Number of blocks to batch together (512KB)
+#define UDFS_CACHE_MIN_BATCH_SIZE             16   // Minimum blocks for batching
+#define UDFS_CACHE_SEQUENTIAL_THRESHOLD       2    // Number of sequential writes to trigger optimization
+#define UDFS_CACHE_MAX_COALESCE_DISTANCE      128  // Maximum LBA distance for write coalescing
 
 // Initialize cache
 NTSTATUS 
