@@ -225,6 +225,32 @@ UdfsCacheOptimizedSequentialWrite(
     OUT PSIZE_T WrittenBytes
     );
 
+// Internal cache management functions
+VOID
+UdfsCacheRemoveEntry(
+    IN PUDFS_CACHE Cache,
+    IN PUDFS_CACHE_ENTRY EntryToRemove
+    );
+
+VOID
+UdfsCacheAddEntry(
+    IN PUDFS_CACHE Cache,
+    IN PUDFS_CACHE_ENTRY Entry,
+    IN lba_t Lba
+    );
+
+VOID
+UdfsCacheAddToDirtyList(
+    IN PUDFS_CACHE Cache,
+    IN PUDFS_CACHE_ENTRY Entry
+    );
+
+VOID
+UdfsCacheRemoveFromDirtyList(
+    IN PUDFS_CACHE Cache,
+    IN PUDFS_CACHE_ENTRY Entry
+    );
+
 } // extern "C"
 
 #endif // __UDFS_CACHE_H__
