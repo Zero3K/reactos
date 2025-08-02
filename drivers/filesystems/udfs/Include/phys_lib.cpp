@@ -190,7 +190,7 @@ UDFTIOVerify(
     }
     if (Flags & PH_LOCK_CACHE) {
         UDFReleaseResource(&(Vcb->IoResource));
-        WCacheStartDirect__(&(Vcb->FastCache), Vcb, TRUE);
+        // Cache locking handled by Windows Cache Manager
         UDFAcquireResourceExclusive(&(Vcb->IoResource), TRUE);
     }
 
@@ -288,26 +288,22 @@ UDFTIOVerify(
         }
 
         if (!zero) {
-            if (WCacheIsCached__(&(Vcb->FastCache), lba0+i, 1)) {
-                // even if block is cached, we have to verify if it is readable
-                if (!packet_ok && !UDFVIsStored(Vcb, lba0+i)) {
+            // Simplified without wcache - always read if not in packet or not verified
+            cached_block = NULL;
+            if (!packet_ok && !UDFVIsStored(Vcb, lba0+i)) {
 
-                    tmp_wb = (SIZE_T)_Vcb;
-                    RC = UDFTRead(IrpContext, _Vcb, p, Vcb->BlockSize, lba0+i, &tmp_wb,
-                                  Flags | PH_FORGET_VERIFIED | PH_READ_VERIFY_CACHE | PH_TMP_BUFFER | PH_VCB_IN_RETLEN);
-                    if (!NT_SUCCESS(RC)) {
-                        UDFPrint(("  Found BB @ %x\n", lba0+i));
-                    }
-
+                tmp_wb = (SIZE_T)_Vcb;
+                RC = UDFTRead(IrpContext, _Vcb, p, Vcb->BlockSize, lba0+i, &tmp_wb,
+                              Flags | PH_FORGET_VERIFIED | PH_READ_VERIFY_CACHE | PH_TMP_BUFFER | PH_VCB_IN_RETLEN);
+                if (!NT_SUCCESS(RC)) {
+                    UDFPrint(("  Found BB @ %x\n", lba0+i));
                 }
-                RC = WCacheDirect__(IrpContext, &Vcb->FastCache, _Vcb, lba0+i, FALSE, &cached_block, TRUE/* cached only */);
+
+            }
+            if (!packet_ok) {
+                RC = STATUS_UNSUCCESSFUL;
             } else {
-                cached_block = NULL;
-                if (!packet_ok) {
-                    RC = STATUS_UNSUCCESSFUL;
-                } else {
-                    RC = STATUS_SUCCESS;
-                }
+                RC = STATUS_SUCCESS;
             }
             if (NT_SUCCESS(RC)) {
                 // cached or successfully read
@@ -431,7 +427,7 @@ do_remap:
 
     UDFReleaseResource(&(Vcb->IoResource));
     if (Flags & PH_LOCK_CACHE) {
-        WCacheEODirect__(&(Vcb->FastCache), Vcb);
+        // Cache unlocking handled by Windows Cache Manager
     }
 
     return RC;
@@ -1403,10 +1399,7 @@ try_exit:   NOTHING;
             if (!(Vcb->LastPossibleLBA >> i))
                 break;
         }
-        if (i > 20) {
-            Vcb->WCacheBlocksPerFrameSh = max(Vcb->WCacheBlocksPerFrameSh, (2*i)/5+2);
-            Vcb->WCacheBlocksPerFrameSh = min(Vcb->WCacheBlocksPerFrameSh, 16);
-        }
+        // WCache configuration removed
 
 #endif //_BROWSE_UDF_
 
@@ -1430,7 +1423,7 @@ try_exit:   NOTHING;
         UDFPrint(("UDF: Last LBA in last session: %x\n",Vcb->LastLBA));
         UDFPrint(("UDF: First writable LBA (NWA) in last session: %x\n",Vcb->NWA));
         UDFPrint(("UDF: Last available LBA beyond end of last session: %x\n",Vcb->LastPossibleLBA));
-        UDFPrint(("UDF: blocks per frame: %x\n",1 << Vcb->WCacheBlocksPerFrameSh));
+        UDFPrint(("UDF: Cache system: Windows Cache Manager\n"));
         UDFPrint(("UDF: Flags: %s%s\n",
                  Vcb->VcbState & UDF_VCB_FLAGS_RAW_DISK ? "RAW " : "",
                  Vcb->VcbState & VCB_STATE_VOLUME_READ_ONLY ? "R/O " : "WR "
@@ -1548,9 +1541,7 @@ UDFReadSectors(
     OUT PSIZE_T ReadBytes
     )
 {
-    if (Vcb->FastCache.ReadProc && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
-        return WCacheReadBlocks__(IrpContext, &Vcb->FastCache, Vcb, Buffer, Lba, BCount, ReadBytes, Direct);
-    }
+    // Always use direct I/O now that wcache is removed
     return UDFTRead(IrpContext, Vcb, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
 } // end UDFReadSectors()
 
@@ -1577,21 +1568,14 @@ UDFReadInSector(
     SIZE_T _ReadBytes;
 
     (*ReadBytes) = 0;
-    if (Vcb->FastCache.ReadProc && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
-        status = WCacheDirect__(IrpContext, &Vcb->FastCache, Vcb, Lba, FALSE, &tmp_buff, Direct);
-        if (NT_SUCCESS(status)) {
-            (*ReadBytes) += l;
-            RtlCopyMemory(Buffer, tmp_buff+i, l);
-        }
-        if (!Direct) WCacheEODirect__(&Vcb->FastCache, Vcb);
-    } else {
-        if (Direct) {
-            return STATUS_INVALID_PARAMETER;
-        }
-        tmp_buff = (int8*)MyAllocatePool__(NonPagedPool, Vcb->BlockSize);
-        if (!tmp_buff) return STATUS_INSUFFICIENT_RESOURCES;
-        status = UDFReadSectors(IrpContext, Vcb, Translate, Lba, 1, FALSE, tmp_buff, &_ReadBytes);
-        if (NT_SUCCESS(status)) {
+    // Always use non-cached path now that wcache is removed
+    if (Direct) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    tmp_buff = (int8*)MyAllocatePool__(NonPagedPool, Vcb->BlockSize);
+    if (!tmp_buff) return STATUS_INSUFFICIENT_RESOURCES;
+    status = UDFReadSectors(IrpContext, Vcb, Translate, Lba, 1, FALSE, tmp_buff, &_ReadBytes);
+    if (NT_SUCCESS(status)) {
             (*ReadBytes) += l;
             RtlCopyMemory(Buffer, tmp_buff+i, l);
         }
@@ -1695,15 +1679,7 @@ UDFWriteSectors(
     }
 #endif //_BROWSE_UDF_
 
-    if (Vcb->FastCache.WriteProc && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
-        status = WCacheWriteBlocks__(IrpContext, &Vcb->FastCache, Vcb, Buffer, Lba, BCount, WrittenBytes, Direct);
-        ASSERT(NT_SUCCESS(status));
-#ifdef _BROWSE_UDF_
-        UDFClrZeroBits(Vcb->ZSBM_Bitmap, Lba, BCount);
-#endif //_BROWSE_UDF_
-        return status;
-    }
-
+    // Always use direct I/O now that wcache is removed
     status = UDFTWrite(IrpContext, Vcb, Buffer, BCount<<Vcb->BlockSizeBits, Lba, WrittenBytes);
     ASSERT(NT_SUCCESS(status));
 #ifdef _BROWSE_UDF_
@@ -1744,30 +1720,17 @@ UDFWriteInSector(
 #endif //_BROWSE_UDF_
 
     (*WrittenBytes) = 0;
-#ifdef _BROWSE_UDF_
-    if (Vcb->FastCache.WriteProc && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
-#endif //_BROWSE_UDF_
-        status = WCacheDirect__(IrpContext, &Vcb->FastCache, Vcb, Lba, TRUE, &tmp_buff, Direct);
-        if (NT_SUCCESS(status)) {
-#ifdef _BROWSE_UDF_
-            UDFClrZeroBit(Vcb->ZSBM_Bitmap, Lba);
-#endif //_BROWSE_UDF_
-            (*WrittenBytes) += l;
-            RtlCopyMemory(tmp_buff+i, Buffer, l);
-        }
-        if (!Direct) WCacheEODirect__(&(Vcb->FastCache), Vcb);
-#ifdef _BROWSE_UDF_
-    } else {
-        // If Direct = TRUE we should never get here, but...
-        if (Direct) {
-            BrutePoint();
-            return STATUS_INVALID_PARAMETER;
-        }
-        tmp_buff = (int8*)MyAllocatePool__(NonPagedPool, Vcb->BlockSize);
-        if (!tmp_buff) {
-            BrutePoint();
-            return STATUS_INSUFFICIENT_RESOURCES;
-        }
+    // Always use non-cached path now that wcache is removed
+    // If Direct = TRUE we should never get here, but...
+    if (Direct) {
+        BrutePoint();
+        return STATUS_INVALID_PARAMETER;
+    }
+    tmp_buff = (int8*)MyAllocatePool__(NonPagedPool, Vcb->BlockSize);
+    if (!tmp_buff) {
+        BrutePoint();
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
         // read packet
         status = UDFReadSectors(IrpContext, Vcb, Translate, Lba, 1, FALSE, tmp_buff, &ReadBytes);
         if (!NT_SUCCESS(status)) goto EO_WrSctD;

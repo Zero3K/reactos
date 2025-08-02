@@ -739,7 +739,7 @@ UDFCommonWrite(
                 Fcb->Header.ValidDataLength.QuadPart = ByteOffset.QuadPart + TruncatedLength;
             }
 
-            // Successful check will cause WCache lock
+            // Cache checking for async operation decision
             if (!CanWait && UDFIsFileCached__(Vcb, Fcb->FileInfo, ByteOffset.QuadPart, TruncatedLength, TRUE)) {
                 UDFPrint(("UDFCommonWrite: Cached => CanWait\n"));
                 CacheLocked = TRUE;
