@@ -451,7 +451,7 @@ UDFUpdateLogicalVolInt(
 
     Vcb->IntegrityType = INTEGRITY_TYPE_OPEN; // make happy auto-dirty
     RC = UDFWriteSectors(IrpContext, Vcb, TRUE, PTag->tagLocation, len >> Vcb->BlockSizeBits, FALSE, (int8*)(lvid), &WrittenBytes);
-    WCacheFlushBlocks__(IrpContext, &Vcb->FastCache, Vcb, PTag->tagLocation, len >> Vcb->BlockSizeBits);
+    UdfCacheFlushBlocks(IrpContext, Vcb, Vcb, PTag->tagLocation, len >> Vcb->BlockSizeBits);
     // update it here to prevent recursion
     Vcb->IntegrityType = lvid->integrityType;
 
@@ -956,7 +956,7 @@ UDFUmount__(
     if (Vcb->VerifyOnWrite) {
         UDFPrint(("UDF: Flushing cache for verify\n"));
         //WCacheFlushAll__(&(Vcb->FastCache), Vcb);
-        WCacheFlushBlocks__(IrpContext, &Vcb->FastCache, Vcb, 0, Vcb->LastLBA);
+        UdfCacheFlushBlocks(IrpContext, Vcb, Vcb, 0, Vcb->LastLBA);
         UDFVFlush(Vcb);
     }
 

@@ -779,7 +779,7 @@ try_exit:   NOTHING;
     } _SEH2_FINALLY {
 
         if (CacheLocked) {
-            WCacheEODirect__(&(Vcb->FastCache), Vcb);
+            UdfCacheEODirect(Vcb, Vcb);
         }
 
         // Post IRP if required

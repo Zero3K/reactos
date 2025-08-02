@@ -272,3 +272,159 @@ UdfCacheIsInitialized(
     return WCacheIsInitialized__(&Vcb->FastCache);
 #endif
 }
+
+// Additional compatibility functions for direct cache access
+
+// Start direct cache access (simplified - no-op for simple cache)
+VOID
+UdfCacheStartDirect(
+    IN PVCB Vcb,
+    IN PVOID Context,
+    IN BOOLEAN IsReadOperation
+    )
+{
+#ifdef UDF_USE_SIMPLE_CACHE
+    // Simple cache doesn't need direct access setup
+    UNREFERENCED_PARAMETER(Vcb);
+    UNREFERENCED_PARAMETER(Context);
+    UNREFERENCED_PARAMETER(IsReadOperation);
+#else
+    WCacheStartDirect__(&Vcb->FastCache, Context, IsReadOperation);
+#endif
+}
+
+// End direct cache access (simplified - no-op for simple cache)  
+VOID
+UdfCacheEODirect(
+    IN PVCB Vcb,
+    IN PVOID Context
+    )
+{
+#ifdef UDF_USE_SIMPLE_CACHE
+    // Simple cache doesn't need direct access cleanup
+    UNREFERENCED_PARAMETER(Vcb);
+    UNREFERENCED_PARAMETER(Context);
+#else
+    WCacheEODirect__(&Vcb->FastCache, Context);
+#endif
+}
+
+// Check if block is cached (simplified)
+BOOLEAN
+UdfCacheIsCached(
+    IN PVCB Vcb,
+    IN lba_t Lba,
+    IN ULONG BCount
+    )
+{
+#ifdef UDF_USE_SIMPLE_CACHE
+    // For simple cache, just check if initialized
+    // In a full implementation, we'd check if the specific blocks are cached
+    UNREFERENCED_PARAMETER(Lba);
+    UNREFERENCED_PARAMETER(BCount);
+    return UdfsCacheIsInitialized(&Vcb->SimpleCache);
+#else
+    return WCacheIsCached__(&Vcb->FastCache, Lba, BCount);
+#endif
+}
+
+// Direct cache access (simplified)
+NTSTATUS
+UdfCacheDirect(
+    IN PIRP_CONTEXT IrpContext,
+    IN PVCB Vcb,
+    IN PVOID Context,
+    IN lba_t Lba,
+    IN BOOLEAN Modified,
+    OUT PCHAR* CachedBlock,
+    IN BOOLEAN CachedOnly
+    )
+{
+#ifdef UDF_USE_SIMPLE_CACHE
+    // Simple cache doesn't support direct access - fall back to regular read
+    UNREFERENCED_PARAMETER(Modified);
+    UNREFERENCED_PARAMETER(CachedBlock);
+    
+    // For now, return not supported for direct access in simple cache
+    // A full implementation could cache and return pointers
+    UNREFERENCED_PARAMETER(IrpContext);
+    UNREFERENCED_PARAMETER(Vcb); 
+    UNREFERENCED_PARAMETER(Context);
+    UNREFERENCED_PARAMETER(Lba);
+    UNREFERENCED_PARAMETER(CachedOnly);
+    return STATUS_NOT_SUPPORTED;
+#else
+    return WCacheDirect__(IrpContext, &Vcb->FastCache, Context, 
+                         Lba, Modified, CachedBlock, CachedOnly);
+#endif
+}
+
+// Additional advanced cache functions
+
+// Get write block count
+ULONG
+UdfCacheGetWriteBlockCount(
+    IN PVCB Vcb
+    )
+{
+#ifdef UDF_USE_SIMPLE_CACHE
+    return Vcb->SimpleCache.WriteCount;
+#else
+    return WCacheGetWriteBlockCount__(&Vcb->FastCache);
+#endif
+}
+
+// Change cache flags
+NTSTATUS
+UdfCacheChFlags(
+    IN PVCB Vcb,
+    IN ULONG SetFlags,
+    IN ULONG ClrFlags
+    )
+{
+#ifdef UDF_USE_SIMPLE_CACHE
+    // Simple cache doesn't support dynamic flag changes
+    UNREFERENCED_PARAMETER(Vcb);
+    UNREFERENCED_PARAMETER(SetFlags);
+    UNREFERENCED_PARAMETER(ClrFlags);
+    return STATUS_SUCCESS;
+#else
+    return WCacheChFlags__(&Vcb->FastCache, SetFlags, ClrFlags);
+#endif
+}
+
+// Set cache mode
+NTSTATUS  
+UdfCacheSetMode(
+    IN PVCB Vcb,
+    IN ULONG Mode
+    )
+{
+#ifdef UDF_USE_SIMPLE_CACHE
+    // Update simple cache mode
+    if (Mode == WCACHE_MODE_ROM || Mode == WCACHE_MODE_R) {
+        Vcb->SimpleCache.Mode = UDFS_CACHE_MODE_RO;
+    } else {
+        Vcb->SimpleCache.Mode = UDFS_CACHE_MODE_RW;
+    }
+    return STATUS_SUCCESS;
+#else
+    return WCacheSetMode__(&Vcb->FastCache, Mode);
+#endif
+}
+
+// Sync relocation (simplified - no-op)
+VOID
+UdfCacheSyncReloc(
+    IN PVCB Vcb,
+    IN PVOID Context
+    )
+{
+#ifdef UDF_USE_SIMPLE_CACHE
+    // Simple cache doesn't need relocation sync
+    UNREFERENCED_PARAMETER(Vcb);
+    UNREFERENCED_PARAMETER(Context);
+#else
+    WCacheSyncReloc__(&Vcb->FastCache, Context);
+#endif
+}

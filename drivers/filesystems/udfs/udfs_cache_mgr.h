@@ -110,6 +110,73 @@ UdfCacheIsInitialized(
     IN PVCB Vcb
     );
 
+// Additional compatibility functions for direct cache access
+
+// Start direct cache access
+VOID
+UdfCacheStartDirect(
+    IN PVCB Vcb,
+    IN PVOID Context,
+    IN BOOLEAN IsReadOperation
+    );
+
+// End direct cache access
+VOID
+UdfCacheEODirect(
+    IN PVCB Vcb,
+    IN PVOID Context
+    );
+
+// Check if block is cached
+BOOLEAN
+UdfCacheIsCached(
+    IN PVCB Vcb,
+    IN lba_t Lba,
+    IN ULONG BCount
+    );
+
+// Direct cache access
+NTSTATUS
+UdfCacheDirect(
+    IN PIRP_CONTEXT IrpContext,
+    IN PVCB Vcb,
+    IN PVOID Context,
+    IN lba_t Lba,
+    IN BOOLEAN Modified,
+    OUT PCHAR* CachedBlock,
+    IN BOOLEAN CachedOnly
+    );
+
+// Additional advanced cache functions
+
+// Get write block count
+ULONG
+UdfCacheGetWriteBlockCount(
+    IN PVCB Vcb
+    );
+
+// Change cache flags
+NTSTATUS
+UdfCacheChFlags(
+    IN PVCB Vcb,
+    IN ULONG SetFlags,
+    IN ULONG ClrFlags
+    );
+
+// Set cache mode
+NTSTATUS  
+UdfCacheSetMode(
+    IN PVCB Vcb,
+    IN ULONG Mode
+    );
+
+// Sync relocation
+VOID
+UdfCacheSyncReloc(
+    IN PVCB Vcb,
+    IN PVOID Context
+    );
+
 } // extern "C"
 
 #endif // __UDFS_CACHE_MGR_H__

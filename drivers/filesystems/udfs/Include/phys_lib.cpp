@@ -190,7 +190,7 @@ UDFTIOVerify(
     }
     if (Flags & PH_LOCK_CACHE) {
         UDFReleaseResource(&(Vcb->IoResource));
-        WCacheStartDirect__(&(Vcb->FastCache), Vcb, TRUE);
+        UdfCacheStartDirect(Vcb, Vcb, TRUE);
         UDFAcquireResourceExclusive(&(Vcb->IoResource), TRUE);
     }
 
@@ -288,7 +288,7 @@ UDFTIOVerify(
         }
 
         if (!zero) {
-            if (WCacheIsCached__(&(Vcb->FastCache), lba0+i, 1)) {
+            if (UdfCacheIsCached(Vcb, lba0+i, 1)) {
                 // even if block is cached, we have to verify if it is readable
                 if (!packet_ok && !UDFVIsStored(Vcb, lba0+i)) {
 
@@ -300,7 +300,7 @@ UDFTIOVerify(
                     }
 
                 }
-                RC = WCacheDirect__(IrpContext, &Vcb->FastCache, _Vcb, lba0+i, FALSE, &cached_block, TRUE/* cached only */);
+                RC = UdfCacheDirect(IrpContext, Vcb, _Vcb, lba0+i, FALSE, &cached_block, TRUE/* cached only */);
             } else {
                 cached_block = NULL;
                 if (!packet_ok) {
@@ -431,7 +431,7 @@ do_remap:
 
     UDFReleaseResource(&(Vcb->IoResource));
     if (Flags & PH_LOCK_CACHE) {
-        WCacheEODirect__(&(Vcb->FastCache), Vcb);
+        UdfCacheEODirect(Vcb, Vcb);
     }
 
     return RC;
@@ -1548,8 +1548,8 @@ UDFReadSectors(
     OUT PSIZE_T ReadBytes
     )
 {
-    if (Vcb->FastCache.ReadProc && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
-        return WCacheReadBlocks__(IrpContext, &Vcb->FastCache, Vcb, Buffer, Lba, BCount, ReadBytes, Direct);
+    if (UdfCacheIsInitialized(Vcb) && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
+        return UdfCacheReadBlocks(IrpContext, Vcb, Vcb, Buffer, Lba, BCount, ReadBytes, Direct);
     }
     return UDFTRead(IrpContext, Vcb, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
 } // end UDFReadSectors()
@@ -1577,13 +1577,13 @@ UDFReadInSector(
     SIZE_T _ReadBytes;
 
     (*ReadBytes) = 0;
-    if (Vcb->FastCache.ReadProc && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
-        status = WCacheDirect__(IrpContext, &Vcb->FastCache, Vcb, Lba, FALSE, &tmp_buff, Direct);
+    if (UdfCacheIsInitialized(Vcb) && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
+        status = UdfCacheDirect(IrpContext, Vcb, Vcb, Lba, FALSE, &tmp_buff, Direct);
         if (NT_SUCCESS(status)) {
             (*ReadBytes) += l;
             RtlCopyMemory(Buffer, tmp_buff+i, l);
         }
-        if (!Direct) WCacheEODirect__(&Vcb->FastCache, Vcb);
+        if (!Direct) UdfCacheEODirect(Vcb, Vcb);
     } else {
         if (Direct) {
             return STATUS_INVALID_PARAMETER;
@@ -1695,8 +1695,8 @@ UDFWriteSectors(
     }
 #endif //_BROWSE_UDF_
 
-    if (Vcb->FastCache.WriteProc && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
-        status = WCacheWriteBlocks__(IrpContext, &Vcb->FastCache, Vcb, Buffer, Lba, BCount, WrittenBytes, Direct);
+    if (UdfCacheIsInitialized(Vcb) && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
+        status = UdfCacheWriteBlocks(IrpContext, Vcb, Vcb, Buffer, Lba, BCount, WrittenBytes, Direct);
         ASSERT(NT_SUCCESS(status));
 #ifdef _BROWSE_UDF_
         UDFClrZeroBits(Vcb->ZSBM_Bitmap, Lba, BCount);
@@ -1745,9 +1745,9 @@ UDFWriteInSector(
 
     (*WrittenBytes) = 0;
 #ifdef _BROWSE_UDF_
-    if (Vcb->FastCache.WriteProc && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
+    if (UdfCacheIsInitialized(Vcb) && (KeGetCurrentIrql() < DISPATCH_LEVEL)) {
 #endif //_BROWSE_UDF_
-        status = WCacheDirect__(IrpContext, &Vcb->FastCache, Vcb, Lba, TRUE, &tmp_buff, Direct);
+        status = UdfCacheDirect(IrpContext, Vcb, Vcb, Lba, TRUE, &tmp_buff, Direct);
         if (NT_SUCCESS(status)) {
 #ifdef _BROWSE_UDF_
             UDFClrZeroBit(Vcb->ZSBM_Bitmap, Lba);
@@ -1755,7 +1755,7 @@ UDFWriteInSector(
             (*WrittenBytes) += l;
             RtlCopyMemory(tmp_buff+i, Buffer, l);
         }
-        if (!Direct) WCacheEODirect__(&(Vcb->FastCache), Vcb);
+        if (!Direct) UdfCacheEODirect(Vcb, Vcb);
 #ifdef _BROWSE_UDF_
     } else {
         // If Direct = TRUE we should never get here, but...

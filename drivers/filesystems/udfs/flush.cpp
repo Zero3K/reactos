@@ -523,7 +523,7 @@ UDFFlushVolume(
             if (Vcb->VerifyOnWrite) {
                 UDFPrint(("UDF: Flushing cache for verify\n"));
                 //WCacheFlushAll__(&(Vcb->FastCache), Vcb);
-                WCacheFlushBlocks__(IrpContext, &Vcb->FastCache, Vcb, 0, Vcb->LastLBA);
+                UdfCacheFlushBlocks(IrpContext, Vcb, Vcb, 0, Vcb->LastLBA);
                 UDFVFlush(Vcb);
             }
             // umount (this is internal operation, NT will "dismount" volume later)
