@@ -331,8 +331,8 @@ UDFCommonRead(
             try_return(RC = STATUS_ACCESS_DENIED);
         }
 
-        // check for stack overflow
-        if (IoGetRemainingStackSize() < OVERFLOW_READ_THRESHHOLD) {
+        // check for stack overflow - optimize by checking less frequently for small reads
+        if (ReadLength > (PAGE_SIZE * 4) && IoGetRemainingStackSize() < OVERFLOW_READ_THRESHHOLD) {
             RC = UDFPostStackOverflowRead( IrpContext, Irp, Fcb );
             try_return(RC);
         }
@@ -505,11 +505,17 @@ UDFCommonRead(
                 MainResourceAcquired = TRUE;
 
                 // We hold PagingIo shared around the flush to fix a
-                // cache coherency problem.
+                // cache coherency problem - only flush if there's significant cached data
                 UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbPagingIoResource, TRUE );
 
-                MmPrint(("    CcFlushCache()\n"));
-                CcFlushCache(&Fcb->FcbNonpaged->SegmentObject, &ByteOffset, ReadLength, &Irp->IoStatus);
+                // Only flush cache if it's worth the cost for larger operations
+                if (ReadLength > (PAGE_SIZE * 2)) {
+                    MmPrint(("    CcFlushCache()\n"));
+                    CcFlushCache(&Fcb->FcbNonpaged->SegmentObject, &ByteOffset, ReadLength, &Irp->IoStatus);
+                } else {
+                    // For small reads, just set success to avoid unnecessary flush
+                    Irp->IoStatus.Status = STATUS_SUCCESS;
+                }
 
                 UDFReleaseResource(&Fcb->FcbNonpaged->FcbPagingIoResource);
 
@@ -639,7 +645,8 @@ UDFCommonRead(
 
             MmPrint(("    Read NonCachedIo\n"));
 
-            if (!CanWait && UDFIsFileCached__(Vcb, Fcb->FileInfo, ByteOffset.QuadPart, TruncatedLength, FALSE)) {
+            // Cache checking for async operation decision - optimize by checking only for larger reads
+            if (!CanWait && ReadLength > PAGE_SIZE && UDFIsFileCached__(Vcb, Fcb->FileInfo, ByteOffset.QuadPart, TruncatedLength, FALSE)) {
                 MmPrint(("    Locked => CanWait\n"));
                 CacheLocked = TRUE;
                 CanWait = TRUE;

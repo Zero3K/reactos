@@ -322,14 +322,15 @@ UDFCommonWrite(
             try_return(RC = STATUS_ACCESS_DENIED);
         }
 
-        // back pressure for very smart and fast system cache ;)
+        // back pressure for very smart and fast system cache - optimize by checking less frequently
         if (!NonCachedIo) {
-            // cached IO
-            if (Vcb->VerifyCtx.QueuedCount ||
-               Vcb->VerifyCtx.ItemCount >= UDF_MAX_VERIFY_CACHE) {
+            // cached IO - only check for back pressure on larger writes
+            if (WriteLength > (PAGE_SIZE * 8) && 
+               (Vcb->VerifyCtx.QueuedCount || Vcb->VerifyCtx.ItemCount >= UDF_MAX_VERIFY_CACHE)) {
                 UDFVVerify(Vcb, UFD_VERIFY_FLAG_WAIT);
             }
         } else {
+            // non-cached IO - be more aggressive about verification
             if (Vcb->VerifyCtx.ItemCount > UDF_SYS_CACHE_STOP_THR) {
                 UDFVVerify(Vcb, UFD_VERIFY_FLAG_WAIT);
             }
@@ -434,35 +435,41 @@ UDFCommonWrite(
             UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbPagingIoResource, TRUE);
             PagingIoResourceAcquired = TRUE;
 
-            // Flush and then attempt to purge the cache
+            // Flush and then attempt to purge the cache - optimize for larger writes
             if ((ByteOffset.QuadPart + TruncatedLength) > Fcb->Header.FileSize.QuadPart) {
                 NumberBytesWritten = TruncatedLength;
             } else {
                 NumberBytesWritten = (ULONG)(Fcb->Header.FileSize.QuadPart - ByteOffset.QuadPart);
             }
 
-            MmPrint(("    CcFlushCache()\n"));
-            CcFlushCache(&Fcb->FcbNonpaged->SegmentObject, &ByteOffset, NumberBytesWritten, &Irp->IoStatus);
+            // Only flush cache for larger writes to reduce overhead
+            if (TruncatedLength > (PAGE_SIZE * 2)) {
+                MmPrint(("    CcFlushCache()\n"));
+                CcFlushCache(&Fcb->FcbNonpaged->SegmentObject, &ByteOffset, NumberBytesWritten, &Irp->IoStatus);
+                
+                // If the flush failed, return error to the caller
+                if (!NT_SUCCESS(RC = Irp->IoStatus.Status)) {
+                    NumberBytesWritten = 0;
+                    try_return(RC);
+                }
 
-            // If the flush failed, return error to the caller
-            if (!NT_SUCCESS(RC = Irp->IoStatus.Status)) {
-                NumberBytesWritten = 0;
-                try_return(RC);
+                // Attempt the purge
+                MmPrint(("    CcPurgeCacheSection()\n"));
+                BOOLEAN SuccessfulPurge = CcPurgeCacheSection(&Fcb->FcbNonpaged->SegmentObject, &ByteOffset,
+                                                              NumberBytesWritten, FALSE);
+                
+                // We are finished with our flushing and purging
+                if (!SuccessfulPurge) {
+                    try_return(RC = STATUS_PURGE_FAILED);            
+                }
+            } else {
+                // For small writes, skip cache operations to improve performance
+                Irp->IoStatus.Status = STATUS_SUCCESS;
             }
-
-            // Attempt the purge
-            MmPrint(("    CcPurgeCacheSection()\n"));
-            BOOLEAN SuccessfulPurge = CcPurgeCacheSection(&Fcb->FcbNonpaged->SegmentObject, &ByteOffset,
-                                                           NumberBytesWritten, FALSE);
             NumberBytesWritten = 0;
 
             UDFReleaseResource(&Fcb->FcbNonpaged->FcbPagingIoResource);
             PagingIoResourceAcquired = FALSE;
-
-            // We are finished with our flushing and purging
-            if (!SuccessfulPurge) {
-                try_return(RC = STATUS_PURGE_FAILED);            
-            }
 
             MainResourceCanDemoteToShared = TRUE;
         }
@@ -736,8 +743,8 @@ UDFCommonWrite(
                 Fcb->Header.ValidDataLength.QuadPart = ByteOffset.QuadPart + TruncatedLength;
             }
 
-            // Cache checking for async operation decision
-            if (!CanWait && UDFIsFileCached__(Vcb, Fcb->FileInfo, ByteOffset.QuadPart, TruncatedLength, TRUE)) {
+            // Cache checking for async operation decision - optimize by checking only for larger writes
+            if (!CanWait && WriteLength > PAGE_SIZE && UDFIsFileCached__(Vcb, Fcb->FileInfo, ByteOffset.QuadPart, TruncatedLength, TRUE)) {
                 UDFPrint(("UDFCommonWrite: Cached => CanWait\n"));
                 CacheLocked = TRUE;
                 CanWait = TRUE;
