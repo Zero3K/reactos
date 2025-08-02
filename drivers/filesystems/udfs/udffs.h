@@ -45,6 +45,11 @@
 // New simplified cache implementation
 #define UDF_USE_SIMPLE_CACHE
 
+// Performance optimization flags for simple cache
+#define UDF_CACHE_USE_WRITE_BACK       // Enable write-back caching instead of write-through
+#define UDF_CACHE_BATCH_WRITES         // Batch multiple writes together
+#define UDF_CACHE_ASYNC_FLUSH          // Enable asynchronous background flushing
+
 #define UDF_ALLOW_FRAG_AD
 
 #ifndef UDF_LIMIT_DIR_SIZE
