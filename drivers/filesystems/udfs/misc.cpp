@@ -1161,6 +1161,14 @@ UDFFspDispatch(
 
         // Ensure that the "top-level" field is cleared
         IoSetTopLevelIrp(NULL);
+        
+        // Yield CPU briefly after processing each IRP to prevent hogging
+        // This is essential during filesystem-intensive operations
+        {
+            LARGE_INTEGER briefYield;
+            briefYield.QuadPart = -1000; // Yield for 100 microseconds
+            KeDelayExecutionThread(KernelMode, FALSE, &briefYield);
+        }
 
         //  If there are any entries on this volume's overflow queue, service
         //  them.
@@ -1184,11 +1192,15 @@ UDFFspDispatch(
                                           IRP_CONTEXT,
                                           WorkQueueItem.List);
         
-        // Yield CPU briefly to prevent hogging in case of many queued items
-        // This is especially important when processing many small operations
-        if (Vcb->OverflowQueueCount > 10) {
+        // Yield CPU periodically to prevent hogging during continuous processing
+        // This is critical during filesystem-intensive operations like git
+        static ULONG processedCount = 0;
+        processedCount++;
+        
+        // Yield every 5 processed IRPs or when queue is large
+        if ((processedCount % 5) == 0 || Vcb->OverflowQueueCount > 5) {
             LARGE_INTEGER yieldDelay;
-            yieldDelay.QuadPart = -1; // Yield for 100ns
+            yieldDelay.QuadPart = -10000; // Yield for 1ms (more meaningful than 100ns)
             KeDelayExecutionThread(KernelMode, FALSE, &yieldDelay);
         }
     }
@@ -1534,11 +1546,23 @@ UDFDeleteVCB(
     UDFPrint(("UDFDeleteVCB\n"));
 
     delay.QuadPart = -500000; // 0.05 sec
-    while(Vcb->PostedRequestCount) {
-        UDFPrint(("UDFDeleteVCB: PostedRequestCount = %d\n", Vcb->PostedRequestCount));
+    ULONG maxVcbWaitCycles = 20; // Limit wait to prevent infinite polling
+    ULONG vcbWaitCycle = 0;
+    
+    while(Vcb->PostedRequestCount && vcbWaitCycle < maxVcbWaitCycles) {
+        UDFPrint(("UDFDeleteVCB: PostedRequestCount = %d (cycle %d/%d)\n", Vcb->PostedRequestCount, vcbWaitCycle + 1, maxVcbWaitCycles));
         // spin until all queues IRPs are processed
         KeDelayExecutionThread(KernelMode, FALSE, &delay);
         delay.QuadPart -= 500000; // grow delay 0.05 sec
+        // Cap delay to prevent excessive wait times
+        if (delay.QuadPart < -5000000) { // Cap at 0.5 seconds
+            delay.QuadPart = -5000000;
+        }
+        vcbWaitCycle++;
+    }
+    
+    if (vcbWaitCycle >= maxVcbWaitCycles && Vcb->PostedRequestCount) {
+        UDFPrint(("UDFDeleteVCB: Timeout waiting for posted requests, forcing VCB deletion\n"));
     }
 
     _SEH2_TRY {

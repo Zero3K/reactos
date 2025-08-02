@@ -35,17 +35,23 @@ UDFDriverUnload(
     
     // Check if there are any mounted volumes and wait for them to be dismounted
     // Instead of infinite loop, we'll do a limited number of checks
-    ULONG maxWaitCycles = 30; // Wait up to 5 minutes (30 * 10 seconds)
+    ULONG maxWaitCycles = 6; // Wait up to 1 minute (6 * 10 seconds) - reduced from 5 minutes
     ULONG waitCycle = 0;
     
+    // First do a quick check without waiting
+    UDFAcquireResourceShared(&UdfData.GlobalDataResource, TRUE);
+    BOOLEAN volumesStillMounted = !IsListEmpty(&UdfData.VcbQueue);
+    UDFReleaseResource(&UdfData.GlobalDataResource);
+    
+    if (!volumesStillMounted) {
+        UDFPrint(("No volumes mounted, proceeding with immediate unload\n"));
+        return; // Exit immediately if no volumes to wait for
+    }
+    
     while(waitCycle < maxWaitCycles) {
-        BOOLEAN volumesStillMounted = FALSE;
-        
         // Check if there are any volumes still mounted
         UDFAcquireResourceShared(&UdfData.GlobalDataResource, TRUE);
-        if (!IsListEmpty(&UdfData.VcbQueue)) {
-            volumesStillMounted = TRUE;
-        }
+        volumesStillMounted = !IsListEmpty(&UdfData.VcbQueue);
         UDFReleaseResource(&UdfData.GlobalDataResource);
         
         if (!volumesStillMounted) {
