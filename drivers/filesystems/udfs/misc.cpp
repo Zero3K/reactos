@@ -1064,130 +1064,125 @@ UDFFspDispatch(
 
     UDFPrint(("  *** Thr: %x  ThCnt: %x  QCnt: %x  Started!\n", PsGetCurrentThread(), Vcb->PostedRequestCount, Vcb->OverflowQueueCount));
 
-    // Follow FastFAT pattern: process IRPs until overflow queue is empty
-    // Natural CPU yielding occurs between worker thread invocations
-    while(TRUE) {
+    // Follow BTRFS pattern: process exactly one IRP per worker thread
+    // This eliminates CPU hogging by allowing natural kernel thread scheduling
+    FsRtlEnterFileSystem();
 
-        UDFPrint(("    Next IRP\n"));
-        FsRtlEnterFileSystem();
+    //  Get a pointer to the IRP structure
+    // in some cases we can get Zero pointer to Irp
+    Irp = IrpContext->Irp;
+    // Now, check if the FSD was top level when the IRP was originally invoked
+    // and set the thread context (for the worker thread) appropriately
+    if (IrpContext->Flags & UDF_IRP_CONTEXT_NOT_TOP_LEVEL) {
+        // The FSD is not top level for the original request
+        // Set a constant value in TLS to reflect this fact
+        IoSetTopLevelIrp((PIRP)FSRTL_FSP_TOP_LEVEL_IRP);
+    } else {
+        IoSetTopLevelIrp(Irp);
+    }
 
-        //  Get a pointer to the IRP structure
-        // in some cases we can get Zero pointer to Irp
-        Irp = IrpContext->Irp;
-        // Now, check if the FSD was top level when the IRP was originally invoked
-        // and set the thread context (for the worker thread) appropriately
-        if (IrpContext->Flags & UDF_IRP_CONTEXT_NOT_TOP_LEVEL) {
-            // The FSD is not top level for the original request
-            // Set a constant value in TLS to reflect this fact
-            IoSetTopLevelIrp((PIRP)FSRTL_FSP_TOP_LEVEL_IRP);
-        } else {
-            IoSetTopLevelIrp(Irp);
-        }
+    // Since the FSD routine will now be invoked in the context of this worker
+    // thread, we should inform the FSD that it is perfectly OK to block in
+    // the context of this thread
+    IrpContext->Flags |= IRP_CONTEXT_FLAG_WAIT;
 
-        // Since the FSD routine will now be invoked in the context of this worker
-        // thread, we should inform the FSD that it is perfectly OK to block in
-        // the context of this thread
-        IrpContext->Flags |= IRP_CONTEXT_FLAG_WAIT;
+    _SEH2_TRY {
 
-        _SEH2_TRY {
+        // Pre-processing has been completed; check the Major Function code value
+        // either in the IrpContext (copied from the IRP), or directly from the
+        //  IRP itself (we will need a pointer to the stack location to do that),
+        //  Then, switch based on the value on the Major Function code
+        UDFPrint(("  *** MJ: %x, Thr: %x\n", IrpContext->MajorFunction, PsGetCurrentThread()));
+        switch (IrpContext->MajorFunction) {
+        case IRP_MJ_CREATE:
+            // Invoke the common create routine
+            RC = UDFCommonCreate(IrpContext, Irp);
+            break;
+        case IRP_MJ_READ:
+            // Invoke the common read routine
+            RC = UDFCommonRead(IrpContext, Irp);
+            break;
+        case IRP_MJ_WRITE:
+            // Invoke the common write routine
+            RC = UDFCommonWrite(IrpContext, Irp);
+            break;
+        case IRP_MJ_CLEANUP:
+            // Invoke the common cleanup routine
+            RC = UDFCommonCleanup(IrpContext, Irp);
+            break;
+        case IRP_MJ_CLOSE:
+            // Invoke the common close routine
+            RC = UDFCommonClose(IrpContext, Irp, TRUE);
+            break;
+        case IRP_MJ_DIRECTORY_CONTROL:
+            // Invoke the common directory control routine
+            RC = UDFCommonDirControl(IrpContext, Irp);
+            break;
+        case IRP_MJ_QUERY_INFORMATION:
+            // Invoke the common query information routine
+            RC = UDFCommonQueryInfo(IrpContext, Irp);
+            break;
+        case IRP_MJ_SET_INFORMATION:
+            // Invoke the common set information routine
+            RC = UDFCommonSetInfo(IrpContext, Irp);
+            break;
+        case IRP_MJ_QUERY_VOLUME_INFORMATION:
+            // Invoke the common query volume routine
+            RC = UDFCommonQueryVolInfo(IrpContext, Irp);
+            break;
+        case IRP_MJ_SET_VOLUME_INFORMATION:
+            // Invoke the common set volume routine
+            RC = UDFCommonSetVolInfo(IrpContext, Irp);
+            break;
+        // Continue with the remaining possible dispatch routines below ...
+        default:
 
-            // Pre-processing has been completed; check the Major Function code value
-            // either in the IrpContext (copied from the IRP), or directly from the
-            //  IRP itself (we will need a pointer to the stack location to do that),
-            //  Then, switch based on the value on the Major Function code
-            UDFPrint(("  *** MJ: %x, Thr: %x\n", IrpContext->MajorFunction, PsGetCurrentThread()));
-            switch (IrpContext->MajorFunction) {
-            case IRP_MJ_CREATE:
-                // Invoke the common create routine
-                RC = UDFCommonCreate(IrpContext, Irp);
-                break;
-            case IRP_MJ_READ:
-                // Invoke the common read routine
-                RC = UDFCommonRead(IrpContext, Irp);
-                break;
-            case IRP_MJ_WRITE:
-                // Invoke the common write routine
-                RC = UDFCommonWrite(IrpContext, Irp);
-                break;
-            case IRP_MJ_CLEANUP:
-                // Invoke the common cleanup routine
-                RC = UDFCommonCleanup(IrpContext, Irp);
-                break;
-            case IRP_MJ_CLOSE:
-                // Invoke the common close routine
-                RC = UDFCommonClose(IrpContext, Irp, TRUE);
-                break;
-            case IRP_MJ_DIRECTORY_CONTROL:
-                // Invoke the common directory control routine
-                RC = UDFCommonDirControl(IrpContext, Irp);
-                break;
-            case IRP_MJ_QUERY_INFORMATION:
-                // Invoke the common query information routine
-                RC = UDFCommonQueryInfo(IrpContext, Irp);
-                break;
-            case IRP_MJ_SET_INFORMATION:
-                // Invoke the common set information routine
-                RC = UDFCommonSetInfo(IrpContext, Irp);
-                break;
-            case IRP_MJ_QUERY_VOLUME_INFORMATION:
-                // Invoke the common query volume routine
-                RC = UDFCommonQueryVolInfo(IrpContext, Irp);
-                break;
-            case IRP_MJ_SET_VOLUME_INFORMATION:
-                // Invoke the common set volume routine
-                RC = UDFCommonSetVolInfo(IrpContext, Irp);
-                break;
-            // Continue with the remaining possible dispatch routines below ...
-            default:
+            UDFPrint(("  unhandled *** MJ: %x, Thr: %x\n", IrpContext->MajorFunction, PsGetCurrentThread()));
 
-                UDFPrint(("  unhandled *** MJ: %x, Thr: %x\n", IrpContext->MajorFunction, PsGetCurrentThread()));
-
-                RC = STATUS_INVALID_DEVICE_REQUEST;
-                UDFCompleteRequest( IrpContext, Irp, RC );
-                break;
-            }
-
-            // Note: IrpContext is invalid here
-            UDFPrint(("  *** Thr: %x  Done!\n", PsGetCurrentThread()));
-
-        } _SEH2_EXCEPT(UDFExceptionFilter(IrpContext, _SEH2_GetExceptionInformation())) {
-
-            RC = UDFProcessException(IrpContext, Irp);
-
-            UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
-        }  _SEH2_END;
-
-        // Enable preemption
-        FsRtlExitFileSystem();
-
-        // Ensure that the "top-level" field is cleared
-        IoSetTopLevelIrp(NULL);
-
-        //  If there are any entries on this volume's overflow queue, service
-        //  them following the FastFAT pattern
-        if (!Vcb) {
-            BrutePoint();
+            RC = STATUS_INVALID_DEVICE_REQUEST;
+            UDFCompleteRequest( IrpContext, Irp, RC );
             break;
         }
 
+        // Note: IrpContext is invalid here
+        UDFPrint(("  *** Thr: %x  Done!\n", PsGetCurrentThread()));
+
+    } _SEH2_EXCEPT(UDFExceptionFilter(IrpContext, _SEH2_GetExceptionInformation())) {
+
+        RC = UDFProcessException(IrpContext, Irp);
+
+        UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
+    }  _SEH2_END;
+
+    // Enable preemption
+    FsRtlExitFileSystem();
+
+    // Ensure that the "top-level" field is cleared
+    IoSetTopLevelIrp(NULL);
+
+    //  If there are any entries on this volume's overflow queue, queue another
+    //  worker thread to handle them - following BTRFS pattern
+    if (Vcb) {
         KeAcquireSpinLock(&(Vcb->OverflowQueueSpinLock), &SavedIrql);
         
         if (Vcb->OverflowQueueCount > 0) {
-            // There is overflow work to do - dequeue and continue processing
+            // There is overflow work to do - dequeue one IRP and requeue it as a new work item
             Vcb->OverflowQueueCount--;
             Entry = RemoveHeadList(&Vcb->OverflowQueue);
             KeReleaseSpinLock(&(Vcb->OverflowQueueSpinLock), SavedIrql);
 
-            IrpContext = CONTAINING_RECORD(Entry,
-                                              IRP_CONTEXT,
-                                              WorkQueueItem.List);
-            // Continue loop to process next IRP
-            continue;
+            // Get the next IRP context and queue it for processing
+            PIRP_CONTEXT NextIrpContext = CONTAINING_RECORD(Entry,
+                                                           IRP_CONTEXT,
+                                                           WorkQueueItem.List);
+            
+            // Requeue the work item - this creates a new worker thread instance
+            ExInitializeWorkItem(&(NextIrpContext->WorkQueueItem), UDFFspDispatch, NextIrpContext);
+            ExQueueWorkItem(&(NextIrpContext->WorkQueueItem), CriticalWorkQueue);
         } else {
-            // No more overflow work - decrement posted count and exit
+            // No more overflow work - decrement posted count
             Vcb->PostedRequestCount--;
             KeReleaseSpinLock(&(Vcb->OverflowQueueSpinLock), SavedIrql);
-            break;
         }
     }
 
