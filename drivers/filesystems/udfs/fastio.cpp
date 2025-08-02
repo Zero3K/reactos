@@ -712,7 +712,8 @@ IN PDEVICE_OBJECT           DeviceObject)
 
     _SEH2_TRY {
         // Just delegate to Cache Manager for MDL read
-        ReturnedStatus = CcMdlRead(FileObject, FileOffset, Length, MdlChain, IoStatus);
+        CcMdlRead(FileObject, FileOffset, Length, MdlChain, IoStatus);
+        ReturnedStatus = TRUE;
 
     } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
         // On exception, fast I/O failed
@@ -788,7 +789,8 @@ UDFFastIoPrepareMdlWrite(
 
     _SEH2_TRY {
         // Just delegate to Cache Manager for MDL write preparation
-        ReturnedStatus = CcPrepareMdlWrite(FileObject, FileOffset, Length, MdlChain, IoStatus);
+        CcPrepareMdlWrite(FileObject, FileOffset, Length, MdlChain, IoStatus);
+        ReturnedStatus = TRUE;
 
     } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
         // On exception, fast I/O failed
