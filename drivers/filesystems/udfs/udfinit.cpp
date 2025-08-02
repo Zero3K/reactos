@@ -134,6 +134,10 @@ DriverEntry(
             if (!NT_SUCCESS(RC = UDFInitializeZones()))
                 try_return(RC);
 
+            UDFPrint(("UDF: Init cache\n"));
+            // Initialize cache manager callbacks
+            init_cache();
+
             UDFPrint(("UDF: Init pointers\n"));
             // initialize the IRP major function table, and the fast I/O table
             UDFInitializeFunctionPointers(DriverObject);

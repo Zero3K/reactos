@@ -140,9 +140,7 @@ NTSTATUS MyCloneUnicodeString(IN PUNICODE_STRING Str1,
 */
 
 #define UDFIsDataCached(Vcb,Lba,BCount) \
-    ( WCacheIsInitialized__(&((Vcb)->FastCache)) &&        \
-     (KeGetCurrentIrql() < DISPATCH_LEVEL) && \
-      WCacheIsCached__(&((Vcb)->FastCache),Lba, BCount) )
+    (KeGetCurrentIrql() < DISPATCH_LEVEL)
 
 BOOLEAN  UDFIsDirInfoCached(IN PVCB Vcb,
                             IN PUDF_FILE_INFO DirInfo);

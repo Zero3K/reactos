@@ -931,11 +931,6 @@ UDFInitializeVCB(
 
     Vcb->VcbReference = 1;
 
-    Vcb->WCacheMaxBlocks        = UdfData.WCacheMaxBlocks;
-    Vcb->WCacheMaxFrames        = UdfData.WCacheMaxFrames;
-    Vcb->WCacheBlocksPerFrameSh = UdfData.WCacheBlocksPerFrameSh;
-    Vcb->WCacheFramesToKeepFree = UdfData.WCacheFramesToKeepFree;
-
     // Create a stream file object for this volume.
     //Vcb->PtrStreamFileObject = IoCreateStreamFileObject(NULL,
     //                                            Vcb->Vpb->RealDevice);

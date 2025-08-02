@@ -50,27 +50,15 @@ UDFInitializeZones(VOID)
         case MmMediumSystem:
             UdfData.MaxDelayedCloseCount = 32;
             UdfData.MinDelayedCloseCount = 8;
-            UdfData.WCacheMaxFrames = 8*4;
-            UdfData.WCacheMaxBlocks = 16*64;
-            UdfData.WCacheBlocksPerFrameSh = 8;
-            UdfData.WCacheFramesToKeepFree = 4;
             break;
         case MmLargeSystem:
             UdfData.MaxDelayedCloseCount = 72;
             UdfData.MinDelayedCloseCount = 18;
-            UdfData.WCacheMaxFrames = 2*16*4;
-            UdfData.WCacheMaxBlocks = 2*16*64;
-            UdfData.WCacheBlocksPerFrameSh = 8;
-            UdfData.WCacheFramesToKeepFree = 8;
             break;
         case MmSmallSystem:
         default:
             UdfData.MaxDelayedCloseCount = 10;
             UdfData.MinDelayedCloseCount = 2;
-            UdfData.WCacheMaxFrames = 8*4/2;
-            UdfData.WCacheMaxBlocks = 16*64/2;
-            UdfData.WCacheBlocksPerFrameSh = 8;
-            UdfData.WCacheFramesToKeepFree = 2;
         }
 
         ExInitializeNPagedLookasideList(&UdfData.IrpContextLookasideList,
@@ -1372,11 +1360,6 @@ UDFReadRegKeys(
         if (UDFGetParameter(Vcb, UDF_DIRTY_VOLUME_BEHAVIOR, UDF_PART_DAMAGED_RO)) {
             Vcb->CompatFlags |= UDF_VCB_IC_DIRTY_RO;
         }
-
-        mult = UDFGetParameter(Vcb, UDF_CACHE_SIZE_MULTIPLIER, 1);
-        if (!mult) mult = 1;
-        Vcb->WCacheMaxBlocks *= mult;
-        Vcb->WCacheMaxFrames *= mult;
     }
     return;
 } // end UDFReadRegKeys()
@@ -1552,8 +1535,7 @@ UDFDeleteVCB(
     _SEH2_TRY {
         UDFPrint(("UDF: Flushing buffers\n"));
         UDFVRelease(Vcb);
-        WCacheFlushAll__(IrpContext, &Vcb->FastCache, Vcb);
-        WCacheRelease__(&Vcb->FastCache);
+        // Cache flushing is now handled by Windows Cache Manager
 
     } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
         BrutePoint();
@@ -1949,16 +1931,6 @@ UDFAcquireResourceSharedWithCheck(
     }
     return FALSE;
 } // end UDFAcquireResourceSharedWithCheck()
-
-NTSTATUS
-UDFWCacheErrorHandler(
-    IN PVOID Context,
-    IN PWCACHE_ERROR_CONTEXT ErrorInfo
-    )
-{
-    InterlockedIncrement((PLONG)&(((PVCB)Context)->IoErrorCounter));
-    return ErrorInfo->Status;
-}
 
 VOID
 UDFSetModified(

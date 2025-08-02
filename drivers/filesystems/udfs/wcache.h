@@ -7,6 +7,8 @@
 #ifndef __CDRW_WCACHE_H__
 #define __CDRW_WCACHE_H__
 
-#include "Include/wcache_lib.h"
+// Cache Manager callbacks - similar to BTRFS implementation
+void init_cache();
+extern CACHE_MANAGER_CALLBACKS cache_callbacks;
 
 #endif // __CDRW_WCACHE_H__

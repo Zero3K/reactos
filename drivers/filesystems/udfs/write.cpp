@@ -779,7 +779,7 @@ try_exit:   NOTHING;
     } _SEH2_FINALLY {
 
         if (CacheLocked) {
-            WCacheEODirect__(&(Vcb->FastCache), Vcb);
+            // Cache unlocking is handled by Windows Cache Manager
         }
 
         // Post IRP if required
