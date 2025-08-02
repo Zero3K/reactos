@@ -607,11 +607,9 @@ UDFCommonRead(
                 // Caller does want a MDL returned. Note that this mode
                 // implies that the caller is prepared to block
                 MmPrint(("    CcMdlRead()\n"));
-//                CcMdlRead(FileObject, &ByteOffset, TruncatedLength, &(Irp->MdlAddress), &(Irp->IoStatus));
-//                NumberBytesRead = Irp->IoStatus.Information;
-//                RC = Irp->IoStatus.Status;
-                NumberBytesRead = 0;
-                RC = STATUS_INVALID_PARAMETER;
+                CcMdlRead(FileObject, &ByteOffset, TruncatedLength, &(Irp->MdlAddress), &(Irp->IoStatus));
+                NumberBytesRead = Irp->IoStatus.Information;
+                RC = Irp->IoStatus.Status;
 
                 try_return(RC);
             }

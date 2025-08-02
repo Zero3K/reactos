@@ -334,12 +334,12 @@ UDFInitializeFunctionPointers(
     PtrFastIoDispatch->AcquireForCcFlush        = UDFFastIoAcqCcFlush;
     PtrFastIoDispatch->ReleaseForCcFlush        = UDFFastIoRelCcFlush;
 
-/*    // MDL functionality
+    // MDL functionality
 
     PtrFastIoDispatch->MdlRead                  = UDFFastIoMdlRead;
     PtrFastIoDispatch->MdlReadComplete          = UDFFastIoMdlReadComplete;
     PtrFastIoDispatch->PrepareMdlWrite          = UDFFastIoPrepareMdlWrite;
-    PtrFastIoDispatch->MdlWriteComplete         = UDFFastIoMdlWriteComplete;*/
+    PtrFastIoDispatch->MdlWriteComplete         = UDFFastIoMdlWriteComplete;
 
     // last but not least, initialize the Cache Manager callback functions
     //  which are used in CcInitializeCacheMap()

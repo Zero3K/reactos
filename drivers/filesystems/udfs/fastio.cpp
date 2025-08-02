@@ -697,7 +697,7 @@ try_exit: NOTHING;
 * Return Value: TRUE/FALSE
 *
 *************************************************************************/
-/*BOOLEAN UDFFastIoMdlRead(
+BOOLEAN NTAPI UDFFastIoMdlRead(
 IN PFILE_OBJECT             FileObject,
 IN PLARGE_INTEGER           FileOffset,
 IN ULONG                    Length,
@@ -707,38 +707,22 @@ OUT PIO_STATUS_BLOCK        IoStatus,
 IN PDEVICE_OBJECT           DeviceObject)
 {
     BOOLEAN ReturnedStatus = FALSE;     // fast i/o failed/not allowed
-    NTSTATUS RC = STATUS_SUCCESS;
-    PtrUDFIrpContext IrpContext = NULL;
 
     FsRtlEnterFileSystem();
 
     _SEH2_TRY {
+        // Just delegate to Cache Manager for MDL read
+        ReturnedStatus = CcMdlRead(FileObject, FileOffset, Length, MdlChain, IoStatus);
 
-        _SEH2_TRY {
-
-            // See description in UDFFastIoRead() before filling-in the
-            // stub here.
-            NOTHING;
-
-
-        } __except (UDFExceptionFilter(IrpContext, GetExceptionInformation())) {
-
-            RC = UDFExceptionHandler(IrpContext, NULL);
-
-            UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
-
-        }
-
-        //try_exit: NOTHING;
-
-    } _SEH2_FINALLY {
-
-    }
+    } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+        // On exception, fast I/O failed
+        ReturnedStatus = FALSE;
+    } _SEH2_END;
 
     FsRtlExitFileSystem();
 
     return(ReturnedStatus);
-}*/
+}
 
 
 /*************************************************************************
@@ -757,43 +741,20 @@ IN PDEVICE_OBJECT           DeviceObject)
 * Return Value: TRUE/FALSE
 *
 *************************************************************************/
-/*BOOLEAN UDFFastIoMdlReadComplete(
+BOOLEAN UDFFastIoMdlReadComplete(
 IN PFILE_OBJECT             FileObject,
 OUT PMDL                            MdlChain,
 IN PDEVICE_OBJECT               DeviceObject)
 {
-    BOOLEAN             ReturnedStatus = FALSE;     // fast i/o failed/not allowed
-    NTSTATUS                RC = STATUS_SUCCESS;
-   PtrUDFIrpContext IrpContext = NULL;
-
     FsRtlEnterFileSystem();
 
-    _SEH2_TRY {
-
-        _SEH2_TRY {
-
-            // See description in UDFFastIoRead() before filling-in the
-            // stub here.
-            NOTHING;
-
-        } __except (UDFExceptionFilter(IrpContext, GetExceptionInformation())) {
-
-            RC = UDFExceptionHandler(IrpContext, NULL);
-
-            UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
-
-        }
-
-        //try_exit: NOTHING;
-
-    } _SEH2_FINALLY {
-
-    }
+    // Delegate to Cache Manager for MDL read completion  
+    CcMdlReadComplete(FileObject, MdlChain);
 
     FsRtlExitFileSystem();
 
-    return(ReturnedStatus);
-}*/
+    return TRUE;
+}
 
 
 /*************************************************************************
@@ -810,7 +771,7 @@ IN PDEVICE_OBJECT               DeviceObject)
 * Return Value: TRUE/FALSE
 *
 *************************************************************************/
-/*BOOLEAN
+BOOLEAN NTAPI
 UDFFastIoPrepareMdlWrite(
     IN PFILE_OBJECT      FileObject,
     IN PLARGE_INTEGER    FileOffset,
@@ -822,37 +783,22 @@ UDFFastIoPrepareMdlWrite(
     )
 {
     BOOLEAN              ReturnedStatus = FALSE; // fast i/o failed/not allowed
-    NTSTATUS             RC = STATUS_SUCCESS;
-   PtrUDFIrpContext IrpContext = NULL;
 
     FsRtlEnterFileSystem();
 
     _SEH2_TRY {
+        // Just delegate to Cache Manager for MDL write preparation
+        ReturnedStatus = CcPrepareMdlWrite(FileObject, FileOffset, Length, MdlChain, IoStatus);
 
-        _SEH2_TRY {
-
-            // See description in UDFFastIoRead() before filling-in the
-            // stub here.
-            NOTHING;
-
-        } __except (UDFExceptionFilter(IrpContext, GetExceptionInformation())) {
-
-            RC = UDFExceptionHandler(IrpContext, NULL);
-
-            UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
-
-        }
-
-        //try_exit: NOTHING;
-
-    } _SEH2_FINALLY {
-
-    }
+    } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+        // On exception, fast I/O failed
+        ReturnedStatus = FALSE;
+    } _SEH2_END;
 
     FsRtlExitFileSystem();
 
     return(ReturnedStatus);
-}*/
+}
 
 
 /*************************************************************************
@@ -871,44 +817,21 @@ UDFFastIoPrepareMdlWrite(
 * Return Value: TRUE/FALSE
 *
 *************************************************************************/
-/*BOOLEAN UDFFastIoMdlWriteComplete(
+BOOLEAN NTAPI UDFFastIoMdlWriteComplete(
 IN PFILE_OBJECT             FileObject,
 IN PLARGE_INTEGER               FileOffset,
 OUT PMDL                            MdlChain,
 IN PDEVICE_OBJECT               DeviceObject)
 {
-    BOOLEAN             ReturnedStatus = FALSE;     // fast i/o failed/not allowed
-    NTSTATUS                RC = STATUS_SUCCESS;
-   PtrUDFIrpContext IrpContext = NULL;
-
     FsRtlEnterFileSystem();
 
-    _SEH2_TRY {
-
-        _SEH2_TRY {
-
-            // See description in UDFFastIoRead() before filling-in the
-            // stub here.
-            NOTHING;
-
-        } __except (UDFExceptionFilter(IrpContext, GetExceptionInformation())) {
-
-            RC = UDFExceptionHandler(IrpContext, NULL);
-
-            UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
-
-        }
-
-        //try_exit: NOTHING;
-
-    } _SEH2_FINALLY {
-
-    }
+    // Delegate to Cache Manager for MDL write completion
+    CcMdlWriteComplete(FileObject, FileOffset, MdlChain);
 
     FsRtlExitFileSystem();
 
-    return(ReturnedStatus);
-}*/
+    return TRUE;
+}
 
 
 /*************************************************************************
