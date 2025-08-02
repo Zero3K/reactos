@@ -285,34 +285,7 @@ OUT struct _FILE_NETWORK_OPEN_INFORMATION*      Buffer,
 OUT PIO_STATUS_BLOCK                            IoStatus,
 IN PDEVICE_OBJECT                               DeviceObject);
 
-extern BOOLEAN NTAPI UDFFastIoMdlRead(
-IN PFILE_OBJECT             FileObject,
-IN PLARGE_INTEGER           FileOffset,
-IN ULONG                    Length,
-IN ULONG                    LockKey,
-OUT PMDL*                   MdlChain,
-OUT PIO_STATUS_BLOCK        IoStatus,
-IN PDEVICE_OBJECT           DeviceObject);
 
-extern BOOLEAN NTAPI UDFFastIoMdlReadComplete(
-IN PFILE_OBJECT             FileObject,
-IN PMDL                     MdlChain,
-IN PDEVICE_OBJECT           DeviceObject);
-
-extern BOOLEAN NTAPI UDFFastIoPrepareMdlWrite(
-IN PFILE_OBJECT             FileObject,
-IN PLARGE_INTEGER           FileOffset,
-IN ULONG                    Length,
-IN ULONG                    LockKey,
-OUT PMDL*                   MdlChain,
-OUT PIO_STATUS_BLOCK        IoStatus,
-IN PDEVICE_OBJECT           DeviceObject);
-
-extern BOOLEAN NTAPI UDFFastIoMdlWriteComplete(
-IN PFILE_OBJECT             FileObject,
-IN PLARGE_INTEGER           FileOffset,
-IN PMDL                     MdlChain,
-IN PDEVICE_OBJECT           DeviceObject);
 
 extern NTSTATUS NTAPI UDFFastIoAcqModWrite(
 IN PFILE_OBJECT             FileObject,
