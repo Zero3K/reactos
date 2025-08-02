@@ -656,16 +656,9 @@ Return Value:
 
     PLIST_ENTRY Entry;
 
-    // This function can be called at DISPATCH_LEVEL during volume flush
-    // operations, so we cannot use PAGED_CODE() here.
+    PAGED_CODE();
 
     ASSERT_OPTIONAL_VCB(Vcb);
-
-    // Check if we are at too high IRQL level for mutex operations
-    // If so, return NULL to avoid BSOD - the caller should handle this case
-    if (KeGetCurrentIrql() > PASSIVE_LEVEL) {
-        return NULL;
-    }
 
     // Lock the UdfData to perform the scan.
 
