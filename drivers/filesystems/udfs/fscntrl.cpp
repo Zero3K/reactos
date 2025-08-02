@@ -301,7 +301,6 @@ UDFMountVolume(
     BOOLEAN                 RestoreDoVerify = FALSE;
     BOOLEAN                 RemovableMedia = TRUE;
     BOOLEAN                 SetDoVerifyOnFail;
-    ULONG                   Mode;
     BOOLEAN                 VcbAcquired = FALSE;
     BOOLEAN                 DeviceNotTouched = TRUE;
     DISK_GEOMETRY           DiskGeometry;
@@ -458,34 +457,6 @@ UDFMountVolume(
 
         Vcb->MountPhErrorCount = 0;
 
-#ifdef UDF_USE_WCACHE
-        // Initialize internal cache
-        Mode = WCACHE_MODE_ROM;
-        RC = WCacheInit__(&(Vcb->FastCache),
-                          Vcb->WCacheMaxFrames,
-                          Vcb->WCacheMaxBlocks,
-                          Vcb->WriteBlockSize,
-                          5, Vcb->BlockSizeBits,
-                          Vcb->WCacheBlocksPerFrameSh,
-                          0/*Vcb->FirstLBA*/, Vcb->LastPossibleLBA, Mode,
-                              0/*WCACHE_CACHE_WHOLE_PACKET*/ |
-                              (Vcb->DoNotCompareBeforeWrite ? WCACHE_DO_NOT_COMPARE : 0) |
-                              (Vcb->CacheChainedIo ? WCACHE_CHAINED_IO : 0) |
-                              WCACHE_MARK_BAD_BLOCKS | WCACHE_RO_BAD_BLOCKS,  // this will be cleared after mount
-                          Vcb->WCacheFramesToKeepFree,
-//                          UDFTWrite, UDFTRead,
-                          UDFTWriteVerify, UDFTReadVerify,
-#ifdef UDF_ASYNC_IO
-                          UDFTWriteAsync, UDFTReadAsync,
-#else  //UDF_ASYNC_IO
-                          NULL, NULL,
-#endif //UDF_ASYNC_IO
-                          UDFIsBlockAllocated,
-                          UDFUpdateVAT,
-                          UDFWCacheErrorHandler);
-        if (!NT_SUCCESS(RC)) try_return(RC);
-#endif //UDF_USE_WCACHE
-
         RC = UDFVInit(Vcb);
         if (!NT_SUCCESS(RC)) try_return(RC);
 
@@ -511,10 +482,8 @@ UDFMountVolume(
                 if (!Vcb->CDR_Mode) {
                     if (FsDeviceType == FILE_DEVICE_DISK_FILE_SYSTEM) {
                         UDFPrint(("UDFMountVolume: RAM mode\n"));
-                        Mode = WCACHE_MODE_RAM;
                     } else {
                         UDFPrint(("UDFMountVolume: RW mode\n"));
-                        Mode = WCACHE_MODE_RW;
                     }
 /*                    if (FsDeviceType == FILE_DEVICE_CD_ROM_FILE_SYSTEM) {
                     } else {
@@ -522,7 +491,6 @@ UDFMountVolume(
                     }*/
                 } else {
                     UDFPrint(("UDFMountVolume: R mode\n"));
-                    Mode = WCACHE_MODE_R;
                 }
                 // we can't record ACL on old format disks
                 if (!UDFNtAclSupported(Vcb)) {
@@ -531,9 +499,6 @@ UDFMountVolume(
                     Vcb->UseExtendedFE = FALSE;
                 }
             }
-#ifdef UDF_USE_WCACHE
-            WCacheSetMode__(&(Vcb->FastCache), Mode);
-#endif //UDF_USE_WCACHE
 
             // Complete mount operations: create root FCB
             UDFAcquireResourceExclusive(&(Vcb->BitMapResource1),TRUE);

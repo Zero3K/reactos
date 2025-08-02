@@ -38,9 +38,7 @@
 
 //#define UDF_ASYNC_IO
 
-// WCACHE was disabled due to errors in it.
-// Test case: Running 'git clone https://github.com/reactos/reactos' under ReactOS results in an error.
-//#define UDF_USE_WCACHE
+// WCACHE was replaced with Windows Cache Manager approach
 
 #define UDF_ALLOW_FRAG_AD
 
