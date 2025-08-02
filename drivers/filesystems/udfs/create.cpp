@@ -2065,6 +2065,13 @@ try_exit:   NOTHING;
 
                         FileObject->Flags |= FO_CACHE_SUPPORTED;
                         MmPrint(("        FO_CACHE_SUPPORTED\n"));
+                        
+                        // Pre-optimize cache settings for git clone and build performance
+                        // This reduces overhead during the first I/O operations
+                        if (!(PtrNewFcb->FcbState & UDF_FCB_DIRECTORY)) {
+                            // For regular files, set up optimal cache parameters early
+                            PtrNewFcb->Header.IsFastIoPossible = FastIoIsPossible;
+                        }
                     }
                 }
 

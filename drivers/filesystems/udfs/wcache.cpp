@@ -14,9 +14,15 @@ static BOOLEAN __stdcall acquire_for_lazy_write(PVOID Context, BOOLEAN Wait) {
 
     UDFPrint(("UDF: acquire_for_lazy_write(%p, %u)\n", Context, Wait));
 
-    // For build performance, try shared VCB access first to reduce contention
-    if (!ExAcquireResourceSharedLite(&fcb->Vcb->VcbResource, Wait))
-        return FALSE;
+    // For build and git clone performance, try shared VCB access first to reduce contention
+    // More aggressive approach for git's mixed I/O patterns
+    if (!ExAcquireResourceSharedLite(&fcb->Vcb->VcbResource, Wait)) {
+        // If VCB access fails and we can't wait, return immediately
+        if (!Wait) return FALSE;
+        // Try with Wait=TRUE if originally requested
+        if (!ExAcquireResourceSharedLite(&fcb->Vcb->VcbResource, TRUE))
+            return FALSE;
+    }
 
     if (!ExAcquireResourceExclusiveLite(fcb->Header.Resource, Wait)) {
         ExReleaseResourceLite(&fcb->Vcb->VcbResource);
@@ -47,11 +53,18 @@ static BOOLEAN __stdcall acquire_for_read_ahead(PVOID Context, BOOLEAN Wait) {
 
     UDFPrint(("UDF: acquire_for_read_ahead(%p, %u)\n", Context, Wait));
 
-    // For build performance, always try to acquire with wait=FALSE for read-ahead
-    // to avoid blocking other operations
+    // For build and git clone performance, always try to acquire with wait=FALSE for read-ahead
+    // to avoid blocking other operations - more aggressive than previous optimization
     if (!Wait) {
-        if (!ExAcquireResourceSharedLite(fcb->Header.Resource, FALSE))
-            return FALSE;
+        // For git clone patterns, try shared access first, then try without waiting
+        if (!ExAcquireResourceSharedLite(fcb->Header.Resource, FALSE)) {
+            // If we can't get shared access immediately, try VCB resource instead
+            if (!ExAcquireResourceSharedLite(&fcb->Vcb->VcbResource, FALSE))
+                return FALSE;
+            ExReleaseResourceLite(&fcb->Vcb->VcbResource);
+            if (!ExAcquireResourceSharedLite(fcb->Header.Resource, FALSE))
+                return FALSE;
+        }
     } else {
         if (!ExAcquireResourceSharedLite(fcb->Header.Resource, Wait))
             return FALSE;

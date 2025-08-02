@@ -43,18 +43,20 @@
 #define UDF_ALLOW_FRAG_AD
 
 #ifndef UDF_LIMIT_DIR_SIZE
-    // Increased threshold for better build performance - more directory entries cached
-    #define UDF_DEFAULT_DIR_PACK_THRESHOLD (256)
+    // Increased threshold for better build and git clone performance - more directory entries cached
+    // Git clone creates many directories and needs aggressive directory caching
+    #define UDF_DEFAULT_DIR_PACK_THRESHOLD (512)
 #else // UDF_LIMIT_DIR_SIZE
-    #define UDF_DEFAULT_DIR_PACK_THRESHOLD (32)
+    #define UDF_DEFAULT_DIR_PACK_THRESHOLD (64)
 #endif // UDF_LIMIT_DIR_SIZE
 
 // Read ahead amount used for normal data files
-// Increased for better build performance on UDF drives
+// Increased for better build and git clone performance on UDF drives
+// 512KB read-ahead for mixed I/O patterns like git clone
 
-#define READ_AHEAD_GRANULARITY           (0x20000)
+#define READ_AHEAD_GRANULARITY           (0x80000)
 
-#define UDF_DEFAULT_SPARSE_THRESHOLD (256*PACKETSIZE_UDF)
+#define UDF_DEFAULT_SPARSE_THRESHOLD (128*PACKETSIZE_UDF)
 
 #define ALLOW_SPARSE
 

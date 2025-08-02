@@ -600,8 +600,12 @@ UDFCommonRead(
                     Fcb);        // The context used in callbacks
                 MmPrint(("    CcSetReadAheadGranularity()\n"));
                 CcSetReadAheadGranularity(FileObject, READ_AHEAD_GRANULARITY);
-                // Optimize cache for build workloads - reduce dirty page threshold for faster flushes
+                // Optimize cache for build and git clone workloads - reduce dirty page threshold for faster flushes  
                 CcSetDirtyPageThreshold(FileObject, 32);
+                // Enable aggressive read-ahead for git clone operations
+                if (TruncatedLength <= 0x100000) { // Files under 1MB - typical for git files
+                    CcSetAdditionalCacheAttributes(FileObject, TRUE, FALSE); // Enable read-ahead, disable write-behind
+                }
             }
 
             // Check and see if this request requires a MDL returned to the caller

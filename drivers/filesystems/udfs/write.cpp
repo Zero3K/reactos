@@ -662,8 +662,12 @@ UDFCommonWrite(
                 CcSetReadAheadGranularity(FileObject, READ_AHEAD_GRANULARITY);
                 // Optimize cache for build workloads - reduce dirty page threshold for faster flushes
                 CcSetDirtyPageThreshold(FileObject, 32);
-                // Disable write-behind for small files to improve build performance
+                // Disable write-behind for small files to improve build and git clone performance
                 CcSetAdditionalCacheAttributes(FileObject, FALSE, FALSE);
+                // Optimize for git clone patterns - enable write-through for small files under 64KB
+                if (TruncatedLength <= 0x10000) { // 64KB
+                    FileObject->Flags |= FO_WRITE_THROUGH;
+                }
             }
 
             if (ZeroBlock && !ZeroBlockDone) {
