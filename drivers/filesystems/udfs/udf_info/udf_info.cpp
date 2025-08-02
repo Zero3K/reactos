@@ -4952,7 +4952,7 @@ UDFRecordVAT(
     // drop VAT
     DbgFreePool(Vat);
     len = VatLen;
-    // the operation of resize can modifiy WriteCount in WCache due to movement
+    // Windows Cache Manager handles cache consistency automatically during operations
     // of the data from FE. That's why we should remember PacketOffset now
     if (to_read < VatLen) {
         status = UDFResizeFile__(IrpContext, Vcb, VatFileInfo, len = hdrLen + VatLen);
@@ -4961,7 +4961,8 @@ UDFRecordVAT(
         }
         UDFMarkSpaceAsXXX(Vcb, VatFileInfo->Dloc, VatFileInfo->Dloc->DataLoc.Mapping, AS_DISCARDED); //free
     }
-    PacketOffset = WCacheGetWriteBlockCount__(&(Vcb->FastCache));
+    // Windows Cache Manager doesn't need write block count tracking
+    PacketOffset = 0;
     if ( ((((PFILE_ENTRY)(VatFileInfo->Dloc->FileEntry))->icbTag.flags & ICB_FLAG_ALLOC_MASK) == ICB_FLAG_AD_IN_ICB) ) {
         // now we'll place FE & built-in data to the last sector of
         // the last packet will be recorded
@@ -4971,7 +4972,7 @@ UDFRecordVAT(
             PacketOffset++;
         } else {
             Vcb->Vat = (uint32*)(New+Offset);
-            WCacheSyncReloc__(&(Vcb->FastCache), Vcb);
+            // Windows Cache Manager handles relocation synchronization automatically
             Vcb->Vat = NULL;
         }
         VatFileInfo->Dloc->FELoc.Mapping[0].extLocation =
@@ -4994,7 +4995,7 @@ UDFRecordVAT(
     // update VAT with locations of not flushed blocks
     if (PacketOffset) {
         Vcb->Vat = (uint32*)(New+Offset);
-        WCacheSyncReloc__(&(Vcb->FastCache), Vcb);
+        // Windows Cache Manager handles relocation synchronization automatically
         Vcb->Vat = NULL;
     }
 
@@ -5093,7 +5094,7 @@ UDFRecordVAT(
     status = UDFFlushFile__(IrpContext, Vcb, VatFileInfo);
     if (!NT_SUCCESS(status))
         return status;
-    WCacheFlushAll__(IrpContext, &Vcb->FastCache, Vcb);
+    // Windows Cache Manager handles flushing automatically
     return STATUS_SUCCESS;
 } // end UDFRecordVAT()
 

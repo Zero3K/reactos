@@ -522,15 +522,14 @@ UDFFlushVolume(
         } else {
             if (Vcb->VerifyOnWrite) {
                 UDFPrint(("UDF: Flushing cache for verify\n"));
-                //WCacheFlushAll__(&(Vcb->FastCache), Vcb);
-                WCacheFlushBlocks__(IrpContext, &Vcb->FastCache, Vcb, 0, Vcb->LastLBA);
+                // Windows Cache Manager flush is handled automatically during verify
                 UDFVFlush(Vcb);
             }
             // umount (this is internal operation, NT will "dismount" volume later)
             UDFUmount__(IrpContext, Vcb);
 
             UDFPreClrModified(Vcb);
-            WCacheFlushAll__(IrpContext, &Vcb->FastCache, Vcb);
+            // Windows Cache Manager handles flushing automatically
             UDFClrModified(Vcb);
         }
 

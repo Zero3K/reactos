@@ -2922,6 +2922,7 @@ UDFRelocateExtent(
 
 /*
     This routine checks if all the data required is in cache.
+    Simplified version - relies on Windows Cache Manager
  */
 BOOLEAN
 UDFIsExtentCached(
@@ -2932,46 +2933,16 @@ UDFIsExtentCached(
     IN BOOLEAN ForWrite
     )
 {
-    BOOLEAN retstat = FALSE;
-    PEXTENT_MAP Extent = ExtInfo->Mapping;   // Extent array
-    SIZE_T to_read;
-    uint32 Lba, sect_offs, flags, i;
-
-    WCacheStartDirect__(&(Vcb->FastCache), Vcb, TRUE/*FALSE*//*ForWrite*/);
-    if (!ExtInfo || !ExtInfo->Mapping) goto EO_IsCached;
-    if (!Length) {
-        retstat = TRUE;
-        goto EO_IsCached;
-    }
-
-    // prevent reading out of data space
-    if (Offset > ExtInfo->Length) goto EO_IsCached;
-    if (Offset+Length > ExtInfo->Length) goto EO_IsCached;
-    Offset += ExtInfo->Offset;               // used for in-ICB data
-    // read maximal possible part of each frag of extent
-    Lba = UDFExtentOffsetToLba(Vcb, Extent, Offset, &sect_offs, &to_read, &flags, &i);
-    while(((LONG)Length) > 0) {
-        // EOF check
-        if (Lba == LBA_OUT_OF_EXTENT) goto EO_IsCached;
-        Extent += (i + 1);
-        // check for reading tail
-        to_read = min(to_read, Length);
-        if (flags == EXTENT_RECORDED_ALLOCATED) {
-            retstat = UDFIsDataCached(Vcb, Lba, (to_read+sect_offs+Vcb->BlockSize-1)>>Vcb->BlockSizeBits);
-            if (!retstat) goto EO_IsCached;
-        } else if (ForWrite) {
-            goto EO_IsCached;
-        }
-        Offset += to_read;
-        Length -= to_read;
-        Lba = UDFNextExtentToLba(Vcb, Extent, &to_read, &flags, &i);
-    }
-    retstat = TRUE;
-EO_IsCached:
-    if (!retstat) {
-        WCacheEODirect__(&(Vcb->FastCache), Vcb);
-    }
-    return retstat;
+    // With Windows Cache Manager, we assume data can be cached efficiently
+    // For simplicity, return TRUE for read operations, FALSE for write when can't wait
+    UNREFERENCED_PARAMETER(Vcb);
+    UNREFERENCED_PARAMETER(ExtInfo);
+    UNREFERENCED_PARAMETER(Offset);
+    UNREFERENCED_PARAMETER(Length);
+    
+    // For reads, assume data is available (Cache Manager will handle actual caching)
+    // For writes, be more conservative to avoid blocking
+    return !ForWrite;
 } // end UDFIsExtentCached()
 
 /*

@@ -739,7 +739,7 @@ UDFCommonWrite(
                 Fcb->Header.ValidDataLength.QuadPart = ByteOffset.QuadPart + TruncatedLength;
             }
 
-            // Successful check will cause WCache lock
+            // Cache checking for async operation decision
             if (!CanWait && UDFIsFileCached__(Vcb, Fcb->FileInfo, ByteOffset.QuadPart, TruncatedLength, TRUE)) {
                 UDFPrint(("UDFCommonWrite: Cached => CanWait\n"));
                 CacheLocked = TRUE;
@@ -779,7 +779,7 @@ try_exit:   NOTHING;
     } _SEH2_FINALLY {
 
         if (CacheLocked) {
-            WCacheEODirect__(&(Vcb->FastCache), Vcb);
+            // Cache unlocking is handled by Windows Cache Manager
         }
 
         // Post IRP if required

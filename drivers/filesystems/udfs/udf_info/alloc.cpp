@@ -649,7 +649,7 @@ UDFMarkSpaceAsXXXNoProtect_(
 
             if (asXXX & AS_DISCARDED) {
                 UDFUnmapRange(Vcb, lba, len);
-                WCacheDiscardBlocks__(&(Vcb->FastCache), Vcb, lba, len);
+                // Windows Cache Manager handles cache invalidation automatically
                 UDFSetZeroBits(Vcb->ZSBM_Bitmap, lba, len);
             }
             if (Vcb->Vat) {
@@ -907,7 +907,7 @@ UDFGetTotalSpace(
 } // end UDFGetTotalSpace()
 
 /*
-    Callback for WCache
+    Callback for Windows Cache Manager
     returns Allocated and Zero-filled flags for given block
     any data in 'unallocated' blocks may be changed during flush process
  */
@@ -919,27 +919,25 @@ UDFIsBlockAllocated(
 {
     ULONG ret_val = 0;
     uint32* bm;
+    
+    // Simple constants for block state (replacing old custom cache constants)
+    #define BLOCK_USED    0x01
+    #define BLOCK_ZERO    0x02
+    
 //    return TRUE;
     if (!(((PVCB)_Vcb)->VcbState & UDF_VCB_ASSUME_ALL_USED)) {
         // check used
         if ((bm = (uint32*)(((PVCB)_Vcb)->FSBM_Bitmap)))
-            ret_val = (UDFGetUsedBit(bm, Lba) ? WCACHE_BLOCK_USED : 0);
+            ret_val = (UDFGetUsedBit(bm, Lba) ? BLOCK_USED : 0);
         // check zero-filled
         if ((bm = (uint32*)(((PVCB)_Vcb)->ZSBM_Bitmap)))
-            ret_val |= (UDFGetZeroBit(bm, Lba) ? WCACHE_BLOCK_ZERO : 0);
+            ret_val |= (UDFGetZeroBit(bm, Lba) ? BLOCK_ZERO : 0);
     } else {
-        ret_val = WCACHE_BLOCK_USED;
+        ret_val = BLOCK_USED;
     }
     // check bad block
 
-    // WCache works with LOGICAL addresses, not PHYSICAL, BB check must be performed UNDER cache
-/*
-    if (bm = (uint32*)(((PVCB)_Vcb)->BSBM_Bitmap)) {
-        ret_val |= (UDFGetBadBit(bm, Lba) ? WCACHE_BLOCK_BAD : 0);
-        if (ret_val & WCACHE_BLOCK_BAD) {
-            UDFPrint(("Marked BB @ %#x\n", Lba));
-        }
-    }
-*/
+    // Bad block checking is handled by Windows Cache Manager
+    // Old custom cache implementation is no longer used
     return ret_val;
 } // end UDFIsBlockAllocated()

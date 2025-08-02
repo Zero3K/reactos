@@ -531,13 +531,6 @@ struct VCB {
 
     UCHAR           SyncCacheState;
 
-    // W-cache
-    W_CACHE         FastCache;
-    ULONG           WCacheMaxFrames;
-    ULONG           WCacheMaxBlocks;
-    ULONG           WCacheBlocksPerFrameSh;
-    ULONG           WCacheFramesToKeepFree;
-
     PCHAR           ZBuffer;
     PCHAR           fZBuffer;
     ULONG           fZBufferSize;
@@ -967,11 +960,6 @@ typedef struct _UDFData {
     UNICODE_STRING              UnicodeStrRoot;
     UNICODE_STRING              UnicodeStrSDir;
     UNICODE_STRING              AclName;
-
-    ULONG                       WCacheMaxFrames;
-    ULONG                       WCacheMaxBlocks;
-    ULONG                       WCacheBlocksPerFrameSh;
-    ULONG                       WCacheFramesToKeepFree;
 
 } UDFData, *PUDFData;
 
