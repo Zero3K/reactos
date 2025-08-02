@@ -465,9 +465,7 @@ UDFMountVolume(
         UDFReleaseResource(&(Vcb->BitMapResource1));
 
         ASSERT(!Vcb->Modified);
-        WCacheChFlags__(&(Vcb->FastCache),
-                        WCACHE_CACHE_WHOLE_PACKET, // enable cache whole packet
-                        WCACHE_MARK_BAD_BLOCKS | WCACHE_RO_BAD_BLOCKS);  // let user retry request on Bad Blocks
+        // Windows Cache Manager handles flags automatically
 
         if (!NT_SUCCESS(RC)) {
 

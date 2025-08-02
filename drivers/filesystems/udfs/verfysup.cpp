@@ -359,30 +359,8 @@ UDFVerifyVolume(
             RC = UDFCompareVcb(IrpContext, Vcb, NewVcb, TRUE);
             if (!NT_SUCCESS(RC)) try_return(RC);
 
-            // Initialize internal cache
-            // in *** READ ONLY *** mode
-            Mode = WCACHE_MODE_ROM;
-
-            RC = WCacheInit__(&(NewVcb->FastCache),
-                              UdfData.WCacheMaxFrames,
-                              UdfData.WCacheMaxBlocks,
-                              NewVcb->WriteBlockSize,
-                              5, NewVcb->BlockSizeBits,
-                              UdfData.WCacheBlocksPerFrameSh,
-                              0/*NewVcb->FirstLBA*/, NewVcb->LastPossibleLBA, Mode,
-                                  /*WCACHE_CACHE_WHOLE_PACKET*/ 0 |
-                                  (Vcb->DoNotCompareBeforeWrite ? WCACHE_DO_NOT_COMPARE : 0) |
-                                  WCACHE_MARK_BAD_BLOCKS | WCACHE_RO_BAD_BLOCKS, // speed up mount on bad disks
-                              UdfData.WCacheFramesToKeepFree,
-                              UDFTWrite, UDFTRead,
-#ifdef UDF_ASYNC_IO
-                          UDFTWriteAsync, UDFTReadAsync,
-#else  //UDF_ASYNC_IO
-                          NULL, NULL,
-#endif //UDF_ASYNC_IO
-                              UDFIsBlockAllocated, UDFUpdateVAT,
-                              UDFWCacheErrorHandler);
-            if (!NT_SUCCESS(RC)) try_return(RC);
+            // Windows Cache Manager is initialized automatically - no manual init needed
+            RC = STATUS_SUCCESS;
 
             UDFPrint(("UDFVerifyVolume: Modified=%d\n", Vcb->Modified));
             RC = UDFGetDiskInfoAndVerify(IrpContext, NewVcb->TargetDeviceObject,NewVcb);
@@ -410,10 +388,7 @@ UDFVerifyVolume(
             UDFPrint(("UDFVerifyVolume: Modified=%d\n", Vcb->Modified));
             RC = UDFCompareVcb(IrpContext, Vcb, NewVcb, FALSE);
             if (!NT_SUCCESS(RC)) try_return(RC);
-            // We have unitialized WCache, so it is better to
-            // force MOUNT_VOLUME call
-            if (!WCacheIsInitialized__(&(Vcb->FastCache)))
-                try_return(RC = STATUS_WRONG_VOLUME);
+            // Windows Cache Manager is always initialized - no need to check
 
 skip_logical_check:;
 
@@ -446,30 +421,9 @@ try_exit: NOTHING;
             BOOLEAN CacheInitialized = FALSE;
             UDFPrint(("    !!! VerifyVolume - QUICK REMOUNT !!!\n"));
             // Initialize internal cache
-            CacheInitialized = WCacheIsInitialized__(&(Vcb->FastCache));
-            if (!CacheInitialized) {
-                Mode = WCACHE_MODE_ROM;
-                RC = WCacheInit__(&(Vcb->FastCache),
-                                  Vcb->WCacheMaxFrames,
-                                  Vcb->WCacheMaxBlocks,
-                                  Vcb->WriteBlockSize,
-                                  5, Vcb->BlockSizeBits,
-                              Vcb->WCacheBlocksPerFrameSh,
-                              0/*Vcb->FirstLBA*/, Vcb->LastPossibleLBA, Mode,
-                                  /*WCACHE_CACHE_WHOLE_PACKET*/ 0 |
-                                  (Vcb->DoNotCompareBeforeWrite ? WCACHE_DO_NOT_COMPARE : 0) |
-                                  (Vcb->CacheChainedIo ? WCACHE_CHAINED_IO : 0),
-                              Vcb->WCacheFramesToKeepFree,
-//                              UDFTWrite, UDFTRead,
-                              UDFTWriteVerify, UDFTReadVerify,
-#ifdef UDF_ASYNC_IO
-                                  UDFTWriteAsync, UDFTReadAsync,
-#else  //UDF_ASYNC_IO
-                                  NULL, NULL,
-#endif //UDF_ASYNC_IO
-                                  UDFIsBlockAllocated, UDFUpdateVAT,
-                                  UDFWCacheErrorHandler);
-            }
+            // Windows Cache Manager handles initialization automatically
+            CacheInitialized = TRUE;
+            RC = STATUS_SUCCESS;
             if (NT_SUCCESS(RC)) {
                 if (!Vcb->VerifyCtx.VInited) {
                     RC = UDFVInit(Vcb);
@@ -495,11 +449,7 @@ try_exit: NOTHING;
                             Mode = WCACHE_MODE_R;
                         }
                     }
-                    WCacheSetMode__(&(Vcb->FastCache), Mode);
-
-                    WCacheChFlags__(&(Vcb->FastCache),
-                                    WCACHE_CACHE_WHOLE_PACKET, // enable cache whole packet
-                                    WCACHE_MARK_BAD_BLOCKS | WCACHE_RO_BAD_BLOCKS);  // let user retry request on Bad Blocks
+                    // Windows Cache Manager handles mode and flags automatically
                 }
                 // we can't record ACL on old format disks
                 if (!UDFNtAclSupported(Vcb)) {
@@ -512,8 +462,8 @@ try_exit: NOTHING;
         if (NewVcb) {
             // Release internal cache
             UDFPrint(("UDFVerifyVolume: delete NewVcb\n"));
-            WCacheFlushAll__(IrpContext, &NewVcb->FastCache, NewVcb);
-            WCacheRelease__(&NewVcb->FastCache);
+            // Windows Cache Manager cleanup - no manual flush/release needed
+            // WCacheFlushAll__ and WCacheRelease__ are handled automatically
             UDFCleanupVCB(NewVcb);
             MyFreePool__(NewVcb);
         }

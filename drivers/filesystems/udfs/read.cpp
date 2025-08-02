@@ -729,7 +729,7 @@ try_exit:   NOTHING;
     } _SEH2_FINALLY {
 
         if (CacheLocked) {
-            WCacheEODirect__(&(Vcb->FastCache), Vcb);
+            // Windows Cache Manager handles direct access automatically
         }
 
         // Release any resources acquired here ...
