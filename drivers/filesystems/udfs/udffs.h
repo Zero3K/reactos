@@ -43,14 +43,16 @@
 #define UDF_ALLOW_FRAG_AD
 
 #ifndef UDF_LIMIT_DIR_SIZE
-    #define UDF_DEFAULT_DIR_PACK_THRESHOLD (128)
+    // Increased threshold for better build performance - more directory entries cached
+    #define UDF_DEFAULT_DIR_PACK_THRESHOLD (256)
 #else // UDF_LIMIT_DIR_SIZE
-    #define UDF_DEFAULT_DIR_PACK_THRESHOLD (16)
+    #define UDF_DEFAULT_DIR_PACK_THRESHOLD (32)
 #endif // UDF_LIMIT_DIR_SIZE
 
 // Read ahead amount used for normal data files
+// Increased for better build performance on UDF drives
 
-#define READ_AHEAD_GRANULARITY           (0x10000)
+#define READ_AHEAD_GRANULARITY           (0x20000)
 
 #define UDF_DEFAULT_SPARSE_THRESHOLD (256*PACKETSIZE_UDF)
 

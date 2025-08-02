@@ -600,6 +600,8 @@ UDFCommonRead(
                     Fcb);        // The context used in callbacks
                 MmPrint(("    CcSetReadAheadGranularity()\n"));
                 CcSetReadAheadGranularity(FileObject, READ_AHEAD_GRANULARITY);
+                // Optimize cache for build workloads - reduce dirty page threshold for faster flushes
+                CcSetDirtyPageThreshold(FileObject, 32);
             }
 
             // Check and see if this request requires a MDL returned to the caller

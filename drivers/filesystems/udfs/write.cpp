@@ -660,6 +660,10 @@ UDFCommonWrite(
                     Fcb);       // The context used in callbacks
                 MmPrint(("    CcSetReadAheadGranularity()\n"));
                 CcSetReadAheadGranularity(FileObject, READ_AHEAD_GRANULARITY);
+                // Optimize cache for build workloads - reduce dirty page threshold for faster flushes
+                CcSetDirtyPageThreshold(FileObject, 32);
+                // Disable write-behind for small files to improve build performance
+                CcSetAdditionalCacheAttributes(FileObject, FALSE, FALSE);
             }
 
             if (ZeroBlock && !ZeroBlockDone) {

@@ -14,6 +14,7 @@ static BOOLEAN __stdcall acquire_for_lazy_write(PVOID Context, BOOLEAN Wait) {
 
     UDFPrint(("UDF: acquire_for_lazy_write(%p, %u)\n", Context, Wait));
 
+    // For build performance, try shared VCB access first to reduce contention
     if (!ExAcquireResourceSharedLite(&fcb->Vcb->VcbResource, Wait))
         return FALSE;
 
@@ -46,8 +47,15 @@ static BOOLEAN __stdcall acquire_for_read_ahead(PVOID Context, BOOLEAN Wait) {
 
     UDFPrint(("UDF: acquire_for_read_ahead(%p, %u)\n", Context, Wait));
 
-    if (!ExAcquireResourceSharedLite(fcb->Header.Resource, Wait))
-        return FALSE;
+    // For build performance, always try to acquire with wait=FALSE for read-ahead
+    // to avoid blocking other operations
+    if (!Wait) {
+        if (!ExAcquireResourceSharedLite(fcb->Header.Resource, FALSE))
+            return FALSE;
+    } else {
+        if (!ExAcquireResourceSharedLite(fcb->Header.Resource, Wait))
+            return FALSE;
+    }
 
     IoSetTopLevelIrp((PIRP)FSRTL_CACHE_TOP_LEVEL_IRP);
 
