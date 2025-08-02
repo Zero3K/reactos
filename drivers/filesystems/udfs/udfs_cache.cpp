@@ -531,8 +531,10 @@ UdfsCacheWriteBlocks(
         }
 
 #ifdef UDF_CACHE_USE_WRITE_BACK
-        // Write-back strategy: Only flush if we need to
-        if (!CachedOnly && UdfsCacheShouldFlush(Cache)) {
+        // Write-back strategy: Only flush if absolutely necessary (memory pressure)
+        // Don't flush during normal write operations - let the background/timer flush handle it
+        if (!CachedOnly && UdfsCacheShouldFlushDuringWrite(Cache)) {
+            // Only flush when we're getting close to memory pressure (90% of max)
             // Release cache lock temporarily for batch I/O
             ExReleaseResourceLite(&Cache->CacheLock);
             
@@ -739,6 +741,21 @@ UdfsCacheRelease(
     RtlZeroMemory(Cache, sizeof(UDFS_CACHE));
 }
 
+// Check if cache needs flushing due to memory pressure (more conservative during writes)
+BOOLEAN
+UdfsCacheShouldFlushDuringWrite(
+    IN PUDFS_CACHE Cache
+    )
+{
+    if (!Cache || !Cache->Initialized) {
+        return FALSE;
+    }
+    
+    // Only flush during writes if we're really running out of space
+    // Use 90% threshold instead of 100% to maintain write-back benefits
+    return (Cache->DirtyCount >= (Cache->MaxDirtyCount * 9 / 10));
+}
+
 // Check if cache needs flushing
 BOOLEAN
 UdfsCacheShouldFlush(
@@ -897,9 +914,9 @@ UdfsCacheOptimizedSequentialWrite(
             
             // Process batch when full
             if (BatchCount >= UDFS_CACHE_BATCH_SIZE) {
-                // For sequential writes, we can defer flushing longer
-                // unless we're approaching the dirty threshold
-                if (Cache->DirtyCount >= (Cache->MaxDirtyCount * 3 / 4)) {
+                // For sequential writes, we defer flushing to maximize batching benefits
+                // Only flush if we're running out of cache space
+                if (UdfsCacheShouldFlushDuringWrite(Cache)) {
                     NTSTATUS BatchStatus = UdfsCacheBatchFlushBlocks(
                         IrpContext, Cache, Context, BatchEntries, BatchCount);
                     
