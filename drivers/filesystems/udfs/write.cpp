@@ -680,12 +680,9 @@ UDFCommonWrite(
                 // Caller does want a MDL returned. Note that this mode
                 // implies that the caller is prepared to block
                 MmPrint(("    CcPrepareMdlWrite()\n"));
-//                CcPrepareMdlWrite(FileObject, &ByteOffset, TruncatedLength, &(Irp->MdlAddress), &(Irp->IoStatus));
-//                NumberBytesWritten = Irp->IoStatus.Information;
-//                RC = Irp->IoStatus.Status;
-
-                NumberBytesWritten = 0;
-                RC = STATUS_INVALID_PARAMETER;
+                CcPrepareMdlWrite(FileObject, &ByteOffset, TruncatedLength, &(Irp->MdlAddress), &(Irp->IoStatus));
+                NumberBytesWritten = Irp->IoStatus.Information;
+                RC = Irp->IoStatus.Status;
 
                 try_return(RC);
             }
