@@ -161,10 +161,10 @@ typedef FILE_ID                     *PFILE_ID;
 #ifdef UDF_USE_SIMPLE_CACHE
 #include "udfs_cache.h"
 #endif
-#include "udfs_cache_mgr.h"
 
 #include "Include/regtools.h"
 #include "struct.h"
+#include "udfs_cache_mgr.h"
 
 // global variables - minimize these
 extern UDFData              UdfData;
