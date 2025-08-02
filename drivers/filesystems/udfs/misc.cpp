@@ -1171,8 +1171,9 @@ UDFFspDispatch(
 
         KeAcquireSpinLock(&(Vcb->OverflowQueueSpinLock), &SavedIrql);
         SpinLock = TRUE;
-        if (!Vcb->OverflowQueueCount)
+        if (!Vcb->OverflowQueueCount) {
             break;
+        }
 
         Vcb->OverflowQueueCount--;
         Entry = RemoveHeadList(&Vcb->OverflowQueue);
@@ -1182,6 +1183,14 @@ UDFFspDispatch(
         IrpContext = CONTAINING_RECORD(Entry,
                                           IRP_CONTEXT,
                                           WorkQueueItem.List);
+        
+        // Yield CPU briefly to prevent hogging in case of many queued items
+        // This is especially important when processing many small operations
+        if (Vcb->OverflowQueueCount > 10) {
+            LARGE_INTEGER yieldDelay;
+            yieldDelay.QuadPart = -1; // Yield for 100ns
+            KeDelayExecutionThread(KernelMode, FALSE, &yieldDelay);
+        }
     }
 
     if (!SpinLock)

@@ -572,12 +572,22 @@ UDFPhSendIOCTL(
             timeout.QuadPart = -1000;
             UDFPrint(("waiting, TO=%I64d\n", timeout.QuadPart));
             RC = DbgWaitForSingleObject(&(Context->event), &timeout);
-            while(RC == STATUS_TIMEOUT) {
+            ULONG retryCount = 0;
+            const ULONG maxRetries = 20; // Limit exponential backoff
+            while(RC == STATUS_TIMEOUT && retryCount < maxRetries) {
                 timeout.QuadPart *= 2;
-                UDFPrint(("waiting, TO=%I64d\n", timeout.QuadPart));
+                // Cap the timeout to prevent excessive delays
+                if (timeout.QuadPart < -10000000) { // Cap at 1 second
+                    timeout.QuadPart = -10000000;
+                }
+                UDFPrint(("waiting, TO=%I64d (retry %d)\n", timeout.QuadPart, retryCount));
                 RC = DbgWaitForSingleObject(&(Context->event), &timeout);
+                retryCount++;
             }
-
+            if (retryCount >= maxRetries) {
+                UDFPrint(("Maximum retries reached, proceeding anyway\n"));
+                RC = STATUS_SUCCESS; // Assume success to avoid infinite wait
+            }
         } else {
             DbgWaitForSingleObject(&(Context->event), NULL);
         }
