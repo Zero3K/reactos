@@ -1603,7 +1603,6 @@ UDFReadData(
     NTSTATUS status;
     SIZE_T _ReadBytes = 0;
     Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
-    uint32 to_read;
 
     (*ReadBytes) = 0;
     if (!Length) return STATUS_SUCCESS;
