@@ -1576,11 +1576,10 @@ UDFReadInSector(
     if (!tmp_buff) return STATUS_INSUFFICIENT_RESOURCES;
     status = UDFReadSectors(IrpContext, Vcb, Translate, Lba, 1, FALSE, tmp_buff, &_ReadBytes);
     if (NT_SUCCESS(status)) {
-            (*ReadBytes) += l;
-            RtlCopyMemory(Buffer, tmp_buff+i, l);
-        }
-        MyFreePool__(tmp_buff);
+        (*ReadBytes) += l;
+        RtlCopyMemory(Buffer, tmp_buff+i, l);
     }
+    MyFreePool__(tmp_buff);
     return status;
 } // end UDFReadInSector()
 
@@ -1720,6 +1719,7 @@ UDFWriteInSector(
 #endif //_BROWSE_UDF_
 
     (*WrittenBytes) = 0;
+#ifdef _BROWSE_UDF_
     // Always use non-cached path now that wcache is removed
     // If Direct = TRUE we should never get here, but...
     if (Direct) {
@@ -1731,18 +1731,17 @@ UDFWriteInSector(
         BrutePoint();
         return STATUS_INSUFFICIENT_RESOURCES;
     }
-        // read packet
-        status = UDFReadSectors(IrpContext, Vcb, Translate, Lba, 1, FALSE, tmp_buff, &ReadBytes);
-        if (!NT_SUCCESS(status)) goto EO_WrSctD;
-        // modify packet
-        RtlCopyMemory(tmp_buff+i, Buffer, l);
-        // write modified packet
-        status = UDFWriteSectors(IrpContext, Vcb, Translate, Lba, 1, FALSE, tmp_buff, &_WrittenBytes);
-        if (NT_SUCCESS(status))
-            (*WrittenBytes) += l;
+    // read packet
+    status = UDFReadSectors(IrpContext, Vcb, Translate, Lba, 1, FALSE, tmp_buff, &ReadBytes);
+    if (!NT_SUCCESS(status)) goto EO_WrSctD;
+    // modify packet
+    RtlCopyMemory(tmp_buff+i, Buffer, l);
+    // write modified packet
+    status = UDFWriteSectors(IrpContext, Vcb, Translate, Lba, 1, FALSE, tmp_buff, &_WrittenBytes);
+    if (NT_SUCCESS(status))
+        (*WrittenBytes) += l;
 EO_WrSctD:
-        MyFreePool__(tmp_buff);
-    }
+    MyFreePool__(tmp_buff);
     ASSERT(NT_SUCCESS(status));
     if (!NT_SUCCESS(status)) {
         UDFPrint(("UDFWriteInSector() for LBA %x failed\n", Lba));
