@@ -735,6 +735,9 @@ extern NTSTATUS UDFPostRequest(
 PIRP_CONTEXT IrpContext,
 PIRP                        Irp);
 
+ULONG
+UDFGetFspPerDeviceThreshold(VOID);
+
 VOID
 NTAPI
 UDFFspDispatch(

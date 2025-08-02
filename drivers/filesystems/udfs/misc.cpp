@@ -18,10 +18,24 @@
 // define the file specific bug-check id
 #define         UDF_BUG_CHECK_ID                UDF_FILE_MISC
 
-//  The following constant is the maximum number of ExWorkerThreads that we
+//  The following function determines the maximum number of ExWorkerThreads that we
 //  will allow to be servicing a particular target device at any one time.
+//  This is now dynamically scaled based on system memory size.
 
-#define FSP_PER_DEVICE_THRESHOLD         (2)
+ULONG
+UDFGetFspPerDeviceThreshold(VOID)
+{
+    // Scale worker thread limit based on system memory size
+    switch (MmQuerySystemSize()) {
+    case MmLargeSystem:
+        return 16;  // Large systems can handle more concurrent I/O
+    case MmMediumSystem:
+        return 8;   // Medium systems get moderate concurrency
+    case MmSmallSystem:
+    default:
+        return 4;   // Small systems still get more than the original 2
+    }
+}
 
 /*
 
@@ -986,7 +1000,7 @@ UDFPostRequest(
     Vcb = (PVCB)(IrpContext->RealDevice->DeviceExtension);
     KeAcquireSpinLock(&(Vcb->OverflowQueueSpinLock), &SavedIrql);
 
-    if ( Vcb->PostedRequestCount > FSP_PER_DEVICE_THRESHOLD) {
+    if ( Vcb->PostedRequestCount > UDFGetFspPerDeviceThreshold()) {
 
         //  We cannot currently respond to this IRP so we'll just enqueue it
         //  to the overflow queue on the volume.
@@ -1008,7 +1022,7 @@ UDFPostRequest(
         // queue up the request
         ExInitializeWorkItem(&(IrpContext->WorkQueueItem), UDFFspDispatch, IrpContext);
 
-        ExQueueWorkItem(&(IrpContext->WorkQueueItem), CriticalWorkQueue);
+        ExQueueWorkItem(&(IrpContext->WorkQueueItem), DelayedWorkQueue);
     }
 
     // return status pending
@@ -1163,7 +1177,8 @@ UDFFspDispatch(
         IoSetTopLevelIrp(NULL);
 
         //  If there are any entries on this volume's overflow queue, service
-        //  them.
+        //  them. We'll try to dispatch multiple items if we're below the threshold
+        //  to improve parallelism.
         if (!Vcb) {
             BrutePoint();
             break;
@@ -1171,6 +1186,25 @@ UDFFspDispatch(
 
         KeAcquireSpinLock(&(Vcb->OverflowQueueSpinLock), &SavedIrql);
         SpinLock = TRUE;
+        
+        // Dispatch multiple overflow items if we have capacity
+        while (Vcb->OverflowQueueCount > 0 && 
+               Vcb->PostedRequestCount < UDFGetFspPerDeviceThreshold()) {
+            
+            Vcb->OverflowQueueCount--;
+            Entry = RemoveHeadList(&Vcb->OverflowQueue);
+            Vcb->PostedRequestCount++;
+            
+            PIRP_CONTEXT OverflowIrpContext = CONTAINING_RECORD(Entry,
+                                              IRP_CONTEXT,
+                                              WorkQueueItem.List);
+            
+            // Dispatch this overflow item to a new worker thread
+            ExInitializeWorkItem(&(OverflowIrpContext->WorkQueueItem), UDFFspDispatch, OverflowIrpContext);
+            ExQueueWorkItem(&(OverflowIrpContext->WorkQueueItem), DelayedWorkQueue);
+        }
+        
+        // Check if we should get another item for our current thread
         if (!Vcb->OverflowQueueCount)
             break;
 
