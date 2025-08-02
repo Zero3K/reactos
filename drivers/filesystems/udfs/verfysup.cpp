@@ -269,7 +269,6 @@ UDFVerifyVolume(
     IO_STATUS_BLOCK Iosb;
     ULONG MediaChangeCount = 0;
     NTSTATUS RC;
-    ULONG Mode;
     BOOLEAN UnsafeIoctl = (Vcb->VcbState & UDF_VCB_FLAGS_UNSAFE_IOCTL) ? TRUE : FALSE;
 
     //  Update the real device in the IrpContext from the Vpb.  There was no available
@@ -428,27 +427,8 @@ try_exit: NOTHING;
                 }
             }
             if (NT_SUCCESS(RC)) {
-
-                if (!CacheInitialized) {
-                    if (!(Vcb->VcbState & VCB_STATE_MEDIA_WRITE_PROTECT)) {
-                        if (!Vcb->CDR_Mode) {
-                            if (Vcb->TargetDeviceObject->DeviceType == FILE_DEVICE_DISK) {
-                                UDFPrint(("UDFMountVolume: RAM mode\n"));
-                                Mode = WCACHE_MODE_RAM;
-                            } else {
-                                UDFPrint(("UDFMountVolume: RW mode\n"));
-                                Mode = WCACHE_MODE_RW;
-                            }
-        /*                    if (FsDeviceType == FILE_DEVICE_CD_ROM_FILE_SYSTEM) {
-                            } else {
-                                Vcb->WriteSecurity = TRUE;
-                            }*/
-                        } else {
-                            Mode = WCACHE_MODE_R;
-                        }
-                    }
-                    // Windows Cache Manager handles mode and flags automatically
-                }
+                // Windows Cache Manager handles cache initialization and mode automatically
+                
                 // we can't record ACL on old format disks
                 if (!UDFNtAclSupported(Vcb)) {
                     Vcb->WriteSecurity = FALSE;
