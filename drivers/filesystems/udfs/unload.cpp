@@ -5,6 +5,9 @@
 ////////////////////////////////////////////////////////////////////
 #include "udffs.h"
 
+// define the file specific bug-check id
+#define         UDF_BUG_CHECK_ID                UDF_FILE_SHUTDOWN
+
 VOID
 NTAPI
 UDFDriverUnload(
