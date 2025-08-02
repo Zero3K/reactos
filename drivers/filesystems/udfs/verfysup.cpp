@@ -363,7 +363,7 @@ UDFVerifyVolume(
             // in *** READ ONLY *** mode
             Mode = WCACHE_MODE_ROM;
 
-            RC = WCacheInit__(&(NewVcb->FastCache),
+            RC = UdfCacheInit(NewVcb,
                               UdfData.WCacheMaxFrames,
                               UdfData.WCacheMaxBlocks,
                               NewVcb->WriteBlockSize,
@@ -446,10 +446,10 @@ try_exit: NOTHING;
             BOOLEAN CacheInitialized = FALSE;
             UDFPrint(("    !!! VerifyVolume - QUICK REMOUNT !!!\n"));
             // Initialize internal cache
-            CacheInitialized = WCacheIsInitialized__(&(Vcb->FastCache));
+            CacheInitialized = UdfCacheIsInitialized(Vcb);
             if (!CacheInitialized) {
                 Mode = WCACHE_MODE_ROM;
-                RC = WCacheInit__(&(Vcb->FastCache),
+                RC = UdfCacheInit(Vcb,
                                   Vcb->WCacheMaxFrames,
                                   Vcb->WCacheMaxBlocks,
                                   Vcb->WriteBlockSize,
@@ -512,8 +512,8 @@ try_exit: NOTHING;
         if (NewVcb) {
             // Release internal cache
             UDFPrint(("UDFVerifyVolume: delete NewVcb\n"));
-            WCacheFlushAll__(IrpContext, &NewVcb->FastCache, NewVcb);
-            WCacheRelease__(&NewVcb->FastCache);
+            UdfCacheFlushAll(IrpContext, NewVcb, NewVcb);
+            UdfCacheRelease(NewVcb);
             UDFCleanupVCB(NewVcb);
             MyFreePool__(NewVcb);
         }

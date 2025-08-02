@@ -42,6 +42,9 @@
 // Test case: Running 'git clone https://github.com/reactos/reactos' under ReactOS results in an error.
 //#define UDF_USE_WCACHE
 
+// New simplified cache implementation
+#define UDF_USE_SIMPLE_CACHE
+
 #define UDF_ALLOW_FRAG_AD
 
 #ifndef UDF_LIMIT_DIR_SIZE
@@ -155,6 +158,10 @@ typedef FILE_ID                     *PFILE_ID;
 #include <string.h>
 #include <stdio.h>
 #include "wcache.h"
+#ifdef UDF_USE_SIMPLE_CACHE
+#include "udfs_cache.h"
+#endif
+#include "udfs_cache_mgr.h"
 
 #include "Include/regtools.h"
 #include "struct.h"

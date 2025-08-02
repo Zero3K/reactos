@@ -38,6 +38,8 @@ list(APPEND SOURCE
     write.cpp
     strucsup.cpp
     filobsup.cpp
+    udfs_cache.cpp
+    udfs_cache_mgr.cpp
     udffs.h)
 
 add_library(udfs MODULE ${SOURCE} udffs.rc)
