@@ -451,7 +451,7 @@ UDFUpdateLogicalVolInt(
 
     Vcb->IntegrityType = INTEGRITY_TYPE_OPEN; // make happy auto-dirty
     RC = UDFWriteSectors(IrpContext, Vcb, TRUE, PTag->tagLocation, len >> Vcb->BlockSizeBits, FALSE, (int8*)(lvid), &WrittenBytes);
-    WCacheFlushBlocks__(IrpContext, &Vcb->FastCache, Vcb, PTag->tagLocation, len >> Vcb->BlockSizeBits);
+    // Windows Cache Manager handles block flushing automatically
     // update it here to prevent recursion
     Vcb->IntegrityType = lvid->integrityType;
 
@@ -943,9 +943,7 @@ UDFUmount__(
     // prevent discarding metadata
     Vcb->VcbState |= UDF_VCB_ASSUME_ALL_USED;
     if (Vcb->CDR_Mode) {
-        // flush internal cache
-        if (WCacheGetWriteBlockCount__(&(Vcb->FastCache)) >= (Vcb->WriteBlockSize >> Vcb->BlockSizeBits) )
-            WCacheFlushAll__(IrpContext, &Vcb->FastCache, Vcb);
+        // Windows Cache Manager handles flushing automatically
         // record VAT
         return UDFRecordVAT(IrpContext, Vcb);
     }
@@ -955,8 +953,7 @@ UDFUmount__(
 
     if (Vcb->VerifyOnWrite) {
         UDFPrint(("UDF: Flushing cache for verify\n"));
-        //WCacheFlushAll__(&(Vcb->FastCache), Vcb);
-        WCacheFlushBlocks__(IrpContext, &Vcb->FastCache, Vcb, 0, Vcb->LastLBA);
+        // Windows Cache Manager handles block flushing automatically
         UDFVFlush(Vcb);
     }
 
@@ -1096,7 +1093,7 @@ MRW_workaround:
                         IsMRW = TRUE;
                         ASSERT(Vcb->LastReadTrack == 1);
                         Vcb->TrackMap[Vcb->LastReadTrack].Flags |= TrackMap_FixMRWAddressing;
-                        WCachePurgeAll__(IrpContext, &Vcb->FastCache, Vcb);
+                        // Windows Cache Manager handles cache purging automatically
                         UDFPrint(("UDF: MRW on non-MRW drive => ReadOnly"));
                         Vcb->VcbState |= VCB_STATE_VOLUME_READ_ONLY;
                     }
@@ -2127,8 +2124,7 @@ UDFLoadPartDesc(
                     RC = UDFLoadVAT(IrpContext, Vcb, i);
                     if (!NT_SUCCESS(RC))
                         return RC;
-                    WCacheFlushAll__(IrpContext, &Vcb->FastCache, Vcb);
-                    WCacheSetMode__(&Vcb->FastCache, WCACHE_MODE_R);
+                    // Windows Cache Manager handles flushing and mode automatically
                     Vcb->LastModifiedTrack = 0;
                 }
             }
@@ -2241,8 +2237,7 @@ UDFVerifyPartDesc(
 /*                    RC = UDFLoadVAT(Vcb, i);
                     if (!NT_SUCCESS(RC))
                         return RC;
-                    WCacheFlushAll__(&(Vcb->FastCache), Vcb);
-                    WCacheSetMode__(&(Vcb->FastCache), WCACHE_MODE_R);
+                    // Windows Cache Manager handles flushing and mode automatically
                     Vcb->LastModifiedTrack = 0;*/
                 }
             }

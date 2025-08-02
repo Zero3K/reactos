@@ -379,9 +379,7 @@ UDFVerifyVolume(
                 try_return(RC);
             }
 
-            WCacheChFlags__(&(Vcb->FastCache),
-                            WCACHE_CACHE_WHOLE_PACKET, // enable cache whole packet
-                            WCACHE_MARK_BAD_BLOCKS | WCACHE_RO_BAD_BLOCKS);  // let user retry request on Bad Blocks
+            // Windows Cache Manager handles flags automatically
 
             NewVcb->VcbCondition = VcbMounted;
             // Compare logical parameters (phase 2)

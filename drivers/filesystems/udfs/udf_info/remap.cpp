@@ -562,7 +562,7 @@ UDFVWorkItem(
     ReadBytes = (SIZE_T)Vcb;
 #if 1
     if (Vcb->SparingCountFree) {
-        WCacheStartDirect__(&(Vcb->FastCache), Vcb, TRUE);
+        // Windows Cache Manager handles direct access automatically
         for(i=0; i<VerifyReq->nReq; i++) {
             UDFTIOVerify(&IrpContext,
                          Vcb,
@@ -572,7 +572,7 @@ UDFVWorkItem(
                          &ReadBytes,
                          PH_TMP_BUFFER | PH_VCB_IN_RETLEN /*| PH_LOCK_CACHE*/);
         }
-        WCacheEODirect__(&(Vcb->FastCache), Vcb);
+        // Windows Cache Manager handles direct access automatically
     } else {
         for(i=0; i<VerifyReq->nReq; i++) {
             UDFPrint(("!!! No more space for remap !!!\n"));
@@ -584,14 +584,14 @@ UDFVWorkItem(
 #else
     for(i=0; i<VerifyReq->nReq; i++) {
         if (Vcb->SparingCountFree) {
-            WCacheStartDirect__(&(Vcb->FastCache), Vcb, TRUE);
+            // Windows Cache Manager handles direct access automatically
             RC = UDFTIOVerify(Vcb,
                            VerifyReq->Buffer,     // Target buffer
                            VerifyReq->vr[i].BCount << Vcb->BlockSizeBits,
                            VerifyReq->vr[i].lba,
                            &ReadBytes,
                            PH_TMP_BUFFER | PH_VCB_IN_RETLEN /*| PH_LOCK_CACHE*/);
-            WCacheEODirect__(&(Vcb->FastCache), Vcb);
+            // Windows Cache Manager handles direct access automatically
         } else {
             UDFPrint(("!!! No more space for remap !!!\n"));
             UDFPrint(("  try del from verify cache @ %x\n", VerifyReq->vr[i].lba));
