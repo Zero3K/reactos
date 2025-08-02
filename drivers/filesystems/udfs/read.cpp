@@ -331,8 +331,8 @@ UDFCommonRead(
             try_return(RC = STATUS_ACCESS_DENIED);
         }
 
-        // check for stack overflow - optimize by checking less frequently for small reads
-        if (ReadLength > (PAGE_SIZE * 4) && IoGetRemainingStackSize() < OVERFLOW_READ_THRESHHOLD) {
+        // check for stack overflow
+        if (IoGetRemainingStackSize() < OVERFLOW_READ_THRESHHOLD) {
             RC = UDFPostStackOverflowRead( IrpContext, Irp, Fcb );
             try_return(RC);
         }
@@ -505,17 +505,11 @@ UDFCommonRead(
                 MainResourceAcquired = TRUE;
 
                 // We hold PagingIo shared around the flush to fix a
-                // cache coherency problem - only flush if there's significant cached data
+                // cache coherency problem.
                 UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbPagingIoResource, TRUE );
 
-                // Only flush cache if it's worth the cost for larger operations
-                if (ReadLength > (PAGE_SIZE * 2)) {
-                    MmPrint(("    CcFlushCache()\n"));
-                    CcFlushCache(&Fcb->FcbNonpaged->SegmentObject, &ByteOffset, ReadLength, &Irp->IoStatus);
-                } else {
-                    // For small reads, just set success to avoid unnecessary flush
-                    Irp->IoStatus.Status = STATUS_SUCCESS;
-                }
+                MmPrint(("    CcFlushCache()\n"));
+                CcFlushCache(&Fcb->FcbNonpaged->SegmentObject, &ByteOffset, ReadLength, &Irp->IoStatus);
 
                 UDFReleaseResource(&Fcb->FcbNonpaged->FcbPagingIoResource);
 
@@ -645,8 +639,7 @@ UDFCommonRead(
 
             MmPrint(("    Read NonCachedIo\n"));
 
-            // Cache checking for async operation decision - optimize by checking only for larger reads
-            if (!CanWait && ReadLength > PAGE_SIZE && UDFIsFileCached__(Vcb, Fcb->FileInfo, ByteOffset.QuadPart, TruncatedLength, FALSE)) {
+            if (!CanWait && UDFIsFileCached__(Vcb, Fcb->FileInfo, ByteOffset.QuadPart, TruncatedLength, FALSE)) {
                 MmPrint(("    Locked => CanWait\n"));
                 CacheLocked = TRUE;
                 CanWait = TRUE;
@@ -659,8 +652,8 @@ UDFCommonRead(
 
 //                ASSERT(NT_SUCCESS(RC));
 
-            // Optimize buffer operations - combine lock and map for efficiency
-            if (!NT_SUCCESS(RC = UDFLockUserBuffer(IrpContext, TruncatedLength, IoWriteAccess))) {
+            RC = UDFLockUserBuffer(IrpContext, TruncatedLength, IoWriteAccess);
+            if (!NT_SUCCESS(RC)) {
                 try_return(RC);
             }
 

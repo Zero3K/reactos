@@ -3033,59 +3033,14 @@ UDFReadExtent(
         Extent += (_ReadBytes + 1);
         // check for reading tail
         to_read = min(to_read, Length);
-        
         if (flags == EXTENT_RECORDED_ALLOCATED) {
-            // Try to coalesce adjacent allocated fragments for more efficient I/O
-            SIZE_T coalesced_length = to_read;
-            uint32 next_flags, next_index;
-            SIZE_T next_to_read;
-            uint32 expected_next_lba = Lba + ((sect_offs + to_read + Vcb->BlockSize - 1) >> Vcb->BlockSizeBits);
-            
-            // Look ahead to see if we can coalesce with next fragments
-            if (Length > to_read) {
-                PEXTENT_MAP next_extent = Extent;
-                uint32 next_lba = UDFNextExtentToLba(Vcb, next_extent, &next_to_read, &next_flags, &next_index);
-                
-                // Coalesce if next fragment is allocated and physically adjacent
-                while (Length > coalesced_length && 
-                       next_lba != LBA_OUT_OF_EXTENT &&
-                       next_flags == EXTENT_RECORDED_ALLOCATED &&
-                       next_lba == expected_next_lba &&
-                       (sect_offs + coalesced_length) % Vcb->BlockSize == 0) {
-                    
-                    SIZE_T fragment_size = min(next_to_read, Length - coalesced_length);
-                    coalesced_length += fragment_size;
-                    expected_next_lba = next_lba + ((fragment_size + Vcb->BlockSize - 1) >> Vcb->BlockSizeBits);
-                    
-                    if (Length <= coalesced_length) break;
-                    
-                    next_extent += (next_index + 1);
-                    next_lba = UDFNextExtentToLba(Vcb, next_extent, &next_to_read, &next_flags, &next_index);
-                }
-            }
-            
-            // Perform the coalesced read
-            status = UDFReadData(IrpContext, Vcb, TRUE, ( ((uint64)Lba) << Vcb->BlockSizeBits) + sect_offs, coalesced_length, Direct, Buffer, &_ReadBytes);
+            status = UDFReadData(IrpContext, Vcb, TRUE, ( ((uint64)Lba) << Vcb->BlockSizeBits) + sect_offs, to_read, Direct, Buffer, &_ReadBytes);
             (*ReadBytes) += _ReadBytes;
             if (!NT_SUCCESS(status)) return status;
-            
-            // Skip past the coalesced fragments
-            SIZE_T remaining_coalesced = coalesced_length - to_read;
-            while (remaining_coalesced > 0 && Length > coalesced_length - remaining_coalesced) {
-                Extent += (_ReadBytes + 1);
-                SIZE_T frag_size = min(remaining_coalesced, Length - (coalesced_length - remaining_coalesced));
-                remaining_coalesced -= frag_size;
-                if (remaining_coalesced > 0) {
-                    UDFNextExtentToLba(Vcb, Extent, &to_read, &flags, &index);
-                    _ReadBytes = index;
-                }
-            }
-            to_read = coalesced_length;
         } else {
             RtlZeroMemory(Buffer, to_read);
             (*ReadBytes) += to_read;
         }
-        
         // prepare for reading next frag...
         Length -= to_read;
         if (!Length)
@@ -3236,10 +3191,7 @@ UDFWriteExtent(
     Offset += ExtInfo->Offset;               // used for in-ICB data
     // write maximal possible part of each frag of extent
     while(((LONG)Length) > 0) {
-        // Reduce redundant space allocation checks for small fragments
-        if (Length > Vcb->LBlockSize) {
-            UDFCheckSpaceAllocation(Vcb, 0, Extent, AS_USED); // check if used
-        }
+        UDFCheckSpaceAllocation(Vcb, 0, Extent, AS_USED); // check if used
         Lba = UDFExtentOffsetToLba(Vcb, Extent, Offset, &sect_offs, &to_write, &flags, NULL);
         // EOF check
         if (Lba == LBA_OUT_OF_EXTENT) {
