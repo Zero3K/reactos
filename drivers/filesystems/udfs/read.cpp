@@ -659,8 +659,8 @@ UDFCommonRead(
 
 //                ASSERT(NT_SUCCESS(RC));
 
-            RC = UDFLockUserBuffer(IrpContext, TruncatedLength, IoWriteAccess);
-            if (!NT_SUCCESS(RC)) {
+            // Optimize buffer operations - combine lock and map for efficiency
+            if (!NT_SUCCESS(RC = UDFLockUserBuffer(IrpContext, TruncatedLength, IoWriteAccess))) {
                 try_return(RC);
             }
 

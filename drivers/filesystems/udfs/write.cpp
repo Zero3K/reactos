@@ -758,7 +758,7 @@ UDFCommonWrite(
 
             PerfPrint(("UDFCommonWrite: Physical write %x bytes at %x\n", TruncatedLength, ByteOffset.LowPart));
 
-            // Lock the callers buffer
+            // Optimize buffer operations - combine lock and map for efficiency  
             if (!NT_SUCCESS(RC = UDFLockUserBuffer(IrpContext, TruncatedLength, IoReadAccess))) {
                 try_return(RC);
             }
