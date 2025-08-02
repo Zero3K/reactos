@@ -1045,7 +1045,6 @@ UDFFspDispatch(
     PVCB             Vcb;
     KIRQL            SavedIrql;
     PLIST_ENTRY      Entry;
-    BOOLEAN          SpinLock = FALSE;
 
     // The context must be a pointer to an IrpContext structure
     IrpContext = (PIRP_CONTEXT)Context;
@@ -1065,6 +1064,8 @@ UDFFspDispatch(
 
     UDFPrint(("  *** Thr: %x  ThCnt: %x  QCnt: %x  Started!\n", PsGetCurrentThread(), Vcb->PostedRequestCount, Vcb->OverflowQueueCount));
 
+    // Follow FastFAT pattern: process IRPs until overflow queue is empty
+    // Natural CPU yielding occurs between worker thread invocations
     while(TRUE) {
 
         UDFPrint(("    Next IRP\n"));
@@ -1161,54 +1162,34 @@ UDFFspDispatch(
 
         // Ensure that the "top-level" field is cleared
         IoSetTopLevelIrp(NULL);
-        
-        // Yield CPU briefly after processing each IRP to prevent hogging
-        // This is essential during filesystem-intensive operations
-        {
-            LARGE_INTEGER briefYield;
-            briefYield.QuadPart = -1000; // Yield for 100 microseconds
-            KeDelayExecutionThread(KernelMode, FALSE, &briefYield);
-        }
 
         //  If there are any entries on this volume's overflow queue, service
-        //  them.
+        //  them following the FastFAT pattern
         if (!Vcb) {
             BrutePoint();
             break;
         }
 
         KeAcquireSpinLock(&(Vcb->OverflowQueueSpinLock), &SavedIrql);
-        SpinLock = TRUE;
-        if (!Vcb->OverflowQueueCount) {
+        
+        if (Vcb->OverflowQueueCount > 0) {
+            // There is overflow work to do - dequeue and continue processing
+            Vcb->OverflowQueueCount--;
+            Entry = RemoveHeadList(&Vcb->OverflowQueue);
+            KeReleaseSpinLock(&(Vcb->OverflowQueueSpinLock), SavedIrql);
+
+            IrpContext = CONTAINING_RECORD(Entry,
+                                              IRP_CONTEXT,
+                                              WorkQueueItem.List);
+            // Continue loop to process next IRP
+            continue;
+        } else {
+            // No more overflow work - decrement posted count and exit
+            Vcb->PostedRequestCount--;
+            KeReleaseSpinLock(&(Vcb->OverflowQueueSpinLock), SavedIrql);
             break;
         }
-
-        Vcb->OverflowQueueCount--;
-        Entry = RemoveHeadList(&Vcb->OverflowQueue);
-        KeReleaseSpinLock(&(Vcb->OverflowQueueSpinLock), SavedIrql);
-        SpinLock = FALSE;
-
-        IrpContext = CONTAINING_RECORD(Entry,
-                                          IRP_CONTEXT,
-                                          WorkQueueItem.List);
-        
-        // Yield CPU periodically to prevent hogging during continuous processing
-        // This is critical during filesystem-intensive operations like git
-        static ULONG processedCount = 0;
-        processedCount++;
-        
-        // Yield every 5 processed IRPs or when queue is large
-        if ((processedCount % 5) == 0 || Vcb->OverflowQueueCount > 5) {
-            LARGE_INTEGER yieldDelay;
-            yieldDelay.QuadPart = -10000; // Yield for 1ms (more meaningful than 100ns)
-            KeDelayExecutionThread(KernelMode, FALSE, &yieldDelay);
-        }
     }
-
-    if (!SpinLock)
-        KeAcquireSpinLock(&(Vcb->OverflowQueueSpinLock), &SavedIrql);
-    Vcb->PostedRequestCount--;
-    KeReleaseSpinLock(&(Vcb->OverflowQueueSpinLock), SavedIrql);
 
     UDFPrint(("  *** Thr: %x  ThCnt: %x  QCnt: %x  Terminated!\n", PsGetCurrentThread(), Vcb->PostedRequestCount, Vcb->OverflowQueueCount));
 
