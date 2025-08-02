@@ -294,9 +294,9 @@ OUT PMDL*                   MdlChain,
 OUT PIO_STATUS_BLOCK        IoStatus,
 IN PDEVICE_OBJECT           DeviceObject);
 
-extern BOOLEAN UDFFastIoMdlReadComplete(
+extern BOOLEAN NTAPI UDFFastIoMdlReadComplete(
 IN PFILE_OBJECT             FileObject,
-OUT PMDL                    MdlChain,
+IN PMDL                     MdlChain,
 IN PDEVICE_OBJECT           DeviceObject);
 
 extern BOOLEAN NTAPI UDFFastIoPrepareMdlWrite(
@@ -311,7 +311,7 @@ IN PDEVICE_OBJECT           DeviceObject);
 extern BOOLEAN NTAPI UDFFastIoMdlWriteComplete(
 IN PFILE_OBJECT             FileObject,
 IN PLARGE_INTEGER           FileOffset,
-OUT PMDL                    MdlChain,
+IN PMDL                     MdlChain,
 IN PDEVICE_OBJECT           DeviceObject);
 
 extern NTSTATUS NTAPI UDFFastIoAcqModWrite(

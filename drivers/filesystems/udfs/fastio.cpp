@@ -742,10 +742,10 @@ IN PDEVICE_OBJECT           DeviceObject)
 * Return Value: TRUE/FALSE
 *
 *************************************************************************/
-BOOLEAN UDFFastIoMdlReadComplete(
+BOOLEAN NTAPI UDFFastIoMdlReadComplete(
 IN PFILE_OBJECT             FileObject,
-OUT PMDL                            MdlChain,
-IN PDEVICE_OBJECT               DeviceObject)
+IN PMDL                     MdlChain,
+IN PDEVICE_OBJECT           DeviceObject)
 {
     FsRtlEnterFileSystem();
 
@@ -821,9 +821,9 @@ UDFFastIoPrepareMdlWrite(
 *************************************************************************/
 BOOLEAN NTAPI UDFFastIoMdlWriteComplete(
 IN PFILE_OBJECT             FileObject,
-IN PLARGE_INTEGER               FileOffset,
-OUT PMDL                            MdlChain,
-IN PDEVICE_OBJECT               DeviceObject)
+IN PLARGE_INTEGER           FileOffset,
+IN PMDL                     MdlChain,
+IN PDEVICE_OBJECT           DeviceObject)
 {
     FsRtlEnterFileSystem();
 
