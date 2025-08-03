@@ -39,6 +39,27 @@ static KSPIN_LOCK ContextPoolLock = 0; // Initialize to zero
 static ULONG ContextPoolUsageMask = 0;
 static LONG ContextPoolInitialized = 0; // Use LONG for InterlockedCompareExchange
 
+// Performance optimization: Buffer pool to eliminate allocation overhead for I/O operations
+// This addresses the major bottleneck where every read/write operation without PH_TMP_BUFFER
+// allocates a temporary buffer, performs I/O, copies data, and frees the buffer.
+// The buffer pool pre-allocates commonly used buffer sizes to eliminate this overhead.
+#define UDF_BUFFER_POOL_SMALL_SIZE 16    // Pool for small buffers (up to 4KB)
+#define UDF_BUFFER_POOL_MEDIUM_SIZE 8    // Pool for medium buffers (up to 64KB) 
+#define UDF_BUFFER_SMALL_MAX 4096        // 4KB - typical block size
+#define UDF_BUFFER_MEDIUM_MAX 65536      // 64KB - larger read operations
+#define UDF_DIRECT_IO_THRESHOLD 128      // Use direct I/O for very small reads to avoid copy overhead
+
+typedef struct _UDF_BUFFER_POOL_ENTRY {
+    PVOID Buffer;
+    SIZE_T Size;
+    BOOLEAN InUse;
+} UDF_BUFFER_POOL_ENTRY, *PUDF_BUFFER_POOL_ENTRY;
+
+static UDF_BUFFER_POOL_ENTRY SmallBufferPool[UDF_BUFFER_POOL_SMALL_SIZE];
+static UDF_BUFFER_POOL_ENTRY MediumBufferPool[UDF_BUFFER_POOL_MEDIUM_SIZE];
+static KSPIN_LOCK BufferPoolLock = 0;
+static LONG BufferPoolInitialized = 0;
+
 static PUDF_PH_CALL_CONTEXT UDFAllocateContext(void)
 {
     KIRQL oldIrql;
@@ -81,6 +102,99 @@ static VOID UDFFreeContext(PUDF_PH_CALL_CONTEXT Context)
         // Allocated context, free it
         MyFreePool__(Context);
     }
+}
+
+static VOID UDFInitializeBufferPool(void)
+{
+    ULONG i;
+    
+    // Initialize small buffer pool (4KB buffers)
+    for (i = 0; i < UDF_BUFFER_POOL_SMALL_SIZE; i++) {
+        SmallBufferPool[i].Buffer = DbgAllocatePoolWithTag(NonPagedPool, UDF_BUFFER_SMALL_MAX, 'bSUD');
+        SmallBufferPool[i].Size = (SmallBufferPool[i].Buffer) ? UDF_BUFFER_SMALL_MAX : 0;
+        SmallBufferPool[i].InUse = FALSE;
+    }
+    
+    // Initialize medium buffer pool (64KB buffers)
+    for (i = 0; i < UDF_BUFFER_POOL_MEDIUM_SIZE; i++) {
+        MediumBufferPool[i].Buffer = DbgAllocatePoolWithTag(NonPagedPool, UDF_BUFFER_MEDIUM_MAX, 'bMUD');
+        MediumBufferPool[i].Size = (MediumBufferPool[i].Buffer) ? UDF_BUFFER_MEDIUM_MAX : 0;
+        MediumBufferPool[i].InUse = FALSE;
+    }
+}
+
+static PVOID UDFAllocatePooledBuffer(SIZE_T Size)
+{
+    KIRQL oldIrql;
+    ULONG i;
+    
+    // Thread-safe initialization
+    if (InterlockedCompareExchange(&BufferPoolInitialized, 1, 0) == 0) {
+        KeInitializeSpinLock(&BufferPoolLock);
+        UDFInitializeBufferPool();
+    }
+    
+    KeAcquireSpinLock(&BufferPoolLock, &oldIrql);
+    
+    // Try small buffer pool first for sizes up to 4KB
+    if (Size <= UDF_BUFFER_SMALL_MAX) {
+        for (i = 0; i < UDF_BUFFER_POOL_SMALL_SIZE; i++) {
+            if (SmallBufferPool[i].Buffer && !SmallBufferPool[i].InUse) {
+                SmallBufferPool[i].InUse = TRUE;
+                KeReleaseSpinLock(&BufferPoolLock, oldIrql);
+                return SmallBufferPool[i].Buffer;
+            }
+        }
+    }
+    
+    // Try medium buffer pool for sizes up to 64KB
+    if (Size <= UDF_BUFFER_MEDIUM_MAX) {
+        for (i = 0; i < UDF_BUFFER_POOL_MEDIUM_SIZE; i++) {
+            if (MediumBufferPool[i].Buffer && !MediumBufferPool[i].InUse) {
+                MediumBufferPool[i].InUse = TRUE;
+                KeReleaseSpinLock(&BufferPoolLock, oldIrql);
+                return MediumBufferPool[i].Buffer;
+            }
+        }
+    }
+    
+    KeReleaseSpinLock(&BufferPoolLock, oldIrql);
+    
+    // Pool exhausted or buffer too large, fall back to allocation
+    return DbgAllocatePoolWithTag(NonPagedPool, Size, 'bNWD');
+}
+
+static VOID UDFFreePooledBuffer(PVOID Buffer)
+{
+    KIRQL oldIrql;
+    ULONG i;
+    
+    if (!Buffer) return;
+    
+    KeAcquireSpinLock(&BufferPoolLock, &oldIrql);
+    
+    // Check small buffer pool
+    for (i = 0; i < UDF_BUFFER_POOL_SMALL_SIZE; i++) {
+        if (SmallBufferPool[i].Buffer == Buffer) {
+            SmallBufferPool[i].InUse = FALSE;
+            KeReleaseSpinLock(&BufferPoolLock, oldIrql);
+            return;
+        }
+    }
+    
+    // Check medium buffer pool
+    for (i = 0; i < UDF_BUFFER_POOL_MEDIUM_SIZE; i++) {
+        if (MediumBufferPool[i].Buffer == Buffer) {
+            MediumBufferPool[i].InUse = FALSE;
+            KeReleaseSpinLock(&BufferPoolLock, oldIrql);
+            return;
+        }
+    }
+    
+    KeReleaseSpinLock(&BufferPoolLock, oldIrql);
+    
+    // Not from pool, free normally
+    DbgFreePool(Buffer);
 }
 
 /*
@@ -213,11 +327,15 @@ UDFPhReadSynchronous(
     ROffset.QuadPart = Offset;
     (*ReadBytes) = 0;
 
-    // Optimize: Use direct buffer when possible to avoid unnecessary allocation
+    // Optimize: Use direct buffer when possible, pooled buffer for common sizes, or smart allocation
     if (Flags & PH_TMP_BUFFER) {
         IoBuf = Buffer;
+    } else if (Length <= UDF_DIRECT_IO_THRESHOLD) {
+        // For very small reads, just allocate directly to avoid copy overhead
+        IoBuf = DbgAllocatePoolWithTag(NonPagedPool, Length, 'bSWD');
     } else {
-        IoBuf = DbgAllocatePoolWithTag(NonPagedPool, Length, 'bNWD');
+        // Use pooled buffer for larger reads that benefit from reuse
+        IoBuf = UDFAllocatePooledBuffer(Length);
     }
     if (!IoBuf) {
         UDFPrint(("    !IoBuf\n"));
@@ -300,7 +418,13 @@ UDFPhReadSynchronous(
 try_exit: NOTHING;
 
     if (Context) UDFFreeContext(Context);
-    if (IoBuf && !(Flags & PH_TMP_BUFFER)) DbgFreePool(IoBuf);
+    if (IoBuf && !(Flags & PH_TMP_BUFFER)) {
+        if (Length <= UDF_DIRECT_IO_THRESHOLD) {
+            DbgFreePool(IoBuf);
+        } else {
+            UDFFreePooledBuffer(IoBuf);
+        }
+    }
 
 #ifdef MEASURE_IO_PERFORMANCE
     KeQuerySystemTime((PLARGE_INTEGER)&IoExitTime);
@@ -395,8 +519,14 @@ UDFPhWriteSynchronous(
    // This typically occurs during IRP_NOCACHE. Otherwise, an assert occurs within IoBuildAsynchronousFsdRequest.
     if (Flags & PH_TMP_BUFFER) {
         IoBuf = Buffer;
-    } else {
+    } else if (Length <= UDF_DIRECT_IO_THRESHOLD) {
+        // For very small writes, just allocate directly to avoid copy overhead
         IoBuf = DbgAllocatePool(NonPagedPool, Length);
+        if (!IoBuf) try_return (RC = STATUS_INSUFFICIENT_RESOURCES);
+        RtlCopyMemory(IoBuf, Buffer, Length);
+    } else {
+        // Use pooled buffer for larger writes that benefit from reuse
+        IoBuf = UDFAllocatePooledBuffer(Length);
         if (!IoBuf) try_return (RC = STATUS_INSUFFICIENT_RESOURCES);
         RtlCopyMemory(IoBuf, Buffer, Length);
     }
@@ -449,7 +579,13 @@ UDFPhWriteSynchronous(
 try_exit: NOTHING;
 
     if (Context) UDFFreeContext(Context);
-    if (IoBuf && !(Flags & PH_TMP_BUFFER)) DbgFreePool(IoBuf);
+    if (IoBuf && !(Flags & PH_TMP_BUFFER)) {
+        if (Length <= UDF_DIRECT_IO_THRESHOLD) {
+            DbgFreePool(IoBuf);
+        } else {
+            UDFFreePooledBuffer(IoBuf);
+        }
+    }
     if (!NT_SUCCESS(RC)) {
         UDFPrint(("WriteError\n"));
     }
