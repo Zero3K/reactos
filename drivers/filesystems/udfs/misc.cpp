@@ -991,6 +991,7 @@ UDFPostRequest(
     }
 
     // Determine priority based on operation type
+    // Optimized for git clone and similar bulk file operations
     switch (IrpContext->MajorFunction) {
         case IRP_MJ_CLOSE:
         case IRP_MJ_CLEANUP:
@@ -998,6 +999,8 @@ UDFPostRequest(
             break;
         case IRP_MJ_CREATE:
         case IRP_MJ_DIRECTORY_CONTROL:
+        case IRP_MJ_READ:          // Promote reads to normal priority for git clone
+        case IRP_MJ_WRITE:         // Promote writes to normal priority for git clone
             Priority = UdfWorkQueueNormal;
             break;
         default:

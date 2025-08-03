@@ -25,10 +25,10 @@
     Work Queue Management Constants
 **************************************************************************/
 
-// Default thresholds for work queue management
+// Default thresholds for work queue management (optimized for bulk operations like git clone)
 #define UDF_DEFAULT_MIN_WORKERS                 2
 #define UDF_DEFAULT_MAX_WORKERS                 16
-#define UDF_DEFAULT_WORKER_THRESHOLD            4
+#define UDF_DEFAULT_WORKER_THRESHOLD            2  // More aggressive - create workers sooner
 #define UDF_DEFAULT_OVERFLOW_THRESHOLD          8
 #define UDF_DEFAULT_BACKPRESSURE_THRESHOLD      32
 #define UDF_DEFAULT_REJECT_THRESHOLD            64

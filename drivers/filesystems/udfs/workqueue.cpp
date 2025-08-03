@@ -344,7 +344,8 @@ UDFQueueWorkItem(
     if (Manager->CurrentWorkerThreads < Manager->MaxWorkerThreads) {
         // Create worker if we have enough queued items
         if (TotalQueued >= Manager->WorkerThreshold || 
-            Priority == UdfWorkQueueCritical) {
+            Priority == UdfWorkQueueCritical ||
+            (Priority == UdfWorkQueueNormal && TotalQueued >= Manager->WorkerThreshold / 2)) {
             ShouldCreateWorker = TRUE;
         }
         
