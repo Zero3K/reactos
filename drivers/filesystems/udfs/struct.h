@@ -584,7 +584,14 @@ struct VCB {
     DEVICE_TYPE                         FsDeviceType;
 
     // New work queue management system
-    struct UDF_WORK_QUEUE_MANAGER* WorkQueueManager;
+    PUDF_WORK_QUEUE_MANAGER WorkQueueManager;
+    
+    // Legacy overflow queue fields (maintained for backward compatibility)
+    __volatile ULONG PostedRequestCount;
+    ULONG OverflowQueueCount;
+    LIST_ENTRY OverflowQueue;
+    KSPIN_LOCK OverflowQueueSpinLock;
+    ULONG StopOverflowQueue;
 
     //---------------
     //
@@ -868,7 +875,7 @@ struct VOLUME_DEVICE_OBJECT {
     DEVICE_OBJECT DeviceObject;
 
     // New work queue management system
-    struct UDF_WORK_QUEUE_MANAGER* WorkQueueManager;
+    PUDF_WORK_QUEUE_MANAGER WorkQueueManager;
 
     // This is the file system specific volume control block.
 
