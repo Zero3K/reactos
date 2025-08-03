@@ -454,8 +454,7 @@ typedef struct _UDF_WORK_QUEUE_MANAGER {
     ULONG BackpressureThreshold; // When to start applying backpressure
     ULONG RejectThreshold;       // When to start rejecting requests
     
-    // Worker thread management
-    WORK_QUEUE_ITEM WorkerItem;  // Work item for worker threads
+    // Worker thread management  
     KEVENT WorkerEvent;          // Event to signal worker threads
     volatile BOOLEAN ShutdownRequested; // TRUE when shutting down
     
@@ -463,6 +462,12 @@ typedef struct _UDF_WORK_QUEUE_MANAGER {
     struct VCB* Vcb;
     
 } UDF_WORK_QUEUE_MANAGER, *PUDF_WORK_QUEUE_MANAGER;
+
+// Worker thread context - allocated for each worker thread
+typedef struct _UDF_WORKER_CONTEXT {
+    WORK_QUEUE_ITEM WorkItem;    // Work item for this worker thread
+    PUDF_WORK_QUEUE_MANAGER Manager; // Manager that owns this worker
+} UDF_WORKER_CONTEXT, *PUDF_WORKER_CONTEXT;
 
 // Extended IRP context for work queue management
 typedef struct _UDF_WORK_CONTEXT {

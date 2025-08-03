@@ -20,6 +20,7 @@
 
 #include "udffs.h"
 #define UDF_BUG_CHECK_ID    UDF_FILE_WORKQUEUE
+#define MEM_WORKQUEUE_TAG   "UDF_WQ"
 
 /*************************************************************************
 *
@@ -122,11 +123,6 @@ UDFInitializeWorkQueueManager(
     KeQuerySystemTime(&NewManager->LastLoadCheck);
 
     // Initialize worker thread management
-    ExInitializeWorkItem(
-        &NewManager->WorkerItem,
-        UDFWorkQueueWorkerThread,
-        NewManager
-    );
     KeInitializeEvent(&NewManager->WorkerEvent, NotificationEvent, FALSE);
     NewManager->ShutdownRequested = FALSE;
 
@@ -369,10 +365,32 @@ UDFQueueWorkItem(
         }
         KeReleaseSpinLock(&Manager->StatsLock, OldIrql);
         
-        ExQueueWorkItem(&Manager->WorkerItem, CriticalWorkQueue);
+        // Allocate a worker context for this worker thread
+        PUDF_WORKER_CONTEXT WorkerContext = (PUDF_WORKER_CONTEXT)MyAllocatePoolTag__(
+            NonPagedPool, 
+            sizeof(UDF_WORKER_CONTEXT), 
+            MEM_WORKQUEUE_TAG
+        );
         
-        UDFPrint(("UDFQueueWorkItem: Created worker thread, now have %d workers\n", 
-                 Manager->CurrentWorkerThreads));
+        if (WorkerContext) {
+            // Initialize the worker context
+            WorkerContext->Manager = Manager;
+            ExInitializeWorkItem(
+                &WorkerContext->WorkItem,
+                UDFWorkQueueWorkerThread,
+                WorkerContext
+            );
+            
+            // Queue the worker thread
+            ExQueueWorkItem(&WorkerContext->WorkItem, CriticalWorkQueue);
+            
+            UDFPrint(("UDFQueueWorkItem: Created worker thread, now have %d workers\n", 
+                     Manager->CurrentWorkerThreads));
+        } else {
+            // Failed to allocate worker context, decrement the counter
+            InterlockedDecrement((PLONG)&Manager->CurrentWorkerThreads);
+            UDFPrint(("UDFQueueWorkItem: Failed to allocate worker context\n"));
+        }
     } else {
         // Signal existing worker threads that there's work available
         KeSetEvent(&Manager->WorkerEvent, 0, FALSE);
@@ -460,7 +478,8 @@ UDFWorkQueueWorkerThread(
     _In_ PVOID Context
     )
 {
-    PUDF_WORK_QUEUE_MANAGER Manager = (PUDF_WORK_QUEUE_MANAGER)Context;
+    PUDF_WORKER_CONTEXT WorkerContext = (PUDF_WORKER_CONTEXT)Context;
+    PUDF_WORK_QUEUE_MANAGER Manager;
     PUDF_WORK_CONTEXT WorkContext;
     NTSTATUS Status;
     ULONG IdleCount = 0;
@@ -469,11 +488,20 @@ UDFWorkQueueWorkerThread(
 
     PAGED_CODE();
 
+    // Validate worker context
+    if (!WorkerContext) {
+        UDFPrint(("UDFWorkQueueWorkerThread: Invalid worker context\n"));
+        return;
+    }
+
+    Manager = WorkerContext->Manager;
+
     // Validate manager structure
     if (!Manager || 
         Manager->NodeIdentifier.NodeTypeCode != UDF_NODE_TYPE_WORK_QUEUE_MANAGER ||
         Manager->NodeIdentifier.NodeByteSize != sizeof(UDF_WORK_QUEUE_MANAGER)) {
         UDFPrint(("UDFWorkQueueWorkerThread: Invalid manager structure\n"));
+        MyFreePool__(WorkerContext);
         return;
     }
 
@@ -615,6 +643,9 @@ UDFWorkQueueWorkerThread(
     
     UDFPrint(("UDFWorkQueueWorkerThread: Worker thread exiting, remaining workers: %d\n", 
              Manager->CurrentWorkerThreads));
+
+    // Free the worker context that was allocated for this thread
+    MyFreePool__(WorkerContext);
 }
 
 /*************************************************************************
