@@ -514,6 +514,22 @@ UDFAdjustWorkerThreads(
     _In_ PUDF_WORK_QUEUE_MANAGER Manager
     );
 
+NTSTATUS
+UDFGetWorkQueueStatistics(
+    _In_ PUDF_WORK_QUEUE_MANAGER Manager,
+    _Out_ PUDF_WORK_QUEUE_STATS Stats
+    );
+
+NTSTATUS
+UDFResetWorkQueueStatistics(
+    _In_ PUDF_WORK_QUEUE_MANAGER Manager
+    );
+
+VOID
+UDFPrintWorkQueueStatistics(
+    _In_ PUDF_WORK_QUEUE_MANAGER Manager
+    );
+
 enum VCB_CONDITION {
 
     VcbNotMounted = 0,

@@ -257,12 +257,22 @@ UDFQueueWorkItem(
     BOOLEAN ShouldCreateWorker = FALSE;
     NTSTATUS Status = STATUS_SUCCESS;
 
-    ASSERT(Manager != NULL);
-    ASSERT(IrpContext != NULL);
-    ASSERT(Priority < UdfWorkQueueMax);
+    // Validate parameters
+    if (!Manager || !IrpContext || Priority >= UdfWorkQueueMax) {
+        UDFPrint(("UDFQueueWorkItem: Invalid parameters\n"));
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Verify manager structure integrity
+    if (Manager->NodeIdentifier.NodeTypeCode != UDF_NODE_TYPE_WORK_QUEUE_MANAGER ||
+        Manager->NodeIdentifier.NodeByteSize != sizeof(UDF_WORK_QUEUE_MANAGER)) {
+        UDFPrint(("UDFQueueWorkItem: Invalid manager structure\n"));
+        return STATUS_INVALID_PARAMETER;
+    }
 
     // Check if we're accepting new requests
-    if (!Manager->AcceptingRequests) {
+    if (!Manager->AcceptingRequests || Manager->ShutdownRequested) {
+        UDFPrint(("UDFQueueWorkItem: Manager not accepting requests\n"));
         return STATUS_DEVICE_NOT_READY;
     }
 
@@ -290,6 +300,12 @@ UDFQueueWorkItem(
     // Reject requests if we're completely overloaded
     if (TotalQueued > Manager->RejectThreshold) {
         UDFPrint(("UDFQueueWorkItem: Rejecting request, total queued: %d\n", TotalQueued));
+        
+        // Update overflow statistics
+        KeAcquireSpinLock(&Manager->StatsLock, &OldIrql);
+        Manager->Stats.OverflowEvents++;
+        KeReleaseSpinLock(&Manager->StatsLock, OldIrql);
+        
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
@@ -300,6 +316,7 @@ UDFQueueWorkItem(
     );
     
     if (!WorkContext) {
+        UDFPrint(("UDFQueueWorkItem: Failed to allocate work context\n"));
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
@@ -447,115 +464,149 @@ UDFWorkQueueWorkerThread(
     PUDF_WORK_CONTEXT WorkContext;
     NTSTATUS Status;
     ULONG IdleCount = 0;
-    LARGE_INTEGER WaitTime;
+    LARGE_INTEGER WaitTime, StartTime, ProcessTime;
     BOOLEAN ShouldExit = FALSE;
 
     PAGED_CODE();
 
-    ASSERT(Manager != NULL);
+    // Validate manager structure
+    if (!Manager || 
+        Manager->NodeIdentifier.NodeTypeCode != UDF_NODE_TYPE_WORK_QUEUE_MANAGER ||
+        Manager->NodeIdentifier.NodeByteSize != sizeof(UDF_WORK_QUEUE_MANAGER)) {
+        UDFPrint(("UDFWorkQueueWorkerThread: Invalid manager structure\n"));
+        return;
+    }
 
     UDFPrint(("UDFWorkQueueWorkerThread: Worker thread starting, current workers: %d\n", 
              Manager->CurrentWorkerThreads));
 
+    KeQuerySystemTime(&StartTime);
     FsRtlEnterFileSystem();
 
-    while (!Manager->ShutdownRequested && !ShouldExit) {
-        
-        // Try to get work
-        Status = UDFDequeueWorkItem(Manager, &WorkContext);
-        
-        if (NT_SUCCESS(Status) && WorkContext) {
-            // Process the work item
-            IdleCount = 0;
+    _SEH2_TRY {
+
+        while (!Manager->ShutdownRequested && !ShouldExit) {
             
-            ASSERT(WorkContext->IrpContext != NULL);
+            // Try to get work
+            Status = UDFDequeueWorkItem(Manager, &WorkContext);
             
-            // Set up thread context for FSP processing
-            IoSetTopLevelIrp((PIRP)FSRTL_FSP_TOP_LEVEL_IRP);
-            WorkContext->IrpContext->Flags |= IRP_CONTEXT_FLAG_WAIT;
-            
-            _SEH2_TRY {
-                // Process the request based on major function
-                switch (WorkContext->IrpContext->MajorFunction) {
-                    case IRP_MJ_CREATE:
-                        Status = UDFCommonCreate(WorkContext->IrpContext, 
-                                               WorkContext->IrpContext->Irp);
-                        break;
-                    case IRP_MJ_READ:
-                        Status = UDFCommonRead(WorkContext->IrpContext, 
-                                             WorkContext->IrpContext->Irp);
-                        break;
-                    case IRP_MJ_WRITE:
-                        Status = UDFCommonWrite(WorkContext->IrpContext, 
-                                              WorkContext->IrpContext->Irp);
-                        break;
-                    case IRP_MJ_CLEANUP:
-                        Status = UDFCommonCleanup(WorkContext->IrpContext, 
-                                                WorkContext->IrpContext->Irp);
-                        break;
-                    case IRP_MJ_CLOSE:
-                        Status = UDFCommonClose(WorkContext->IrpContext, 
-                                              WorkContext->IrpContext->Irp, TRUE);
-                        break;
-                    case IRP_MJ_DIRECTORY_CONTROL:
-                        Status = UDFCommonDirControl(WorkContext->IrpContext, 
-                                                   WorkContext->IrpContext->Irp);
-                        break;
-                    case IRP_MJ_QUERY_INFORMATION:
-                        Status = UDFCommonQueryInfo(WorkContext->IrpContext, 
-                                                  WorkContext->IrpContext->Irp);
-                        break;
-                    case IRP_MJ_SET_INFORMATION:
-                        Status = UDFCommonSetInfo(WorkContext->IrpContext, 
-                                                WorkContext->IrpContext->Irp);
-                        break;
-                    case IRP_MJ_QUERY_VOLUME_INFORMATION:
-                        Status = UDFCommonQueryVolInfo(WorkContext->IrpContext, 
-                                                     WorkContext->IrpContext->Irp);
-                        break;
-                    case IRP_MJ_SET_VOLUME_INFORMATION:
-                        Status = UDFCommonSetVolInfo(WorkContext->IrpContext, 
-                                                   WorkContext->IrpContext->Irp);
-                        break;
-                    default:
-                        UDFPrint(("UDFWorkQueueWorkerThread: Unhandled major function %d\n", 
-                                 WorkContext->IrpContext->MajorFunction));
-                        Status = STATUS_INVALID_DEVICE_REQUEST;
-                        UDFCompleteRequest(WorkContext->IrpContext, 
-                                         WorkContext->IrpContext->Irp, Status);
-                        break;
+            if (NT_SUCCESS(Status) && WorkContext) {
+                // Process the work item
+                IdleCount = 0;
+                
+                // Validate work context
+                if (WorkContext->NodeIdentifier.NodeTypeCode != UDF_NODE_TYPE_WORK_CONTEXT ||
+                    WorkContext->NodeIdentifier.NodeByteSize != sizeof(UDF_WORK_CONTEXT) ||
+                    !WorkContext->IrpContext) {
+                    UDFPrint(("UDFWorkQueueWorkerThread: Invalid work context\n"));
+                    MyFreePool__(WorkContext);
+                    continue;
                 }
-            } _SEH2_EXCEPT(UDFExceptionFilter(WorkContext->IrpContext, _SEH2_GetExceptionInformation())) {
-                Status = UDFProcessException(WorkContext->IrpContext, 
-                                           WorkContext->IrpContext->Irp);
-                UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, Status);
-            } _SEH2_END;
-            
-            IoSetTopLevelIrp(NULL);
-            
-            // Free the work context
-            MyFreePool__(WorkContext);
-            
-        } else {
-            // No work available, increment idle count
-            IdleCount++;
-            
-            // If we've been idle too long and we have more than minimum workers, exit
-            if (IdleCount > 10 && Manager->CurrentWorkerThreads > Manager->MinWorkerThreads) {
-                ShouldExit = TRUE;
-                break;
-            }
-            
-            // Wait for work to become available or timeout
-            WaitTime.QuadPart = -50000000LL; // 5 second timeout
-            KeWaitForSingleObject(&Manager->WorkerEvent, Executive, KernelMode, FALSE, &WaitTime);
-            
-            // Reset the event if we're continuing
-            if (!Manager->ShutdownRequested) {
-                KeClearEvent(&Manager->WorkerEvent);
+                
+                // Set up thread context for FSP processing
+                IoSetTopLevelIrp((PIRP)FSRTL_FSP_TOP_LEVEL_IRP);
+                WorkContext->IrpContext->Flags |= IRP_CONTEXT_FLAG_WAIT;
+                
+                _SEH2_TRY {
+                    // Process the request based on major function
+                    switch (WorkContext->IrpContext->MajorFunction) {
+                        case IRP_MJ_CREATE:
+                            Status = UDFCommonCreate(WorkContext->IrpContext, 
+                                                   WorkContext->IrpContext->Irp);
+                            break;
+                        case IRP_MJ_READ:
+                            Status = UDFCommonRead(WorkContext->IrpContext, 
+                                                 WorkContext->IrpContext->Irp);
+                            break;
+                        case IRP_MJ_WRITE:
+                            Status = UDFCommonWrite(WorkContext->IrpContext, 
+                                                  WorkContext->IrpContext->Irp);
+                            break;
+                        case IRP_MJ_CLEANUP:
+                            Status = UDFCommonCleanup(WorkContext->IrpContext, 
+                                                    WorkContext->IrpContext->Irp);
+                            break;
+                        case IRP_MJ_CLOSE:
+                            Status = UDFCommonClose(WorkContext->IrpContext, 
+                                                  WorkContext->IrpContext->Irp, TRUE);
+                            break;
+                        case IRP_MJ_DIRECTORY_CONTROL:
+                            Status = UDFCommonDirControl(WorkContext->IrpContext, 
+                                                       WorkContext->IrpContext->Irp);
+                            break;
+                        case IRP_MJ_QUERY_INFORMATION:
+                            Status = UDFCommonQueryInfo(WorkContext->IrpContext, 
+                                                      WorkContext->IrpContext->Irp);
+                            break;
+                        case IRP_MJ_SET_INFORMATION:
+                            Status = UDFCommonSetInfo(WorkContext->IrpContext, 
+                                                    WorkContext->IrpContext->Irp);
+                            break;
+                        case IRP_MJ_QUERY_VOLUME_INFORMATION:
+                            Status = UDFCommonQueryVolInfo(WorkContext->IrpContext, 
+                                                         WorkContext->IrpContext->Irp);
+                            break;
+                        case IRP_MJ_SET_VOLUME_INFORMATION:
+                            Status = UDFCommonSetVolInfo(WorkContext->IrpContext, 
+                                                       WorkContext->IrpContext->Irp);
+                            break;
+                        default:
+                            UDFPrint(("UDFWorkQueueWorkerThread: Unhandled major function %d\n", 
+                                     WorkContext->IrpContext->MajorFunction));
+                            Status = STATUS_INVALID_DEVICE_REQUEST;
+                            if (WorkContext->IrpContext->Irp) {
+                                UDFCompleteRequest(WorkContext->IrpContext, 
+                                                 WorkContext->IrpContext->Irp, Status);
+                            } else {
+                                UDFCleanupIrpContext(WorkContext->IrpContext, FALSE);
+                            }
+                            break;
+                    }
+                } _SEH2_EXCEPT(UDFExceptionFilter(WorkContext->IrpContext, _SEH2_GetExceptionInformation())) {
+                    Status = UDFProcessException(WorkContext->IrpContext, 
+                                               WorkContext->IrpContext->Irp);
+                    UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, Status);
+                } _SEH2_END;
+                
+                IoSetTopLevelIrp(NULL);
+                
+                // Update processing statistics
+                KeQuerySystemTime(&ProcessTime);
+                ProcessTime.QuadPart -= WorkContext->QueueTime.QuadPart;
+                
+                // Log performance warning if item was queued too long
+                if (ProcessTime.QuadPart > UDF_MAX_QUEUE_WAIT_TIME) {
+                    UDFPrint(("UDFWorkQueueWorkerThread: Work item waited %I64d (100ns units) in queue\n", 
+                             ProcessTime.QuadPart));
+                }
+                
+                // Free the work context
+                MyFreePool__(WorkContext);
+                
+            } else {
+                // No work available, increment idle count
+                IdleCount++;
+                
+                // If we've been idle too long and we have more than minimum workers, exit
+                if (IdleCount > 10 && Manager->CurrentWorkerThreads > Manager->MinWorkerThreads) {
+                    ShouldExit = TRUE;
+                    break;
+                }
+                
+                // Wait for work to become available or timeout
+                WaitTime.QuadPart = -50000000LL; // 5 second timeout
+                Status = KeWaitForSingleObject(&Manager->WorkerEvent, Executive, KernelMode, FALSE, &WaitTime);
+                
+                // Reset the event if we're continuing and it was signaled
+                if (Status == STATUS_SUCCESS && !Manager->ShutdownRequested) {
+                    KeClearEvent(&Manager->WorkerEvent);
+                }
             }
         }
-    }
+
+    } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+        UDFPrint(("UDFWorkQueueWorkerThread: Exception in worker thread: %x\n", _SEH2_GetExceptionCode()));
+    } _SEH2_END;
 
     FsRtlExitFileSystem();
     
@@ -652,4 +703,173 @@ UDFAdjustWorkerThreads(
         // Decrease overflow threshold if we're consistently under it
         Manager->OverflowThreshold = max(4, Manager->OverflowThreshold - 1);
     }
+}
+
+/*************************************************************************
+*
+* Function: UDFGetWorkQueueStatistics()
+*
+* Description:
+*   Get current work queue statistics for monitoring and debugging.
+*
+* Expected Interrupt Level (for execution) :
+*
+*  IRQL <= DISPATCH_LEVEL
+*
+* Return Value: STATUS_SUCCESS/Error
+*
+*************************************************************************/
+NTSTATUS
+UDFGetWorkQueueStatistics(
+    _In_ PUDF_WORK_QUEUE_MANAGER Manager,
+    _Out_ PUDF_WORK_QUEUE_STATS Stats
+    )
+{
+    KIRQL OldIrql;
+    ULONG i;
+
+    if (!Manager || !Stats) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Validate manager structure
+    if (Manager->NodeIdentifier.NodeTypeCode != UDF_NODE_TYPE_WORK_QUEUE_MANAGER ||
+        Manager->NodeIdentifier.NodeByteSize != sizeof(UDF_WORK_QUEUE_MANAGER)) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    KeAcquireSpinLock(&Manager->StatsLock, &OldIrql);
+    
+    // Copy statistics structure
+    RtlCopyMemory(Stats, &Manager->Stats, sizeof(UDF_WORK_QUEUE_STATS));
+    
+    // Update current queue counts
+    Stats->CurrentQueued = 0;
+    for (i = 0; i < UdfWorkQueueMax; i++) {
+        Stats->CurrentQueued += Manager->PriorityQueues[i].QueueCount;
+    }
+    
+    Stats->CurrentActive = Manager->CurrentWorkerThreads;
+    
+    KeReleaseSpinLock(&Manager->StatsLock, OldIrql);
+
+    return STATUS_SUCCESS;
+}
+
+/*************************************************************************
+*
+* Function: UDFResetWorkQueueStatistics()
+*
+* Description:
+*   Reset work queue statistics counters.
+*
+* Expected Interrupt Level (for execution) :
+*
+*  IRQL <= DISPATCH_LEVEL
+*
+* Return Value: STATUS_SUCCESS/Error
+*
+*************************************************************************/
+NTSTATUS
+UDFResetWorkQueueStatistics(
+    _In_ PUDF_WORK_QUEUE_MANAGER Manager
+    )
+{
+    KIRQL OldIrql;
+    ULONG i;
+
+    if (!Manager) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Validate manager structure
+    if (Manager->NodeIdentifier.NodeTypeCode != UDF_NODE_TYPE_WORK_QUEUE_MANAGER ||
+        Manager->NodeIdentifier.NodeByteSize != sizeof(UDF_WORK_QUEUE_MANAGER)) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    KeAcquireSpinLock(&Manager->StatsLock, &OldIrql);
+    
+    // Reset statistics
+    Manager->Stats.TotalQueued = 0;
+    Manager->Stats.TotalProcessed = 0;
+    Manager->Stats.OverflowEvents = 0;
+    Manager->Stats.MaxConcurrent = Manager->CurrentWorkerThreads;
+    KeQuerySystemTime(&Manager->Stats.LastStatsReset);
+    
+    // Reset per-priority processed counts
+    for (i = 0; i < UdfWorkQueueMax; i++) {
+        Manager->PriorityQueues[i].ProcessedCount = 0;
+    }
+    
+    KeReleaseSpinLock(&Manager->StatsLock, OldIrql);
+
+    UDFPrint(("UDFResetWorkQueueStatistics: Statistics reset for manager %p\n", Manager));
+    
+    return STATUS_SUCCESS;
+}
+
+/*************************************************************************
+*
+* Function: UDFPrintWorkQueueStatistics()
+*
+* Description:
+*   Print current work queue statistics for debugging.
+*
+* Expected Interrupt Level (for execution) :
+*
+*  IRQL_PASSIVE_LEVEL
+*
+* Return Value: None
+*
+*************************************************************************/  
+VOID
+UDFPrintWorkQueueStatistics(
+    _In_ PUDF_WORK_QUEUE_MANAGER Manager
+    )
+{
+    UDF_WORK_QUEUE_STATS Stats;
+    NTSTATUS Status;
+    ULONG i;
+
+    PAGED_CODE();
+
+    if (!Manager) {
+        UDFPrint(("UDFPrintWorkQueueStatistics: Manager is NULL\n"));
+        return;
+    }
+
+    Status = UDFGetWorkQueueStatistics(Manager, &Stats);
+    if (!NT_SUCCESS(Status)) {
+        UDFPrint(("UDFPrintWorkQueueStatistics: Failed to get statistics: %x\n", Status));
+        return;
+    }
+
+    UDFPrint(("=== UDFS Work Queue Statistics ===\n"));
+    UDFPrint(("Total Queued:      %d\n", Stats.TotalQueued));
+    UDFPrint(("Total Processed:   %d\n", Stats.TotalProcessed));
+    UDFPrint(("Currently Queued:  %d\n", Stats.CurrentQueued));
+    UDFPrint(("Active Workers:    %d\n", Stats.CurrentActive));
+    UDFPrint(("Max Concurrent:    %d\n", Stats.MaxConcurrent));
+    UDFPrint(("Overflow Events:   %d\n", Stats.OverflowEvents));
+    
+    UDFPrint(("Thresholds:\n"));
+    UDFPrint(("  Min Workers:     %d\n", Manager->MinWorkerThreads));
+    UDFPrint(("  Max Workers:     %d\n", Manager->MaxWorkerThreads));  
+    UDFPrint(("  Worker Thresh:   %d\n", Manager->WorkerThreshold));
+    UDFPrint(("  Overflow Thresh: %d\n", Manager->OverflowThreshold));
+    UDFPrint(("  Backpressure:    %d\n", Manager->BackpressureThreshold));
+    UDFPrint(("  Reject Thresh:   %d\n", Manager->RejectThreshold));
+    
+    UDFPrint(("System Load:       %d%%\n", Manager->SystemLoadFactor));
+    UDFPrint(("Accepting Reqs:    %s\n", Manager->AcceptingRequests ? "Yes" : "No"));
+    
+    UDFPrint(("Per-Priority Queue Counts:\n"));
+    for (i = 0; i < UdfWorkQueueMax; i++) {
+        UDFPrint(("  Priority %d: Queued=%d, Processed=%d\n", 
+                 i, Manager->PriorityQueues[i].QueueCount,
+                 Manager->PriorityQueues[i].ProcessedCount));
+    }
+    
+    UDFPrint(("==================================\n"));
 }
