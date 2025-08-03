@@ -912,9 +912,9 @@ UDFInitializeVCB(
     InitializeListHead(&Vcb->NextNotifyIRP);
 
     //  Initialize the new work queue management system
-    Status = UDFInitializeWorkQueueManager(&Vcb->WorkQueueManager, Vcb);
-    if (!NT_SUCCESS(Status)) {
-        UDFPrint(("UDFInitializeVCB: Failed to initialize work queue manager, status=%x\n", Status));
+    RC = UDFInitializeWorkQueueManager(&Vcb->WorkQueueManager, Vcb);
+    if (!NT_SUCCESS(RC)) {
+        UDFPrint(("UDFInitializeVCB: Failed to initialize work queue manager, status=%x\n", RC));
         UDFPrint(("UDFInitializeVCB: Falling back to legacy queue system\n"));
         Vcb->WorkQueueManager = NULL;
         // Initialize legacy overflow queue as fallback
