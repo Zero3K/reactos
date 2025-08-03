@@ -49,18 +49,12 @@ UDFAsyncCompletionRoutine(
 
     Context->IosbToUse = Irp->IoStatus;
 #if 1
-    // Unlock pages that are described by MDL (if any)...
+    // Optimize: Unlock and free MDLs in a single pass
     Mdl = Irp->MdlAddress;
     while(Mdl) {
-        MmPrint(("    Unlock MDL=%x\n", Mdl));
-        MmUnlockPages(Mdl);
-        Mdl = Mdl->Next;
-    }
-    // ... and free MDL
-    Mdl = Irp->MdlAddress;
-    while(Mdl) {
-        MmPrint(("    Free MDL=%x\n", Mdl));
         NextMdl = Mdl->Next;
+        MmPrint(("    Unlock&Free MDL=%x\n", Mdl));
+        MmUnlockPages(Mdl);
         IoFreeMdl(Mdl);
         Mdl = NextMdl;
     }
