@@ -38,13 +38,10 @@
 
 //#define USE_PERF_PRINT
 
-// Optimize for performance: Only enable debug prints in debug builds
-#ifdef UDF_DBG
 #define USE_KD_PRINT
 #define USE_MM_PRINT
 #define USE_AD_PRINT
 #define UDF_DUMP_EXTENT
-#endif
 //#define USE_TH_PRINT
 //#define USE_TIME_PRINT
 

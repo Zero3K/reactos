@@ -32,6 +32,57 @@ LONGLONG IoRelWriteTime=0;
 ULONG UDF_SIMULATE_WRITES=0;
 #endif //DBG
 
+// Performance optimization: Context pool to reduce allocation overhead
+#define UDF_CONTEXT_POOL_SIZE 32
+static UDF_PH_CALL_CONTEXT ContextPool[UDF_CONTEXT_POOL_SIZE];
+static KSPIN_LOCK ContextPoolLock;
+static ULONG ContextPoolUsageMask = 0;
+static BOOLEAN ContextPoolInitialized = FALSE;
+
+static PUDF_PH_CALL_CONTEXT UDFAllocateContext(void)
+{
+    KIRQL oldIrql;
+    ULONG i;
+    
+    if (!ContextPoolInitialized) {
+        KeInitializeSpinLock(&ContextPoolLock);
+        ContextPoolInitialized = TRUE;
+    }
+    
+    KeAcquireSpinLock(&ContextPoolLock, &oldIrql);
+    
+    // Find first available context in pool
+    for (i = 0; i < UDF_CONTEXT_POOL_SIZE; i++) {
+        if (!(ContextPoolUsageMask & (1 << i))) {
+            ContextPoolUsageMask |= (1 << i);
+            KeReleaseSpinLock(&ContextPoolLock, oldIrql);
+            return &ContextPool[i];
+        }
+    }
+    
+    KeReleaseSpinLock(&ContextPoolLock, oldIrql);
+    
+    // Pool full, fall back to allocation
+    return (PUDF_PH_CALL_CONTEXT)MyAllocatePool__(NonPagedPool, sizeof(UDF_PH_CALL_CONTEXT));
+}
+
+static VOID UDFFreeContext(PUDF_PH_CALL_CONTEXT Context)
+{
+    KIRQL oldIrql;
+    ULONG i;
+    
+    // Check if context is from pool
+    if (Context >= &ContextPool[0] && Context < &ContextPool[UDF_CONTEXT_POOL_SIZE]) {
+        i = (ULONG)(Context - &ContextPool[0]);
+        KeAcquireSpinLock(&ContextPoolLock, &oldIrql);
+        ContextPoolUsageMask &= ~(1 << i);
+        KeReleaseSpinLock(&ContextPoolLock, oldIrql);
+    } else {
+        // Allocated context, free it
+        MyFreePool__(Context);
+    }
+}
+
 /*
 
  */
@@ -161,10 +212,8 @@ UDFPhReadSynchronous(
 
     ROffset.QuadPart = Offset;
     (*ReadBytes) = 0;
-/*
-    // DEBUG !!!
-    Flags |= PH_TMP_BUFFER;
-*/
+
+    // Optimize: Use direct buffer when possible to avoid unnecessary allocation
     if (Flags & PH_TMP_BUFFER) {
         IoBuf = Buffer;
     } else {
@@ -174,7 +223,7 @@ UDFPhReadSynchronous(
         UDFPrint(("    !IoBuf\n"));
         return STATUS_INSUFFICIENT_RESOURCES;
     }
-    Context = (PUDF_PH_CALL_CONTEXT)MyAllocatePool__( NonPagedPool, sizeof(UDF_PH_CALL_CONTEXT) );
+    Context = UDFAllocateContext();
     if (!Context) {
         UDFPrint(("    !Context\n"));
         try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
@@ -182,7 +231,8 @@ UDFPhReadSynchronous(
     // Create notification event object to be used to signal the request completion.
     KeInitializeEvent(&(Context->event), NotificationEvent, FALSE);
 
-    if (TRUE || CurIrql > PASSIVE_LEVEL) {
+    // Optimize: Use sync path for small operations at PASSIVE_LEVEL to reduce overhead
+    if (CurIrql > PASSIVE_LEVEL || Length > (16 * 1024)) {
         Irp = IoBuildAsynchronousFsdRequest(IRP_MJ_READ, DeviceObject, IoBuf,
                                                Length, &ROffset, &(Context->IosbToUse) );
         if (!Irp) {
@@ -250,7 +300,7 @@ UDFPhReadSynchronous(
 
 try_exit: NOTHING;
 
-    if (Context) MyFreePool__(Context);
+    if (Context) UDFFreeContext(Context);
     if (IoBuf && !(Flags & PH_TMP_BUFFER)) DbgFreePool(IoBuf);
 
 #ifdef MEASURE_IO_PERFORMANCE
@@ -352,12 +402,13 @@ UDFPhWriteSynchronous(
         RtlCopyMemory(IoBuf, Buffer, Length);
     }
 
-    Context = (PUDF_PH_CALL_CONTEXT)MyAllocatePool__( NonPagedPool, sizeof(UDF_PH_CALL_CONTEXT) );
+    Context = UDFAllocateContext();
     if (!Context) try_return (RC = STATUS_INSUFFICIENT_RESOURCES);
     // Create notification event object to be used to signal the request completion.
     KeInitializeEvent(&(Context->event), NotificationEvent, FALSE);
 
-    if (TRUE || CurIrql > PASSIVE_LEVEL) {
+    // Optimize: Use sync path for small write operations at PASSIVE_LEVEL to reduce overhead
+    if (CurIrql > PASSIVE_LEVEL || Length > (16 * 1024)) {
         irp = IoBuildAsynchronousFsdRequest(IRP_MJ_WRITE, DeviceObject, IoBuf,
                                                Length, &ROffset, &(Context->IosbToUse) );
         if (!irp) try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
@@ -399,7 +450,7 @@ UDFPhWriteSynchronous(
 
 try_exit: NOTHING;
 
-    if (Context) MyFreePool__(Context);
+    if (Context) UDFFreeContext(Context);
     if (IoBuf && !(Flags & PH_TMP_BUFFER)) DbgFreePool(IoBuf);
     if (!NT_SUCCESS(RC)) {
         UDFPrint(("WriteError\n"));
@@ -533,7 +584,7 @@ UDFPhSendIOCTL(
 
     UDFPrint(("UDFPhDevIOCTL: Code %8x  \n",IoControlCode));
 
-    Context = (PUDF_PH_CALL_CONTEXT)MyAllocatePool__( NonPagedPool, sizeof(UDF_PH_CALL_CONTEXT) );
+    Context = UDFAllocateContext();
     if (!Context) return STATUS_INSUFFICIENT_RESOURCES;
     //  Check if the user gave us an Iosb.
 
@@ -595,7 +646,7 @@ UDFPhSendIOCTL(
 
 try_exit: NOTHING;
 
-    if (Context) MyFreePool__(Context);
+    if (Context) UDFFreeContext(Context);
     return(RC);
 } // end UDFPhSendIOCTL()
 
