@@ -356,6 +356,7 @@ UDFFreePool(
 #define UDF_FILE_ENV_SPEC                               (0x00000018)
 #define UDF_FILE_SYS_SPEC                               (0x00000019)
 #define UDF_FILE_PHYS_EJECT                             (0x0000001A)
+#define UDF_FILE_WORKQUEUE                              (0x0000001B)
 
 #define UDF_FILE_DLD                                    (0x00000200)
 #define UDF_FILE_MEM                                    (0x00000201)

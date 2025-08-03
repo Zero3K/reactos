@@ -22,6 +22,31 @@
 
 
 /**************************************************************************
+    Work Queue Management Constants
+**************************************************************************/
+
+// Default thresholds for work queue management
+#define UDF_DEFAULT_MIN_WORKERS                 2
+#define UDF_DEFAULT_MAX_WORKERS                 16
+#define UDF_DEFAULT_WORKER_THRESHOLD            4
+#define UDF_DEFAULT_OVERFLOW_THRESHOLD          8
+#define UDF_DEFAULT_BACKPRESSURE_THRESHOLD      32
+#define UDF_DEFAULT_REJECT_THRESHOLD            64
+
+// System load check interval (in 100ns units = 1 second)
+#define UDF_SYSTEM_LOAD_CHECK_INTERVAL          10000000LL
+
+// Time to wait before scaling down worker threads (in 100ns units = 30 seconds)
+#define UDF_WORKER_SCALEDOWN_DELAY              300000000LL
+
+// Maximum time a work item should wait in queue (in 100ns units = 5 seconds)
+#define UDF_MAX_QUEUE_WAIT_TIME                 50000000LL
+
+// Node type codes for new structures
+#define UDF_NODE_TYPE_WORK_QUEUE_MANAGER        0x0921
+#define UDF_NODE_TYPE_WORK_CONTEXT              0x0922
+
+/**************************************************************************
     some useful definitions
 **************************************************************************/
 
@@ -365,6 +390,130 @@ enum UDFFSD_MEDIA_TYPE {
     MediaDvdrw
 };
 
+/**************************************************************************
+    Work Queue Management System
+    
+    This implements an improved work and overflow queue system for UDFS
+    that provides better scalability, dynamic thresholds, and reduced
+    contention compared to the original simple threshold-based approach.
+**************************************************************************/
+
+// Work queue priorities for different types of operations
+typedef enum _UDF_WORK_QUEUE_PRIORITY {
+    UdfWorkQueueCritical = 0,    // Critical operations (close, cleanup)
+    UdfWorkQueueNormal = 1,      // Normal I/O operations
+    UdfWorkQueueLow = 2,         // Background operations (delayed close)
+    UdfWorkQueueMax = 3
+} UDF_WORK_QUEUE_PRIORITY;
+
+// Work queue statistics for monitoring and tuning
+typedef struct _UDF_WORK_QUEUE_STATS {
+    ULONG TotalQueued;           // Total requests queued
+    ULONG TotalProcessed;        // Total requests processed
+    ULONG CurrentActive;         // Currently active worker threads
+    ULONG CurrentQueued;         // Currently queued requests
+    ULONG MaxConcurrent;         // Maximum concurrent workers seen
+    ULONG OverflowEvents;        // Number of times overflow was used
+    LARGE_INTEGER LastStatsReset; // Last time stats were reset
+} UDF_WORK_QUEUE_STATS, *PUDF_WORK_QUEUE_STATS;
+
+// Per-priority queue structure
+typedef struct _UDF_PRIORITY_QUEUE {
+    LIST_ENTRY QueueHead;        // Queue of work items
+    ULONG QueueCount;            // Number of items in queue
+    ULONG ProcessedCount;        // Number processed from this queue
+    KSPIN_LOCK QueueLock;        // Lock for this queue
+} UDF_PRIORITY_QUEUE, *PUDF_PRIORITY_QUEUE;
+
+// Main work queue manager structure
+typedef struct _UDF_WORK_QUEUE_MANAGER {
+    // Node identification
+    UDFIdentifier NodeIdentifier;
+    
+    // Priority queues - one for each priority level
+    UDF_PRIORITY_QUEUE PriorityQueues[UdfWorkQueueMax];
+    
+    // Global queue statistics and management
+    UDF_WORK_QUEUE_STATS Stats;
+    KSPIN_LOCK StatsLock;
+    
+    // Dynamic threshold management
+    ULONG MaxWorkerThreads;      // Maximum allowed worker threads
+    ULONG MinWorkerThreads;      // Minimum worker threads to maintain
+    ULONG CurrentWorkerThreads;  // Currently active worker threads
+    ULONG WorkerThreshold;       // Threshold for creating new workers
+    ULONG OverflowThreshold;     // Threshold for using overflow queue
+    
+    // System resource awareness
+    ULONG SystemLoadFactor;      // Current system load (0-100)
+    LARGE_INTEGER LastLoadCheck; // Last time we checked system load
+    
+    // Flow control and backpressure
+    BOOLEAN AcceptingRequests;   // FALSE if we're rejecting new requests
+    ULONG BackpressureThreshold; // When to start applying backpressure
+    ULONG RejectThreshold;       // When to start rejecting requests
+    
+    // Worker thread management
+    WORK_QUEUE_ITEM WorkerItem;  // Work item for worker threads
+    KEVENT WorkerEvent;          // Event to signal worker threads
+    volatile BOOLEAN ShutdownRequested; // TRUE when shutting down
+    
+    // Reference to parent VCB
+    struct VCB* Vcb;
+    
+} UDF_WORK_QUEUE_MANAGER, *PUDF_WORK_QUEUE_MANAGER;
+
+// Extended IRP context for work queue management
+typedef struct _UDF_WORK_CONTEXT {
+    UDFIdentifier NodeIdentifier;
+    LIST_ENTRY WorkQueueLinks;   // Links for priority queues
+    UDF_WORK_QUEUE_PRIORITY Priority; // Priority of this work item
+    LARGE_INTEGER QueueTime;     // When this was queued
+    PIRP_CONTEXT IrpContext;     // Original IRP context
+    PUDF_WORK_QUEUE_MANAGER Manager; // Manager that owns this item
+} UDF_WORK_CONTEXT, *PUDF_WORK_CONTEXT;
+
+// Function prototypes for work queue management
+NTSTATUS
+UDFInitializeWorkQueueManager(
+    _Out_ PUDF_WORK_QUEUE_MANAGER* Manager,
+    _In_ struct VCB* Vcb
+    );
+
+VOID
+UDFCleanupWorkQueueManager(
+    _In_ PUDF_WORK_QUEUE_MANAGER Manager
+    );
+
+NTSTATUS
+UDFQueueWorkItem(
+    _In_ PUDF_WORK_QUEUE_MANAGER Manager,
+    _In_ PIRP_CONTEXT IrpContext,
+    _In_ UDF_WORK_QUEUE_PRIORITY Priority
+    );
+
+VOID
+NTAPI
+UDFWorkQueueWorkerThread(
+    _In_ PVOID Context
+    );
+
+NTSTATUS
+UDFDequeueWorkItem(
+    _In_ PUDF_WORK_QUEUE_MANAGER Manager,
+    _Out_ PUDF_WORK_CONTEXT* WorkContext
+    );
+
+VOID
+UDFUpdateSystemLoad(
+    _In_ PUDF_WORK_QUEUE_MANAGER Manager
+    );
+
+VOID
+UDFAdjustWorkerThreads(
+    _In_ PUDF_WORK_QUEUE_MANAGER Manager
+    );
+
 enum VCB_CONDITION {
 
     VcbNotMounted = 0,
@@ -417,22 +566,8 @@ struct VCB {
     PFILE_OBJECT                        VolumeLockFileObject;
     DEVICE_TYPE                         FsDeviceType;
 
-    //  The following field tells how many requests for this volume have
-    //  either been enqueued to ExWorker threads or are currently being
-    //  serviced by ExWorker threads.  If the number goes above
-    //  a certain threshold, put the request on the overflow queue to be
-    //  executed later.
-    ULONG PostedRequestCount;
-    //  The following field indicates the number of IRP's waiting
-    //  to be serviced in the overflow queue.
-    ULONG OverflowQueueCount;
-    //  The following field contains the queue header of the overflow queue.
-    //  The Overflow queue is a list of IRP's linked via the IRP's ListEntry
-    //  field.
-    LIST_ENTRY OverflowQueue;
-    //  The following spinlock protects access to all the above fields.
-    KSPIN_LOCK OverflowQueueSpinLock;
-    ULONG StopOverflowQueue;
+    // New work queue management system
+    struct UDF_WORK_QUEUE_MANAGER* WorkQueueManager;
 
     //---------------
     //
@@ -715,28 +850,8 @@ struct VOLUME_DEVICE_OBJECT {
 
     DEVICE_OBJECT DeviceObject;
 
-    // The following field tells how many requests for this volume have
-    // either been enqueued to ExWorker threads or are currently being
-    // serviced by ExWorker threads.  If the number goes above
-    // a certain threshold, put the request on the overflow queue to be
-    // executed later.
-
-    __volatile ULONG PostedRequestCount;
-
-    // The following field indicates the number of IRP's waiting
-    // to be serviced in the overflow queue.
-
-    ULONG OverflowQueueCount;
-
-    // The following field contains the queue header of the overflow queue.
-    // The Overflow queue is a list of IRP's linked via the IRP's ListEntry
-    // field.
-
-    LIST_ENTRY OverflowQueue;
-
-    // The following spinlock protects access to all the above fields.
-
-    KSPIN_LOCK OverflowQueueSpinLock;
+    // New work queue management system
+    struct UDF_WORK_QUEUE_MANAGER* WorkQueueManager;
 
     // This is the file system specific volume control block.
 

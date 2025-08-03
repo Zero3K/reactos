@@ -957,27 +957,83 @@ Return Value:
 * Function: UDFPostRequest()
 *
 * Description:
-*   Queue up a request for deferred processing (in the context of a system
-*   worker thread). The caller must have locked the user buffer (if required)
+*   Queue up a request for deferred processing using the new work queue
+*   management system. This replaces the original simple threshold-based
+*   approach with a more sophisticated priority-aware queuing system.
 *
 * Expected Interrupt Level (for execution) :
 *
 *  IRQL_PASSIVE_LEVEL
 *
-* Return Value: STATUS_PENDING
+* Return Value: STATUS_PENDING or error code
 *
 *************************************************************************/
 NTSTATUS
 UDFPostRequest(
     IN PIRP_CONTEXT IrpContext,
-    IN PIRP             Irp
+    IN PIRP         Irp
+    )
+{
+    PVCB Vcb;
+    UDF_WORK_QUEUE_PRIORITY Priority;
+    NTSTATUS Status;
+
+    // Mark the IRP pending if this is not a double post
+    if (Irp) {
+        IoMarkIrpPending(Irp);
+    }
+
+    // Get the VCB from the device extension
+    Vcb = (PVCB)(IrpContext->RealDevice->DeviceExtension);
+    if (!Vcb || !Vcb->WorkQueueManager) {
+        // Fall back to old method if new system not initialized
+        return UDFPostRequestOld(IrpContext, Irp);
+    }
+
+    // Determine priority based on operation type
+    switch (IrpContext->MajorFunction) {
+        case IRP_MJ_CLOSE:
+        case IRP_MJ_CLEANUP:
+            Priority = UdfWorkQueueCritical;
+            break;
+        case IRP_MJ_CREATE:
+        case IRP_MJ_DIRECTORY_CONTROL:
+            Priority = UdfWorkQueueNormal;
+            break;
+        default:
+            Priority = UdfWorkQueueLow;
+            break;
+    }
+
+    // Queue the work item
+    Status = UDFQueueWorkItem(Vcb->WorkQueueManager, IrpContext, Priority);
+    
+    if (!NT_SUCCESS(Status)) {
+        UDFPrint(("UDFPostRequest: Failed to queue work item, status=%x\n", Status));
+        // Fall back to old method
+        return UDFPostRequestOld(IrpContext, Irp);
+    }
+
+    return STATUS_PENDING;
+}
+
+/*************************************************************************
+*
+* Function: UDFPostRequestOld()
+*
+* Description:
+*   Original work queue implementation kept as fallback for compatibility
+*   during transition period.
+*
+*************************************************************************/
+NTSTATUS
+UDFPostRequestOld(
+    IN PIRP_CONTEXT IrpContext,
+    IN PIRP         Irp
     )
 {
     KIRQL SavedIrql;
-//    PIO_STACK_LOCATION IrpSp;
     PVCB Vcb;
-
-//    IrpSp = IoGetCurrentIrpStackLocation(Irp);
 
     // mark the IRP pending if this is not double post
     if (Irp)
@@ -1021,10 +1077,8 @@ UDFPostRequest(
 * Function: UDFFspDispatch()
 *
 * Description:
-*   The common dispatch routine invoked in the context of a system worker
-*   thread. All we do here is pretty much case off the major function
-*   code and invoke the appropriate FSD dispatch routine for further
-*   processing.
+*   Original FSP dispatch routine kept as fallback for compatibility.
+*   The new work queue system uses UDFWorkQueueWorkerThread instead.
 *
 * Expected Interrupt Level (for execution) :
 *
@@ -1524,6 +1578,14 @@ UDFDeleteVCB(
     LARGE_INTEGER delay;
     UDFPrint(("UDFDeleteVCB\n"));
 
+    // Clean up work queue manager first
+    if (Vcb->WorkQueueManager) {
+        UDFPrint(("UDF: Cleaning up work queue manager\n"));
+        UDFCleanupWorkQueueManager(Vcb->WorkQueueManager);
+        Vcb->WorkQueueManager = NULL;
+    }
+
+    // Wait for any remaining legacy posted requests to complete
     delay.QuadPart = -500000; // 0.05 sec
     while(Vcb->PostedRequestCount) {
         UDFPrint(("UDFDeleteVCB: PostedRequestCount = %d\n", Vcb->PostedRequestCount));

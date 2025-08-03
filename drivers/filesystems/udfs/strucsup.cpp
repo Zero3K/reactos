@@ -911,12 +911,20 @@ UDFInitializeVCB(
     // Initialize the list anchor (head) for some lists in this VCB.
     InitializeListHead(&Vcb->NextNotifyIRP);
 
-    //  Initialize the overflow queue for the volume
-    Vcb->OverflowQueueCount = 0;
-    InitializeListHead(&(Vcb->OverflowQueue));
-
-    Vcb->PostedRequestCount = 0;
-    KeInitializeSpinLock(&(Vcb->OverflowQueueSpinLock));
+    //  Initialize the new work queue management system
+    Status = UDFInitializeWorkQueueManager(&Vcb->WorkQueueManager, Vcb);
+    if (!NT_SUCCESS(Status)) {
+        UDFPrint(("UDFInitializeVCB: Failed to initialize work queue manager, status=%x\n", Status));
+        UDFPrint(("UDFInitializeVCB: Falling back to legacy queue system\n"));
+        Vcb->WorkQueueManager = NULL;
+        // Initialize legacy overflow queue as fallback
+        Vcb->OverflowQueueCount = 0;
+        InitializeListHead(&(Vcb->OverflowQueue));
+        Vcb->PostedRequestCount = 0;
+        KeInitializeSpinLock(&(Vcb->OverflowQueueSpinLock));
+    } else {
+        UDFPrint(("UDFInitializeVCB: Successfully initialized new work queue manager\n"));
+    }
 
     // Initialize the notify IRP list mutex
     FsRtlNotifyInitializeSync(&(Vcb->NotifyIRPMutex));

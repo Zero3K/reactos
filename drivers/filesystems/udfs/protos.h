@@ -741,6 +741,14 @@ UDFFspDispatch(
     PVOID Context
     );
 
+// New work queue management system prototypes
+extern NTSTATUS UDFPostRequestOld(
+    PIRP_CONTEXT IrpContext,
+    PIRP Irp
+    );
+
+// Work queue management function prototypes are in struct.h
+
 NTSTATUS
 UDFInitializeVCB(
     PIRP_CONTEXT IrpContext,
