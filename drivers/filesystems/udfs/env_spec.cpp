@@ -35,18 +35,18 @@ ULONG UDF_SIMULATE_WRITES=0;
 // Performance optimization: Context pool to reduce allocation overhead
 #define UDF_CONTEXT_POOL_SIZE 32
 static UDF_PH_CALL_CONTEXT ContextPool[UDF_CONTEXT_POOL_SIZE];
-static KSPIN_LOCK ContextPoolLock;
+static KSPIN_LOCK ContextPoolLock = 0; // Initialize to zero
 static ULONG ContextPoolUsageMask = 0;
-static BOOLEAN ContextPoolInitialized = FALSE;
+static LONG ContextPoolInitialized = 0; // Use LONG for InterlockedCompareExchange
 
 static PUDF_PH_CALL_CONTEXT UDFAllocateContext(void)
 {
     KIRQL oldIrql;
     ULONG i;
     
-    if (!ContextPoolInitialized) {
+    // Thread-safe initialization using InterlockedCompareExchange
+    if (InterlockedCompareExchange(&ContextPoolInitialized, 1, 0) == 0) {
         KeInitializeSpinLock(&ContextPoolLock);
-        ContextPoolInitialized = TRUE;
     }
     
     KeAcquireSpinLock(&ContextPoolLock, &oldIrql);
@@ -231,8 +231,7 @@ UDFPhReadSynchronous(
     // Create notification event object to be used to signal the request completion.
     KeInitializeEvent(&(Context->event), NotificationEvent, FALSE);
 
-    // Optimize: Use sync path for small operations at PASSIVE_LEVEL to reduce overhead
-    if (CurIrql > PASSIVE_LEVEL || Length > (16 * 1024)) {
+    if (TRUE || CurIrql > PASSIVE_LEVEL) {
         Irp = IoBuildAsynchronousFsdRequest(IRP_MJ_READ, DeviceObject, IoBuf,
                                                Length, &ROffset, &(Context->IosbToUse) );
         if (!Irp) {
@@ -407,8 +406,7 @@ UDFPhWriteSynchronous(
     // Create notification event object to be used to signal the request completion.
     KeInitializeEvent(&(Context->event), NotificationEvent, FALSE);
 
-    // Optimize: Use sync path for small write operations at PASSIVE_LEVEL to reduce overhead
-    if (CurIrql > PASSIVE_LEVEL || Length > (16 * 1024)) {
+    if (TRUE || CurIrql > PASSIVE_LEVEL) {
         irp = IoBuildAsynchronousFsdRequest(IRP_MJ_WRITE, DeviceObject, IoBuf,
                                                Length, &ROffset, &(Context->IosbToUse) );
         if (!irp) try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
