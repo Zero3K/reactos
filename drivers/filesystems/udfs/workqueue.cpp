@@ -20,7 +20,7 @@
 
 #include "udffs.h"
 #define UDF_BUG_CHECK_ID    UDF_FILE_WORKQUEUE
-#define MEM_WORKQUEUE_TAG   "UDF_WQ"
+#define MEM_WORKQUEUE_TAG   'qwdU'
 
 /*************************************************************************
 *
