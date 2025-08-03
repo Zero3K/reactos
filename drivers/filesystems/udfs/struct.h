@@ -61,6 +61,7 @@
 struct IRP_CONTEXT_LITE;
 struct IO_CONTEXT;
 struct IRP_CONTEXT;
+using PIRP_CONTEXT = IRP_CONTEXT*;
 
 /**************************************************************************
     every structure has a node type, and a node size associated with it.
@@ -950,7 +951,6 @@ struct IRP_CONTEXT {
 
     VCB*      Vcb;
 };
-using PIRP_CONTEXT = IRP_CONTEXT*;
 
 #define IRP_CONTEXT_FLAG_ON_STACK               (0x00000001)
 #define IRP_CONTEXT_FLAG_MORE_PROCESSING        (0x00000002)
