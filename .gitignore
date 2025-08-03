@@ -1,6 +1,7 @@
 compile_commands.json
 output-*
 *-output
+output/
 build/
 modules/optional
 modules/bootcd_extras
