@@ -841,20 +841,16 @@ UDFFastIoAcqCcFlush(
     PFCB Fcb = (PFCB)FileObject->FsContext;
 
     // First, check if we already own the main resource to avoid nested acquisition
-    if (Fcb->FcbNonpaged->FcbResource != NULL) {
-        if (!ExIsResourceAcquiredSharedLite(&Fcb->FcbNonpaged->FcbResource)) {
-            // If not acquired, acquire exclusively
-            UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbResource, TRUE);
-        } else {
-            // If already acquired shared, acquire shared again
-            UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbResource, TRUE);
-        }
+    if (!ExIsResourceAcquiredSharedLite(&Fcb->FcbNonpaged->FcbResource)) {
+        // If not acquired, acquire exclusively
+        UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbResource, TRUE);
+    } else {
+        // If already acquired shared, acquire shared again
+        UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbResource, TRUE);
     }
 
     // Always acquire paging I/O resource as shared (after main resource)
-    if (Fcb->FcbNonpaged->FcbPagingIoResource != NULL) {
-        UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbPagingIoResource, TRUE);
-    }
+    UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbPagingIoResource, TRUE);
 
     return STATUS_SUCCESS;
 
@@ -895,14 +891,10 @@ UDFFastIoRelCcFlush(
     PFCB Fcb = (PFCB)FileObject->FsContext;
 
     // Release paging I/O resource first (acquired last)
-    if (Fcb->FcbNonpaged->FcbPagingIoResource != NULL) {
-        UDFReleaseResource(&Fcb->FcbNonpaged->FcbPagingIoResource);
-    }
+    UDFReleaseResource(&Fcb->FcbNonpaged->FcbPagingIoResource);
 
     // Release main resource last (acquired first)
-    if (Fcb->FcbNonpaged->FcbResource != NULL) {
-        UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
-    }
+    UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
 
     return STATUS_SUCCESS;
 
