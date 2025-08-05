@@ -89,6 +89,9 @@
 
 //#define UDF_ALLOW_PRETEND_DELETED
 
+// Enable or disable FastIO functionality
+#define UDF_ENABLE_FASTIO
+
 #define UDF_DEFAULT_BM_FLUSH_TIMEOUT 16         // seconds
 #define UDF_DEFAULT_TREE_FLUSH_TIMEOUT 5        // seconds
 
