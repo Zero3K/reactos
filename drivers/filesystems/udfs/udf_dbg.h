@@ -13,6 +13,41 @@
    This file contains small set of debug macroses.
    It is used by the UDF project.
 
+   PERFORMANCE OPTIMIZATION NOTES:
+   
+   When UDF_DBG is defined (automatically when NDEBUG is not set), several
+   debugging features are available that can significantly impact performance:
+
+   1. TRACK_SYS_ALLOCS - Memory allocation tracking
+      - Maintains descriptor array of 8192 entries
+      - Tracks allocation counters
+      - Linear search through descriptors on each alloc/free
+      - SIGNIFICANT PERFORMANCE IMPACT - only enable for memory debugging
+
+   2. TRACK_SYS_ALLOC_CALLERS - Caller tracking for allocations  
+      - Stores source file ID and line number for each allocation
+      - Additional overhead on top of TRACK_SYS_ALLOCS
+      - SIGNIFICANT PERFORMANCE IMPACT - only enable for memory debugging
+
+   3. TRACK_RESOURCES - Resource acquisition tracking
+      - Logs every resource operation with thread IDs
+      - Maintains acquisition counters
+      - MODERATE PERFORMANCE IMPACT - only enable for resource debugging
+
+   4. TRACK_REF_COUNTERS - Reference counter tracking
+      - Logs every interlocked operation
+      - MODERATE PERFORMANCE IMPACT - only enable for ref count debugging
+
+   5. ENABLE_PROTECTED_MEM_RTL - Protected memory operations
+      - Wraps every memory copy/move/compare in SEH try-catch blocks
+      - Adds exception handling overhead to every memory operation
+      - SIGNIFICANT PERFORMANCE IMPACT - only enable for memory corruption debugging
+
+   By default, when UDF_DBG is defined, only basic debug printing and assertions
+   are enabled. The expensive tracking features above are commented out by default
+   to avoid performance degradation in debug builds.
+
+   For production builds, ensure NDEBUG is defined to disable UDF_DBG entirely.
 */
 
 #ifndef _UDF_DEBUG_H_
@@ -27,12 +62,27 @@
 
 //#define CHECK_ALLOC_FRAMES
 
+// Memory allocation tracking - EXPENSIVE - causes significant slowdown
+// Only enable when specifically debugging memory issues
 //#define TRACK_SYS_ALLOCS
 //#define TRACK_SYS_ALLOC_CALLERS
 
+// Resource tracking - EXPENSIVE - causes significant slowdown  
+// Only enable when specifically debugging resource issues
+//#define TRACK_RESOURCES
+//#define TRACK_REF_COUNTERS
+
+// Protected memory RTL - EXPENSIVE - causes significant slowdown
+// Wraps every memory operation in SEH try-catch blocks
+// Only enable when specifically debugging memory corruption
+//#define ENABLE_PROTECTED_MEM_RTL
+
 #endif //UDF_DBG
 
+// PROTECTED_MEM_RTL is expensive - only enable when ENABLE_PROTECTED_MEM_RTL is defined
+#ifdef ENABLE_PROTECTED_MEM_RTL
 #define PROTECTED_MEM_RTL
+#endif
 
 //#define UDF_SIMULATE_WRITES
 
