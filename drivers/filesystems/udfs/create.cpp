@@ -110,7 +110,6 @@ UDFCreate(
 /*
  */
 VOID
-__fastcall
 UDFReleaseResFromCreate(
     IN PERESOURCE* PagingIoRes,
     IN PERESOURCE* Res1,
@@ -134,7 +133,6 @@ UDFReleaseResFromCreate(
 /*
  */
 VOID
-__fastcall
 UDFAcquireParent(
     IN PUDF_FILE_INFO RelatedFileInfo,
     IN PERESOURCE* Res1,

@@ -37,7 +37,6 @@
 #define         MRW_DMA_OFFSET           0x500
 
 NTSTATUS
-__fastcall
 UDFSetDstring(
     IN PUNICODE_STRING UName,
     IN dstring* Dest,
@@ -759,7 +758,6 @@ UDFUpdateVDS(
 } // end UDFUpdateVDS()
 
 NTSTATUS
-__fastcall
 UDFSetDstring(
     IN PUNICODE_STRING UName,
     IN dstring* Dest,
@@ -791,7 +789,6 @@ UDFSetDstring(
 } // end UDFSetDstring()
 
 void
-__fastcall
 UDFGetDstring(
     IN OUT PUNICODE_STRING UName,
     IN dstring* Dest,

@@ -239,7 +239,6 @@ UDFDirIndexTrunc(
     This routine returns pointer to DirIndex item with index i.
  */
 PDIR_INDEX_ITEM
-__fastcall
 UDFDirIndex(
     IN PDIR_INDEX_HDR hDirNdx,
     IN uint_di i

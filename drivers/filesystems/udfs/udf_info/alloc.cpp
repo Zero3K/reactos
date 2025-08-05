@@ -76,7 +76,6 @@ UDFPhysLbaToPart(
     This routine returns physical Lba for partition-relative addr
  */
 uint32
-__fastcall
 UDFPartLbaToPhys(
   IN PVCB Vcb,
   IN lb_addr* Addr
@@ -130,7 +129,6 @@ UDFPartLbaToPhys(
     because it uses negative values as extent terminator (against standard)
  */
 /*uint32
-__fastcall
 UDFPartLbaToPhysCompat(
   IN PVCB Vcb,
   IN lb_addr* Addr
@@ -163,7 +161,6 @@ UDFPartLbaToPhysCompat(
     This routine looks for the partition containing given physical sector
  */
 uint32
-__fastcall
 UDFGetRefPartNumByPhysLba(
     IN PVCB Vcb,
     IN uint32 Lba
@@ -186,7 +183,6 @@ UDFGetRefPartNumByPhysLba(
     the 1st Lba of the 1st suitable one
  */
 uint32
-__fastcall
 UDFPartStart(
     PVCB Vcb,
     uint32 RefPartNum
@@ -207,7 +203,6 @@ UDFPartStart(
    The only difference is changing First Lba to Last one...
  */
 uint32
-__fastcall
 UDFPartEnd(
     PVCB Vcb,
     uint32 RefPartNum
@@ -230,7 +225,6 @@ UDFPartEnd(
     the 1st Lba of the 1st suitable one
  */
 uint32
-__fastcall
 UDFPartLen(
     PVCB Vcb, 
     uint32 RefPartNum
@@ -837,7 +831,6 @@ no_free_space_err:
     Returns block-count
  */
 uint32
-__fastcall
 UDFGetPartFreeSpace(
     IN PVCB Vcb,
     IN uint32 partNum
@@ -856,7 +849,6 @@ UDFGetPartFreeSpace(
 } // end UDFGetPartFreeSpace()
 
 int64
-__fastcall
 UDFGetFreeSpace(
     IN PVCB Vcb
     )

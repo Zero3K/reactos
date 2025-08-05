@@ -110,7 +110,6 @@ UDFReallocTrackMap(
 
 
 NTSTATUS
-__fastcall
 UDFTIOVerify(
     IN PIRP_CONTEXT IrpContext,
     IN void* _Vcb,

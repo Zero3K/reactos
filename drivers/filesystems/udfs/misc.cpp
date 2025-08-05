@@ -182,7 +182,6 @@ VOID UDFDestroyZones(VOID)
 *
 *************************************************************************/
 BOOLEAN
-__fastcall
 UDFIsIrpTopLevel(
     PIRP            Irp)            // the IRP sent to our dispatch routine
 {

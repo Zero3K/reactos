@@ -768,7 +768,6 @@ UDFVFlush(
 } // end UDFVFlush()
 
 BOOLEAN
-__fastcall
 UDFCheckArea(
     PIRP_CONTEXT IrpContext,
     IN PVCB Vcb,
@@ -901,7 +900,6 @@ re_check:
     This routine releases sector mapping when entire packet is marked as free
  */
 NTSTATUS
-__fastcall
 UDFUnmapRange(
     IN PVCB Vcb,
     IN uint32 Lba,
@@ -941,7 +939,6 @@ UDFUnmapRange(
     This routine returns physical address for relocated sector
  */
 uint32
-__fastcall
 UDFRelocateSector(
     IN PVCB Vcb,
     IN uint32 Lba
@@ -989,7 +986,6 @@ UDFRelocateSector(
     This routine checks if the extent specified requires relocation
  */
 BOOLEAN
-__fastcall
 UDFAreSectorsRelocated(
     IN PVCB Vcb,
     IN uint32 Lba,
@@ -1036,7 +1032,6 @@ UDFAreSectorsRelocated(
     If relocation is not required (-1) will be returned
  */
 PEXTENT_MAP
-__fastcall
 UDFRelocateSectors(
     IN PVCB Vcb,
     IN uint32 Lba,

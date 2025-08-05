@@ -25,13 +25,13 @@ extern BOOLEAN UDFIsNameInExpression(IN PVCB Vcb,
 
 extern BOOLEAN UDFDoesNameContainWildCards(IN PUNICODE_STRING SearchPattern);
 
-extern BOOLEAN __fastcall UDFIsNameValid(IN PUNICODE_STRING SearchPattern,
+extern BOOLEAN UDFIsNameValid(IN PUNICODE_STRING SearchPattern,
                               OUT BOOLEAN* StreamOpen,
                               OUT ULONG* SNameIndex);
 
-extern BOOLEAN __fastcall UDFIsMatchAllMask(IN PUNICODE_STRING Name,
+extern BOOLEAN UDFIsMatchAllMask(IN PUNICODE_STRING Name,
                                  OUT BOOLEAN* DosOpen);
 
-extern BOOLEAN __fastcall UDFCanNameBeA8dot3(IN PUNICODE_STRING Name);
+extern BOOLEAN UDFCanNameBeA8dot3(IN PUNICODE_STRING Name);
 
 #endif //__UDF_NAME_SUP__H__

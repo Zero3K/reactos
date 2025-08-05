@@ -14,7 +14,6 @@ extern ULONG LockMode;
 #endif //UDF_FORMAT_MEDIA
 
 NTSTATUS
-__fastcall
 UDFTIOVerify(
     IN PIRP_CONTEXT IrpContext,
     IN void* _Vcb,

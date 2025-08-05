@@ -66,7 +66,7 @@ UDFReadExtentLocation(IN PVCB Vcb,
 int64 UDFGetExtentLength(IN PEXTENT_MAP Extent);  // Extent array
 // convert compressed Unicode to standard
 void
-__fastcall UDFDecompressUnicode(IN OUT PUNICODE_STRING UName,
+UDFDecompressUnicode(IN OUT PUNICODE_STRING UName,
                               IN uint8* CS0,
                               IN SIZE_T Length,
                               OUT uint16* valueCRC);
@@ -136,7 +136,7 @@ __inline NTSTATUS UDFFindFile__(IN PVCB Vcb,
 uint32   UDFGetMappingLength(IN PEXTENT_MAP Extent);
 // merge 2 sequencial file mappings
 PEXTENT_MAP
-__fastcall UDFMergeMappings(IN PEXTENT_MAP Extent,
+UDFMergeMappings(IN PEXTENT_MAP Extent,
                              IN PEXTENT_MAP Extent2);
 
 // build file mapping according to ShortAllocDesc (SHORT_AD) array
@@ -213,7 +213,7 @@ UDFLoadSparingTable(
 
 // build mapping for extent
 PEXTENT_MAP
-__fastcall UDFExtentToMapping_(IN PEXTENT_AD Extent
+UDFExtentToMapping_(IN PEXTENT_AD Extent
 #ifdef UDF_TRACK_EXTENT_TO_MAPPING
                               ,IN ULONG src,
                                IN ULONG line
@@ -237,22 +237,22 @@ UDFRemapPacket(
 
 //    This routine releases sector mapping when entire packet is marked as free
 NTSTATUS
-__fastcall UDFUnmapRange(IN PVCB Vcb,
+UDFUnmapRange(IN PVCB Vcb,
                         IN uint32 Lba,
                         IN uint32 BCount);
 
 // return physical address for relocated sector
 uint32
-__fastcall UDFRelocateSector(IN PVCB Vcb,
+UDFRelocateSector(IN PVCB Vcb,
                           IN uint32 Lba);
 // check
 BOOLEAN
-__fastcall UDFAreSectorsRelocated(IN PVCB Vcb,
+UDFAreSectorsRelocated(IN PVCB Vcb,
                                   IN uint32 Lba,
                                   IN uint32 BlockCount);
 // build mapping for relocated extent
 PEXTENT_MAP
-__fastcall UDFRelocateSectors(IN PVCB Vcb,
+UDFRelocateSectors(IN PVCB Vcb,
                                IN uint32 Lba,
                                IN uint32 BlockCount);
 // check for presence of given char among specified ones
@@ -260,30 +260,30 @@ BOOLEAN  UDFUnicodeInString(IN uint8* string,
                             IN WCHAR ch);     // Unicode char to search for.
 // validate char
 BOOLEAN
-__fastcall UDFIsIllegalChar(IN WCHAR ch);
+UDFIsIllegalChar(IN WCHAR ch);
 // translate udfName to dosName using OSTA compliant.
 #define  UDFDOSName__(Vcb, DosName, UdfName, FileInfo) \
     UDFDOSName(Vcb, DosName, UdfName, (FileInfo) && ((FileInfo)->Index < 2));
 
 void
-__fastcall UDFDOSName(IN PVCB Vcb,
+UDFDOSName(IN PVCB Vcb,
                     IN OUT PUNICODE_STRING DosName,
                     IN PUNICODE_STRING UdfName,
                     IN BOOLEAN KeepIntact);
 
 void
-__fastcall UDFDOSName201(IN OUT PUNICODE_STRING DosName,
+UDFDOSName201(IN OUT PUNICODE_STRING DosName,
                        IN PUNICODE_STRING UdfName,
                        IN BOOLEAN KeepIntact);
 
 void
-__fastcall UDFDOSName200(IN OUT PUNICODE_STRING DosName,
+UDFDOSName200(IN OUT PUNICODE_STRING DosName,
                        IN PUNICODE_STRING UdfName,
                        IN BOOLEAN KeepIntact,
                        IN BOOLEAN Mode150);
 
 void
-__fastcall UDFDOSName100(IN OUT PUNICODE_STRING DosName,
+UDFDOSName100(IN OUT PUNICODE_STRING DosName,
                        IN PUNICODE_STRING UdfName,
                        IN BOOLEAN KeepIntact);
 
@@ -391,7 +391,7 @@ NTSTATUS UDFAllocFreeExtent_(IN PIRP_CONTEXT IrpContext,
 #endif //UDF_TRACK_ALLOC_FREE_EXTENT
 //
 
-uint32 __fastcall
+uint32
 UDFGetPartFreeSpace(IN PVCB Vcb,
                            IN uint32 partNum);
 
@@ -499,7 +499,7 @@ UDFBuildFileEntry(
     );
 
 // find reference partition number containing given physical sector
-uint32 __fastcall UDFGetRefPartNumByPhysLba(IN PVCB Vcb, IN uint32 Lba);
+uint32 UDFGetRefPartNumByPhysLba(IN PVCB Vcb, IN uint32 Lba);
 
 // add given bitmap to existing one
 #define UDF_FSPACE_BM    0x00
@@ -541,7 +541,7 @@ UDFLoadExtInfo(
 
 // convert standard Unicode to compressed
 void
-__fastcall UDFCompressUnicode(IN PUNICODE_STRING UName,
+UDFCompressUnicode(IN PUNICODE_STRING UName,
                             IN OUT uint8** _CS0,
                             IN OUT PSIZE_T Length);
 // build FileIdent for specified FileEntry.
@@ -627,10 +627,10 @@ UDFZeroExtent(
   UDFZeroExtent(IrpContext, Vcb, Ext, Off, Len, TRUE, Dir, WB)
 
 uint32
-__fastcall UDFPartStart(PVCB Vcb,
+UDFPartStart(PVCB Vcb,
                         uint32 PartNum);
 uint32
-__fastcall UDFPartEnd(PVCB Vcb,
+UDFPartEnd(PVCB Vcb,
                       uint32 PartNum);
 
 // resize extent & associated mapping
@@ -978,7 +978,7 @@ UDFLoadVAT(
 
 // get volume free space
 int64
-__fastcall UDFGetFreeSpace(IN PVCB Vcb);
+UDFGetFreeSpace(IN PVCB Vcb);
 
 // get volume total space
 int64
@@ -1044,7 +1044,7 @@ BOOLEAN  UDFCompareFileInfo(IN PUDF_FILE_INFO f1,
                            IN PUDF_FILE_INFO f2);
 // pack mappings
 void
-__fastcall UDFPackMapping(IN PVCB Vcb,
+UDFPackMapping(IN PVCB Vcb,
                         IN PEXTENT_INFO ExtInfo);   // Extent array
 // check if all the data is in cache.
 BOOLEAN  UDFIsExtentCached(IN PVCB Vcb,
@@ -1073,20 +1073,19 @@ UDFUpdateVolIdent(
 
 // calculate checksum for unicode string (for DOS-names)
 uint16
-__fastcall UDFUnicodeCksum(PWCHAR s,
+UDFUnicodeCksum(PWCHAR s,
                          uint32 n);
 //#define UDFUnicodeCksum(s,n)  UDFCrc((uint8*)(s), (n)*sizeof(WCHAR))
 //
 uint16
-__fastcall
 UDFUnicodeCksum150(PWCHAR s,
                 uint32 n);
 
 uint32
-__fastcall crc32(IN uint8* s,
+crc32(IN uint8* s,
             IN uint32 len);
 // calculate a 16-bit CRC checksum using ITU-T V.41 polynomial
-uint16 __fastcall UDFCrc(IN uint8 *Data, IN SIZE_T Size, IN uint16 Crc);
+uint16 UDFCrc(IN uint8 *Data, IN SIZE_T Size, IN uint16 Crc);
 
 // read the first block of a tagged descriptor & check it
 NTSTATUS UDFReadTagged(
@@ -1100,7 +1099,7 @@ NTSTATUS UDFReadTagged(
 
 // get physycal Lba for partition-relative addr
 uint32
-__fastcall UDFPartLbaToPhys(IN PVCB Vcb,
+UDFPartLbaToPhys(IN PVCB Vcb,
                             IN lb_addr* Addr);
 
 // look for Anchor(s) at all possible locations
@@ -1323,7 +1322,7 @@ NTSTATUS UDFUpdateVAT(IN void* _Vcb,
                       IN uint32 BCount);
 //
 NTSTATUS
-__fastcall UDFUnPackMapping(IN PVCB Vcb,
+UDFUnPackMapping(IN PVCB Vcb,
                           IN PEXTENT_INFO ExtInfo);   // Extent array
 //
 NTSTATUS
@@ -1337,7 +1336,7 @@ UDFConvertFEToExtended(
 #define UDFGetPartNumByPartRef(Vcb, pi) (Vcb->Partitions[pi].PartitionNum)
 //
 uint32
-__fastcall UDFPartLen(PVCB Vcb,
+UDFPartLen(PVCB Vcb,
                       uint32 PartNum);
 //
 NTSTATUS UDFPretendFileDeleted__(IN PVCB Vcb,
@@ -1402,7 +1401,6 @@ NTSTATUS UDFPretendFileDeleted__(IN PVCB Vcb,
 #define AlignDirIndex(n)   ((n+UDF_DIR_INDEX_FRAME_GRAN_MASK) & ~(UDF_DIR_INDEX_FRAME_GRAN_MASK))
 
 PDIR_INDEX_ITEM
-__fastcall
 UDFDirIndex(
     IN PDIR_INDEX_HDR hDirNdx,
     IN uint_di i
@@ -1540,7 +1538,7 @@ UDFVFlush(
 
 __inline
 BOOLEAN
-__fastcall UDFVIsStored(
+UDFVIsStored(
     IN PVCB Vcb,
     IN lba_t lba
     )
@@ -1551,7 +1549,6 @@ __fastcall UDFVIsStored(
 } // end UDFVIsStored()
 
 BOOLEAN
-__fastcall
 UDFCheckArea(
     PIRP_CONTEXT IrpContext,
     IN PVCB Vcb,
