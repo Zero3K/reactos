@@ -657,7 +657,7 @@ VOID);
 extern VOID UDFDestroyZones(
 VOID);
 
-extern BOOLEAN __fastcall UDFIsIrpTopLevel(
+extern BOOLEAN UDFIsIrpTopLevel(
 PIRP                        Irp);                   // the IRP sent to our dispatch routine
 
 extern long UDFExceptionFilter(

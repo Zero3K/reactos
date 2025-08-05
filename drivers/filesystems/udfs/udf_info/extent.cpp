@@ -159,7 +159,6 @@ UDFGetExtentLength(
     Such operation makes it compatible with other internal routines
  */
 PEXTENT_MAP
-__fastcall
 UDFExtentToMapping_(
     IN PEXTENT_AD Extent
 #ifdef UDF_TRACK_EXTENT_TO_MAPPING
@@ -215,7 +214,6 @@ UDFGetMappingLength(
     This routine merges 2 sequencial file mappings
  */
 PEXTENT_MAP
-__fastcall
 UDFMergeMappings(
     IN PEXTENT_MAP Extent,
     IN PEXTENT_MAP Extent2
@@ -2749,7 +2747,6 @@ UDFFreeFileAllocation(
     This routine packs physically sequential extents into single one
  */
 void
-__fastcall
 UDFPackMapping(
     IN PVCB Vcb,
     IN PEXTENT_INFO ExtInfo   // Extent array
@@ -2865,7 +2862,6 @@ UDFPackMapping(
     This routine expands mapping to 'frag-per-LBlock' state
  */
 NTSTATUS
-__fastcall
 UDFUnPackMapping(
     IN PVCB Vcb,
     IN PEXTENT_INFO ExtInfo   // Extent array

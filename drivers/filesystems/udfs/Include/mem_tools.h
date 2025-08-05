@@ -57,14 +57,14 @@ PCHAR MyAllocatePool(ULONG Type, ULONG size, USHORT Src, USHORT Line
       );
 ULONG MyReallocPool( PCHAR addr, ULONG OldLength, PCHAR* NewBuff, ULONG NewLength, USHORT Src, USHORT Line);
 #else
-PCHAR __fastcall MyAllocatePool(ULONG Type, ULONG size
+PCHAR MyAllocatePool(ULONG Type, ULONG size
   #ifdef MY_HEAP_TRACK_REF
                     ,PCHAR Tag
   #endif //MY_HEAP_TRACK_REF
       );
-ULONG __fastcall MyReallocPool( PCHAR addr, ULONG OldLength, PCHAR* NewBuff, ULONG NewLength);
+ULONG MyReallocPool( PCHAR addr, ULONG OldLength, PCHAR* NewBuff, ULONG NewLength);
 #endif
-VOID __fastcall MyFreePool(PCHAR addr);
+VOID MyFreePool(PCHAR addr);
 
 #ifdef MY_HEAP_CHECK_BOUNDS
   #define MY_HEAP_ALIGN             63

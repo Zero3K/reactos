@@ -88,7 +88,6 @@ EO_Dissect:
 } // end UDFDissectName()
 
 BOOLEAN
-__fastcall
 UDFIsNameValid(
     IN PUNICODE_STRING SearchPattern,
     OUT BOOLEAN* StreamOpen,
@@ -213,7 +212,6 @@ UDFIsNameInExpression(
 
 
 BOOLEAN
-__fastcall
 UDFIsMatchAllMask(
     IN PUNICODE_STRING Name,
    OUT BOOLEAN* DosOpen
@@ -265,7 +263,6 @@ UDFIsMatchAllMask(
 } // end UDFIsMatchAllMask()
 
 BOOLEAN
-__fastcall
 UDFCanNameBeA8dot3(
     IN PUNICODE_STRING Name
     )

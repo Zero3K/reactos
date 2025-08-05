@@ -166,7 +166,6 @@ UDFMemRealloc(
     This routine converts compressed Unicode to standard
  */
 void
-__fastcall
 UDFDecompressUnicode(
     IN OUT PUNICODE_STRING UName,
     IN uint8* CS0,
@@ -236,7 +235,6 @@ return_empty_str:
     This routine converts standard Unicode to compressed
  */
 void
-__fastcall
 UDFCompressUnicode(
     IN PUNICODE_STRING UName,
     IN OUT uint8** _CS0,
@@ -356,7 +354,6 @@ UDFUnicodeInString(
     DOS file name.
 */
 BOOLEAN
-__fastcall
 UDFIsIllegalChar(
     IN WCHAR chr
     )
@@ -384,7 +381,6 @@ UDFIsIllegalChar(
 }*/
 
 void
-__fastcall
 UDFDOSName(
     IN PVCB Vcb,
     IN OUT PUNICODE_STRING DosName,
@@ -415,7 +411,6 @@ UDFDOSName(
 }
 
 void
-__fastcall
 UDFDOSName100(
     IN OUT PUNICODE_STRING DosName,
     IN PUNICODE_STRING UdfName,
@@ -532,7 +527,6 @@ UDFDOSName100(
 } // end UDFDOSName100()
 
 void
-__fastcall
 UDFDOSName200(
     IN OUT PUNICODE_STRING DosName,
     IN PUNICODE_STRING UdfName,
@@ -650,7 +644,6 @@ UDFDOSName200(
 
 
 void
-__fastcall
 UDFDOSName201(
     IN OUT PUNICODE_STRING DosName,
     IN PUNICODE_STRING UdfName,
@@ -4276,7 +4269,6 @@ UDFCompareFileInfo(
     This routine computes 32-bit hash based on CRC-32 from SSH
  */
 uint32
-__fastcall
 crc32(
     IN uint8* s,
     IN uint32 len
@@ -4300,7 +4292,6 @@ crc32(
     The polynomial used is: x^16 + x^12 + x^15 + 1
 */
 uint16
-__fastcall
 UDFUnicodeCksum(
     PWCHAR s,
     uint32 n
@@ -4315,7 +4306,6 @@ UDFUnicodeCksum(
 } // end UDFUnicodeCksum()
 
 uint16
-__fastcall
 UDFUnicodeCksum150(
     PWCHAR s, // ECX
     uint32 n  // EDX
@@ -4345,7 +4335,6 @@ UDFUnicodeCksum150(
     The polynomial used is: x^16 + x^12 + x^15 + 1
 */
 uint16
-__fastcall
 UDFCrc(
     IN uint8 *Data,
     IN SIZE_T Size,

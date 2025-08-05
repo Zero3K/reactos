@@ -192,7 +192,6 @@ MyAllocCheck(
 
 PCHAR
 #ifndef MY_HEAP_TRACK_OWNERS
-__fastcall
 #endif
 MyAllocatePoolInFrame(
     ULONG Frame,
@@ -307,7 +306,6 @@ MyAllocatePoolInFrame(
 } // end MyAllocatePoolInFrame()
 
 LONG
-__fastcall
 MyFindMemDescByAddr(
     ULONG Frame,
     PCHAR addr
@@ -349,7 +347,6 @@ FIF_Found:
 } // end MyFindMemDescByAddr()
 
 VOID
-__fastcall
 MyFreePoolInFrame(
     ULONG Frame,
     PCHAR addr
@@ -432,7 +429,6 @@ MyFreePoolInFrame(
 } // end MyFreePoolInFrame()
 
 BOOLEAN
-__fastcall
 MyResizePoolInFrame(
     ULONG Frame,
     PCHAR addr,
@@ -543,7 +539,6 @@ MyResizePoolInFrame(
 } // end MyResizePoolInFrame()
 
 VOID
-__fastcall
 MyAllocInitFrame(
     ULONG Type,
     ULONG Frame
@@ -582,7 +577,6 @@ MyAllocInitFrame(
 } // end MyAllocInitFrame()
 
 VOID
-__fastcall
 MyAllocFreeFrame(
     ULONG Frame
     )
@@ -608,7 +602,6 @@ MyAllocFreeFrame(
 
 PCHAR
 #ifndef MY_HEAP_TRACK_OWNERS
-__fastcall
 #endif
 MyAllocatePool(
     ULONG type,
@@ -703,7 +696,6 @@ MyAllocatePool(
 } // end MyAllocatePool()
 
 LONG
-__fastcall
 MyFindFrameByAddr(
     PCHAR addr
     )
@@ -723,7 +715,6 @@ MyFindFrameByAddr(
 }
 
 VOID
-__fastcall
 MyFreePool(
     PCHAR addr
     )
@@ -767,7 +758,6 @@ MyFreePool(
 
 ULONG
 #ifndef MY_HEAP_TRACK_OWNERS
-__fastcall
 #endif
 MyReallocPool(
     IN PCHAR addr,
