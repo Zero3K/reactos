@@ -312,6 +312,8 @@ UDFInitializeFunctionPointers(
     RtlZeroMemory(PtrFastIoDispatch, sizeof(FAST_IO_DISPATCH));
 
     PtrFastIoDispatch->SizeOfFastIoDispatch = sizeof(FAST_IO_DISPATCH);
+
+#ifdef UDF_ENABLE_FASTIO
     PtrFastIoDispatch->FastIoCheckIfPossible    = UDFFastIoCheckIfPossible;
     PtrFastIoDispatch->FastIoRead               = NULL;
     PtrFastIoDispatch->FastIoWrite              = NULL;
@@ -340,6 +342,29 @@ UDFInitializeFunctionPointers(
     PtrFastIoDispatch->MdlReadComplete          = FsRtlMdlReadCompleteDev;
     PtrFastIoDispatch->PrepareMdlWrite          = FsRtlPrepareMdlWriteDev;
     PtrFastIoDispatch->MdlWriteComplete         = FsRtlMdlWriteCompleteDev;
+#else
+    // FastIO is disabled - set all function pointers to NULL
+    PtrFastIoDispatch->FastIoCheckIfPossible    = NULL;
+    PtrFastIoDispatch->FastIoRead               = NULL;
+    PtrFastIoDispatch->FastIoWrite              = NULL;
+    PtrFastIoDispatch->FastIoQueryBasicInfo     = NULL;
+    PtrFastIoDispatch->FastIoQueryStandardInfo  = NULL;
+    PtrFastIoDispatch->FastIoLock               = NULL;
+    PtrFastIoDispatch->FastIoUnlockSingle       = NULL;
+    PtrFastIoDispatch->FastIoUnlockAll          = NULL;
+    PtrFastIoDispatch->FastIoUnlockAllByKey     = NULL;
+    PtrFastIoDispatch->AcquireFileForNtCreateSection = NULL;
+    PtrFastIoDispatch->ReleaseFileForNtCreateSection = NULL;
+    PtrFastIoDispatch->FastIoQueryNetworkOpenInfo = NULL;
+    PtrFastIoDispatch->AcquireForModWrite       = NULL;
+    PtrFastIoDispatch->ReleaseForModWrite       = NULL;
+    PtrFastIoDispatch->AcquireForCcFlush        = NULL;
+    PtrFastIoDispatch->ReleaseForCcFlush        = NULL;
+    PtrFastIoDispatch->MdlRead                  = NULL;
+    PtrFastIoDispatch->MdlReadComplete          = NULL;
+    PtrFastIoDispatch->PrepareMdlWrite          = NULL;
+    PtrFastIoDispatch->MdlWriteComplete         = NULL;
+#endif // UDF_ENABLE_FASTIO
 
     // last but not least, initialize the Cache Manager callback functions
     //  which are used in CcInitializeCacheMap()
