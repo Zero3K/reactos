@@ -6,11 +6,12 @@
 #include "udffs.h"
 #if defined(UDF_DBG) || defined(PRINT_ALWAYS)
 
-//#define TRACK_RESOURCES
-//#define TRACK_REF_COUNTERS
-
+// Resource tracking variables - only included if tracking is enabled
+#if defined(TRACK_RESOURCES) || defined(TRACK_REF_COUNTERS)
 ULONG ResCounter = 0;
 ULONG AcqCounter = 0;
+#endif
+
 ULONG UdfTimeStamp = -1;
 
 BOOLEAN
@@ -32,8 +33,8 @@ UDFDebugAcquireResourceSharedLite(
 #ifdef TRACK_RESOURCES
         UDFPrint(("Res:Sha:Ok:Resource:%x:BugCheckId:%x:Line:%d:ThId:%x\n",Resource,
             BugCheckId,Line,PsGetCurrentThread()));
-#endif
         AcqCounter++;
+#endif
         return Success;
     }
 #ifdef TRACK_RESOURCES
@@ -62,8 +63,8 @@ UDFDebugAcquireSharedStarveExclusive(
 #ifdef TRACK_RESOURCES
         UDFPrint(("Res:Sha*:Ok:Resource:%x:BugCheckId:%x:Line:%d:ThId:%x\n",Resource,
             BugCheckId,Line,PsGetCurrentThread()));
-#endif
         AcqCounter++;
+#endif
         return Success;
     }
 #ifdef TRACK_RESOURCES
@@ -93,8 +94,8 @@ UDFDebugAcquireResourceExclusiveLite(
 #ifdef TRACK_RESOURCES
         UDFPrint(("Res:Exc:OK:Resource:%x:BugCheckId:%x:Line:%d:ThId:%x\n",Resource,
             BugCheckId,Line,PsGetCurrentThread()));
-#endif
         AcqCounter++;
+#endif
         return Success;
     }
 #ifdef TRACK_RESOURCES
@@ -123,8 +124,8 @@ UDFDebugReleaseResourceForThreadLite(
 #ifdef TRACK_RESOURCES
     UDFPrint(("Res:Free:Ok:Resource:%x:BugCheckId:%x:Line:%d:ThId:%x\n",Resource,
         BugCheckId,Line,ResourceThreadId));
-#endif
     AcqCounter--;
+#endif
 }
 
 VOID
@@ -151,8 +152,8 @@ UDFDebugDeleteResource(
 #ifdef TRACK_RESOURCES
     UDFPrint(("Res:Del:Ok:Resource:%x:BugCheckId:%x:Line:%d:ThId:%x\n",Resource,
         BugCheckId,Line,ResourceThreadId));
-#endif
     ResCounter--;
+#endif
 }
 
 NTSTATUS
@@ -175,10 +176,10 @@ UDFDebugInitializeResourceLite(
 #ifdef TRACK_RESOURCES
     UDFPrint(("Res:Ini:Ok:Resource:%x:BugCheckId:%x:Line:%d:ThId:%x\n",Resource,
         BugCheckId,Line,ResourceThreadId));
-#endif
     if (NT_SUCCESS(RC)) {
         ResCounter++;
     }
+#endif
     return RC;
 }
 
@@ -285,6 +286,8 @@ UDFDebugInterlockedExchangeAdd(
     return InterlockedExchangeAdd(addr,i);
 #endif
 }
+
+#ifdef TRACK_SYS_ALLOCS
 
 #define MAX_MEM_DEBUG_DESCRIPTORS 8192
 
@@ -400,6 +403,8 @@ not_bug:
 //    UDFPrint(("SysAllocated: %x\n",AllocCount));
     ExFreePool(addr);
 }
+
+#endif //TRACK_SYS_ALLOCS
 
 NTSTATUS
 DbgWaitForSingleObject_(

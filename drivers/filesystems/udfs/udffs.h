@@ -237,6 +237,10 @@ UDFFreePool(
     ((void)0) /* No operation - CD/DVD write modes not currently supported */
 
 //
+// Performance-optimized resource macros for UDF_DBG builds
+// These provide basic debug information without the performance overhead
+// of tracking counters, detailed logging, or expensive validation
+//
 #if !defined(UDF_DBG) && !defined(PRINT_ALWAYS)
 
 #define UDFAcquireResourceExclusive(Resource,CanWait)  \
@@ -268,8 +272,8 @@ UDFFreePool(
 #define UDF_CHECK_EXVCB_RESOURCE(Vcb)
 #define UDF_CHECK_BITMAP_RESOURCE(Vcb)
 
-#else //UDF_DBG
-
+#elif defined(TRACK_RESOURCES) || defined(TRACK_REF_COUNTERS)
+// Full debug mode with resource tracking - EXPENSIVE
 #define UDFAcquireResourceExclusive(Resource,CanWait)  \
     (UDFDebugAcquireResourceExclusiveLite((Resource),(CanWait),UDF_BUG_CHECK_ID,__LINE__))
 
@@ -305,12 +309,44 @@ UDFFreePool(
     ASSERT( ExIsResourceAcquiredExclusiveLite(&(Vcb->VcbResource)) );
 
 #define UDF_CHECK_BITMAP_RESOURCE(Vcb)
-/* \
-    ASSERT( (ExIsResourceAcquiredExclusiveLite(&(Vcb->VcbResource)) ||  \
-             ExIsResourceAcquiredSharedLite(&(Vcb->VcbResource))) ); \
-    ASSERT(ExIsResourceAcquiredExclusiveLite(&(Vcb->BitMapResource1))); \
-*/
-#endif //UDF_DBG
+
+#else //UDF_DBG but no expensive tracking
+// Lightweight debug mode - minimal overhead, basic assertions only
+#define UDFAcquireResourceExclusive(Resource,CanWait)  \
+    (ExAcquireResourceExclusiveLite((Resource),(CanWait)))
+#define UDFAcquireResourceShared(Resource,CanWait) \
+    (ExAcquireResourceSharedLite((Resource),(CanWait)))
+// a convenient macro (must be invoked in the context of the thread that acquired the resource)
+#define UDFReleaseResource(Resource)    \
+    (ExReleaseResourceForThreadLite((Resource), ExGetCurrentResourceThread()))
+#define UDFDeleteResource(Resource)    \
+    (ExDeleteResourceLite((Resource)))
+#define UDFConvertExclusiveToSharedLite(Resource) \
+    (ExConvertExclusiveToSharedLite((Resource)))
+#define UDFInitializeResourceLite(Resource) \
+    (ExInitializeResourceLite((Resource)))
+#define UDFAcquireSharedStarveExclusive(Resource,CanWait) \
+    (ExAcquireSharedStarveExclusive((Resource),(CanWait)))
+#define UDFAcquireSharedWaitForExclusive(Resource,CanWait) \
+    (ExAcquireSharedWaitForExclusive((Resource),(CanWait)))
+
+#define UDFInterlockedIncrement(addr) \
+    (InterlockedIncrement((addr)))
+#define UDFInterlockedDecrement(addr) \
+    (InterlockedDecrement((addr)))
+#define UDFInterlockedExchangeAdd(addr,i) \
+    (InterlockedExchangeAdd((addr),(i)))
+
+#define UDF_CHECK_PAGING_IO_RESOURCE(Fcb) \
+    ASSERT(!ExIsResourceAcquiredExclusiveLite(&Fcb->FcbNonpaged->FcbPagingIoResource)); \
+    ASSERT(!ExIsResourceAcquiredSharedLite(&Fcb->FcbNonpaged->FcbPagingIoResource));
+
+#define UDF_CHECK_EXVCB_RESOURCE(Vcb) \
+    ASSERT( ExIsResourceAcquiredExclusiveLite(&(Vcb->VcbResource)) );
+
+#define UDF_CHECK_BITMAP_RESOURCE(Vcb)
+
+#endif //UDF_DBG performance optimization levels
 
 #define UDFRaiseStatus(IC,S) {                              \
     (IC)->ExceptionStatus = (S);                            \
