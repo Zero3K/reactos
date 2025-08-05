@@ -833,10 +833,23 @@ UDFFastIoAcqCcFlush(
 
     // Acquire appropriate resources that will allow correct synchronization
     // with a flush call (and avoid deadlock).
+    //
+    // Lock ordering: main->bcb->pagingio (same as FastFAT)
+    // For regular files, we need both resources but acquire them in proper order
+    // to prevent deadlocks during cache flush operations.
 
     PFCB Fcb = (PFCB)FileObject->FsContext;
 
-    UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbResource, TRUE);
+    // First, check if we already own the main resource to avoid nested acquisition
+    if (!ExIsResourceAcquiredSharedLite(&Fcb->FcbNonpaged->FcbResource)) {
+        // If not acquired, acquire exclusively
+        UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbResource, TRUE);
+    } else {
+        // If already acquired shared, acquire shared again
+        UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbResource, TRUE);
+    }
+
+    // Always acquire paging I/O resource as shared (after main resource)
     UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbPagingIoResource, TRUE);
 
     return STATUS_SUCCESS;
@@ -874,9 +887,13 @@ UDFFastIoRelCcFlush(
     }
 
     // Release resources acquired in UDFFastIoAcqCcFlush() above.
+    // Release in reverse order of acquisition
     PFCB Fcb = (PFCB)FileObject->FsContext;
 
+    // Release paging I/O resource first (acquired last)
     UDFReleaseResource(&Fcb->FcbNonpaged->FcbPagingIoResource);
+
+    // Release main resource last (acquired first)
     UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
 
     return STATUS_SUCCESS;
