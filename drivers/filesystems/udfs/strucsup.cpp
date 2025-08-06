@@ -169,6 +169,7 @@ Return Value:
     
     UNREFERENCED_PARAMETER(IrpContext);
     
+    ExDeleteResourceLite(&FcbNonpaged->FcbPagingIoResource);
     ExDeleteResourceLite(&FcbNonpaged->FcbResource);
 
     UDFDeallocateFcbNonpaged(FcbNonpaged);
