@@ -303,7 +303,7 @@ UDFMountVolume(
     BOOLEAN                 SetDoVerifyOnFail;
     BOOLEAN                 VcbAcquired = FALSE;
     BOOLEAN                 DeviceNotTouched = TRUE;
-    DISK_GEOMETRY           DiskGeometry;
+    DISK_GEOMETRY_EX        DiskGeometryEx;
 
     ASSERT(IrpSp);
     UDFPrint(("\n !!! UDFMountVolume\n"));
@@ -357,11 +357,11 @@ UDFMountVolume(
     }
 
     RC = UDFPhSendIOCTL((RealDevice->DeviceType == FILE_DEVICE_CD_ROM ?
-            IOCTL_CDROM_GET_DRIVE_GEOMETRY :
-            IOCTL_DISK_GET_DRIVE_GEOMETRY),
+            IOCTL_CDROM_GET_DRIVE_GEOMETRY_EX :
+            IOCTL_DISK_GET_DRIVE_GEOMETRY_EX),
             TargetDeviceObject,
             NULL, 0,
-            &DiskGeometry, sizeof(DISK_GEOMETRY),
+            &DiskGeometryEx, sizeof(DISK_GEOMETRY_EX),
             TRUE,
             NULL);
 
@@ -378,12 +378,12 @@ UDFMountVolume(
 
         UDFScanForDismountedVcb(IrpContext);
 
-        if (!IS_ALIGNED_POWER_OF_2(DiskGeometry.BytesPerSector)) {
+        if (!IS_ALIGNED_POWER_OF_2(DiskGeometryEx.Geometry.BytesPerSector)) {
 
             try_return(RC = STATUS_DRIVER_INTERNAL_ERROR);
         }
 
-        if (DiskGeometry.BytesPerSector > MAX_SECTOR_SIZE) {
+        if (DiskGeometryEx.Geometry.BytesPerSector > MAX_SECTOR_SIZE) {
 
             try_return(RC = STATUS_UNRECOGNIZED_VOLUME);
         }
