@@ -400,10 +400,10 @@ UDFBuildHashEntry(
                 RetFlags |= UDF_FI_FLAG_LFN;
             }*/
             hashes->hLfn = crc32((uint8*)(UName.Buffer), UName.Length);
-        } else {
-            BrutePoint();
+            MyFreePool__(UName.Buffer);
         }
-        MyFreePool__(UName.Buffer);
+        // If MyCloneUnicodeString fails (e.g., out of memory), skip ULFN hash calculation
+        // and continue with other hash types
     }
 
     if (Mask & HASH_DOS) {
