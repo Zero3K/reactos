@@ -175,6 +175,10 @@ struct FCB_NONPAGED {
 
     FAST_MUTEX AdvancedFcbHeaderMutex;
 
+    // Resource for protecting the CCB list for this FCB
+
+    ERESOURCE CcbListResource;
+
 };
 using PFCB_NONPAGED = FCB_NONPAGED*;
 
@@ -270,7 +274,6 @@ struct FCB {
     // for the UDF fsd, there exists a 1-1 correspondence between a
     //  full object pathname and a FCB
     PtrUDFObjectName                    FCBName;
-    ERESOURCE                           CcbListResource;
 
     // Pointer to the Fcb non-paged structures.
 

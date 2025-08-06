@@ -2451,12 +2451,12 @@ UDFOpenFile(
         Fcb->FcbState &= ~UDF_FCB_DELAY_CLOSE;
 #endif //UDF_DELAYED_CLOSE
 
-        UDFAcquireResourceExclusive(&Fcb->CcbListResource, TRUE);
+        UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->CcbListResource, TRUE);
         // insert CCB into linked list of open file object to Fcb or
         // to Vcb and do other intialization
         InsertTailList(&Fcb->NextCCB, &Ccb->NextCCB);
         UDFInterlockedIncrement((PLONG)&Fcb->FcbReference);
-        UDFReleaseResource(&Fcb->CcbListResource);
+        UDFReleaseResource(&Fcb->FcbNonpaged->CcbListResource);
 
 try_exit:   NOTHING;
     } _SEH2_FINALLY {

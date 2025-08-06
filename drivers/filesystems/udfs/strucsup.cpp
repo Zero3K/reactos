@@ -138,6 +138,7 @@ Return Value:
     ExInitializeResourceLite(&FcbNonpaged->FcbResource);
     ExInitializeFastMutex(&FcbNonpaged->FcbMutex);
     ExInitializeFastMutex(&FcbNonpaged->AdvancedFcbHeaderMutex);
+    ExInitializeResourceLite(&FcbNonpaged->CcbListResource);
 
     return FcbNonpaged;
 }
@@ -171,6 +172,7 @@ Return Value:
     
     ExDeleteResourceLite(&FcbNonpaged->FcbPagingIoResource);
     ExDeleteResourceLite(&FcbNonpaged->FcbResource);
+    ExDeleteResourceLite(&FcbNonpaged->CcbListResource);
 
     UDFDeallocateFcbNonpaged(FcbNonpaged);
 
@@ -218,7 +220,7 @@ Return Value:
 
    // CdUninitializeMcb( IrpContext, Fcb );
 
-  //  CdDeleteFcbNonpaged( IrpContext, Fcb->FcbNonpaged );
+    UDFDeleteFcbNonpaged( IrpContext, Fcb->FcbNonpaged );
 
     //
     //  Check if we need to deallocate the prefix name buffer.
@@ -616,24 +618,6 @@ UDFInitializeFCB(
     FsRtlSetupAdvancedHeader(&Fcb->Header, &Fcb->FcbNonpaged->AdvancedFcbHeaderMutex);
     Fcb->FileLock = NULL;
 
-    if (!NT_SUCCESS(status = UDFInitializeResourceLite(&Fcb->CcbListResource))) {
-
-        AdPrint(("    Can't init resource (3)\n"));
-        BrutePoint();
-
-        UDFDeleteResource(&Fcb->FcbNonpaged->FcbPagingIoResource);
-        UDFDeleteResource(&Fcb->FcbNonpaged->FcbResource);
-        Fcb->Header.Resource = NULL;
-        Fcb->Header.PagingIoResource = NULL;
-
-        if (Fcb->FileLock != NULL) {
-
-            FsRtlFreeFileLock(Fcb->FileLock);
-        }
-
-        return status;
-    }
-
     Fcb->FcbState = Flags;
 
     UDFInsertFcbTable(IrpContext, Fcb);
@@ -644,8 +628,6 @@ UDFInitializeFCB(
 
     Fcb->FcbReference = 0;
     Fcb->FcbCleanup = 0;
-
-    SetFlag(Fcb->FcbState, UDF_FCB_INITIALIZED_CCB_LIST_RESOURCE);
 
     Fcb->FCBName = PtrObjectName;
 
@@ -1040,9 +1022,6 @@ UDFCleanUpFCB(
         UDFUnlockVcb(IrpContext, Fcb->Vcb);
 
         // } end transaction
-
-        if (Fcb->FcbState & UDF_FCB_INITIALIZED_CCB_LIST_RESOURCE)
-            UDFDeleteResource(&(Fcb->CcbListResource));
 
         // Free memory
         UDFDeleteFcb(0, Fcb);

@@ -694,10 +694,10 @@ UDFDeleteCcb(
 
     _SEH2_TRY {
         if (Ccb->Fcb) {
-            UDFTouch(&(Ccb->Fcb->CcbListResource));
-            UDFAcquireResourceExclusive(&(Ccb->Fcb->CcbListResource),TRUE);
+            UDFTouch(&(Ccb->Fcb->FcbNonpaged->CcbListResource));
+            UDFAcquireResourceExclusive(&(Ccb->Fcb->FcbNonpaged->CcbListResource),TRUE);
             RemoveEntryList(&(Ccb->NextCCB));
-            UDFReleaseResource(&(Ccb->Fcb->CcbListResource));
+            UDFReleaseResource(&(Ccb->Fcb->FcbNonpaged->CcbListResource));
         } else {
             BrutePoint();
         }
