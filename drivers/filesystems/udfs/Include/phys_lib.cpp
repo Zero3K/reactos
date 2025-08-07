@@ -785,10 +785,10 @@ UDFTReadAsync(
             return STATUS_SUCCESS;
         }
 retry_1:
-        RC = UDFPrepareForReadOperation(Vcb, rLba, BCount);
+        RC = UDFPrepareForReadOperation(NULL, Vcb, rLba, BCount);
         if (!NT_SUCCESS(RC)) return RC;
         rLba = UDFFixFPAddress(Vcb, rLba);
-        RC = UDFPhReadSynchronous(Vcb->TargetDeviceObject, Buffer, Length,
+        RC = UDFPhReadSynchronous(NULL, Vcb->TargetDeviceObject, Buffer, Length,
                    ((uint64)rLba) << Vcb->BlockSizeBits, ReadBytes, 0);
         Vcb->VcbState &= ~UDF_VCB_LAST_WRITE;
         Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
@@ -809,10 +809,10 @@ retry_1:
         }
         BCount = RelocExtent->extLength>>Vcb->BlockSizeBits;
 retry_2:
-        RC = UDFPrepareForReadOperation(Vcb, rLba, RelocExtent->extLength >> Vcb->BlockSizeBits);
+        RC = UDFPrepareForReadOperation(NULL, Vcb, rLba, RelocExtent->extLength >> Vcb->BlockSizeBits);
         if (!NT_SUCCESS(RC)) break;
         rLba = UDFFixFPAddress(Vcb, rLba);
-        RC = UDFPhReadSynchronous(Vcb->TargetDeviceObject, Buffer, RelocExtent->extLength,
+        RC = UDFPhReadSynchronous(NULL, Vcb->TargetDeviceObject, Buffer, RelocExtent->extLength,
                    ((uint64)rLba) << Vcb->BlockSizeBits, &_ReadBytes, 0);
         Vcb->VcbState &= ~UDF_VCB_LAST_WRITE;
         Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;

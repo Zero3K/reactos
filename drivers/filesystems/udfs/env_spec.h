@@ -71,6 +71,15 @@ UDFPhSendIOCTL(
     IN BOOLEAN OverrideVerify,
     OUT PIO_STATUS_BLOCK Iosb OPTIONAL);
 
+// This routine performs low-level read (asynchronously if possible)
+extern NTSTATUS UDFTReadAsync(
+    IN PVOID _Vcb,
+    IN PVOID _WContext,
+    IN PVOID Buffer,     // Target buffer
+    IN SIZE_T Length,
+    IN ULONG LBA,
+    OUT PSIZE_T ReadBytes);
+
 // This routine performs low-level write (asynchronously if possible)
 extern NTSTATUS UDFTWriteAsync(
     IN PVOID _Vcb,
