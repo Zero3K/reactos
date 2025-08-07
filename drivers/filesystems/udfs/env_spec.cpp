@@ -127,6 +127,7 @@ UDFTrueAsyncCompletionRoutine(
     UDFPrint(("UDFTrueAsyncCompletionRoutine ctx=%x\n", Contxt));
     PUDF_ASYNC_IO_CONTEXT AsyncContext = (PUDF_ASYNC_IO_CONTEXT)Contxt;
     PMDL Mdl, NextMdl;
+    PVOID SystemBuffer = NULL;
 
     // Store the I/O status
     AsyncContext->IoStatus = Irp->IoStatus;
@@ -136,24 +137,33 @@ UDFTrueAsyncCompletionRoutine(
         *AsyncContext->ResultBytes = Irp->IoStatus.Information;
     }
 
-    // For read operations, copy data from temp buffer to original buffer
+    // For read operations, copy data from temp buffer to original buffer using MDL
     if (!AsyncContext->IsWrite && NT_SUCCESS(Irp->IoStatus.Status) && 
-        AsyncContext->TempBuffer && AsyncContext->Buffer) {
-        RtlCopyMemory(AsyncContext->Buffer, AsyncContext->TempBuffer, 
-                      min(AsyncContext->Length, Irp->IoStatus.Information));
+        AsyncContext->TempBuffer && AsyncContext->UserMdl) {
+        
+        // Get system address for the user buffer MDL (safe at DISPATCH_LEVEL)
+        SystemBuffer = MmGetSystemAddressForMdlSafe(AsyncContext->UserMdl, HighPagePriority);
+        if (SystemBuffer) {
+            SIZE_T BytesToCopy = min(AsyncContext->Length, Irp->IoStatus.Information);
+            RtlCopyMemory(SystemBuffer, AsyncContext->TempBuffer, BytesToCopy);
+            UDFPrint(("UDFTrueAsyncCompletionRoutine: Copied %x bytes to user buffer\n", BytesToCopy));
+        } else {
+            UDFPrint(("UDFTrueAsyncCompletionRoutine: Failed to get system address for user MDL\n"));
+        }
     }
 
-    // Unlock and free MDL pages
-    Mdl = Irp->MdlAddress;
-    while(Mdl) {
-        MmPrint(("    True Async Unlock MDL=%x\n", Mdl));
-        MmUnlockPages(Mdl);
-        Mdl = Mdl->Next;
+    // Unlock and free user MDL if we created it
+    if (AsyncContext->UserMdl) {
+        MmPrint(("    True Async Unlock User MDL=%x\n", AsyncContext->UserMdl));
+        MmUnlockPages(AsyncContext->UserMdl);
+        IoFreeMdl(AsyncContext->UserMdl);
+        AsyncContext->UserMdl = NULL;
     }
-    
+
+    // Clean up IRP MDL (for temporary buffer)
     Mdl = Irp->MdlAddress;
     while(Mdl) {
-        MmPrint(("    True Async Free MDL=%x\n", Mdl));
+        MmPrint(("    True Async Unlock IRP MDL=%x\n", Mdl));
         NextMdl = Mdl->Next;
         IoFreeMdl(Mdl);
         Mdl = NextMdl;

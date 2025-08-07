@@ -788,6 +788,29 @@ UDFTReadAsync(
     AsyncContext->ResultBytes = ReadBytes;
     AsyncContext->IsWrite = FALSE;
     AsyncContext->FreeBuffer = FALSE;
+    AsyncContext->UserMdl = NULL;
+    
+    // Create and lock MDL for user buffer to safely access it at DISPATCH_LEVEL
+    __try {
+        AsyncContext->UserMdl = IoAllocateMdl(Buffer, Length, FALSE, FALSE, NULL);
+        if (!AsyncContext->UserMdl) {
+            UDFPrint(("UDFTReadAsync: Failed to allocate user MDL\n"));
+            MyFreePool__(AsyncContext);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        
+        // Lock the user buffer pages in memory
+        MmProbeAndLockPages(AsyncContext->UserMdl, UserMode, IoWriteAccess);
+        UDFPrint(("UDFTReadAsync: Locked user buffer pages\n"));
+        
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        UDFPrint(("UDFTReadAsync: Exception while locking user buffer\n"));
+        if (AsyncContext->UserMdl) {
+            IoFreeMdl(AsyncContext->UserMdl);
+        }
+        MyFreePool__(AsyncContext);
+        return STATUS_INVALID_USER_BUFFER;
+    }
     
     // Calculate physical offset
     Offset.QuadPart = ((LONGLONG)LBA) << Vcb->BlockSizeBits;
@@ -796,6 +819,8 @@ UDFTReadAsync(
     IoBuf = DbgAllocatePoolWithTag(NonPagedPool, Length, 'bNWD');
     if (!IoBuf) {
         UDFPrint(("UDFTReadAsync: Failed to allocate I/O buffer\n"));
+        MmUnlockPages(AsyncContext->UserMdl);
+        IoFreeMdl(AsyncContext->UserMdl);
         MyFreePool__(AsyncContext);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
@@ -814,6 +839,8 @@ UDFTReadAsync(
     if (!Irp) {
         UDFPrint(("UDFTReadAsync: Failed to build async IRP\n"));
         DbgFreePool(IoBuf);
+        MmUnlockPages(AsyncContext->UserMdl);
+        IoFreeMdl(AsyncContext->UserMdl);
         MyFreePool__(AsyncContext);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
@@ -891,6 +918,29 @@ UDFTWriteAsync(
     AsyncContext->ResultBytes = (PSIZE_T)WrittenBytes; // Cast for compatibility
     AsyncContext->IsWrite = TRUE;
     AsyncContext->FreeBuffer = FreeBuffer;
+    AsyncContext->UserMdl = NULL;
+    
+    // For write operations, create MDL for user buffer to safely access it at DISPATCH_LEVEL
+    __try {
+        AsyncContext->UserMdl = IoAllocateMdl(Buffer, Length, FALSE, FALSE, NULL);
+        if (!AsyncContext->UserMdl) {
+            UDFPrint(("UDFTWriteAsync: Failed to allocate user MDL\n"));
+            MyFreePool__(AsyncContext);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        
+        // Lock the user buffer pages in memory for read access
+        MmProbeAndLockPages(AsyncContext->UserMdl, UserMode, IoReadAccess);
+        UDFPrint(("UDFTWriteAsync: Locked user buffer pages\n"));
+        
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        UDFPrint(("UDFTWriteAsync: Exception while locking user buffer\n"));
+        if (AsyncContext->UserMdl) {
+            IoFreeMdl(AsyncContext->UserMdl);
+        }
+        MyFreePool__(AsyncContext);
+        return STATUS_INVALID_USER_BUFFER;
+    }
     
     // Calculate physical offset
     Offset.QuadPart = ((LONGLONG)LBA) << Vcb->BlockSizeBits;
@@ -899,10 +949,23 @@ UDFTWriteAsync(
     IoBuf = DbgAllocatePool(NonPagedPool, Length);
     if (!IoBuf) {
         UDFPrint(("UDFTWriteAsync: Failed to allocate I/O buffer\n"));
+        MmUnlockPages(AsyncContext->UserMdl);
+        IoFreeMdl(AsyncContext->UserMdl);
         MyFreePool__(AsyncContext);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
-    RtlCopyMemory(IoBuf, Buffer, Length);
+    
+    // Use safe method to copy from locked user buffer
+    PVOID SystemBuffer = MmGetSystemAddressForMdlSafe(AsyncContext->UserMdl, HighPagePriority);
+    if (!SystemBuffer) {
+        UDFPrint(("UDFTWriteAsync: Failed to get system address for user buffer\n"));
+        DbgFreePool(IoBuf);
+        MmUnlockPages(AsyncContext->UserMdl);
+        IoFreeMdl(AsyncContext->UserMdl);
+        MyFreePool__(AsyncContext);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    RtlCopyMemory(IoBuf, SystemBuffer, Length);
     AsyncContext->TempBuffer = IoBuf;  // Store temp buffer for cleanup
     
     // Build asynchronous write IRP
@@ -918,6 +981,8 @@ UDFTWriteAsync(
     if (!Irp) {
         UDFPrint(("UDFTWriteAsync: Failed to build async IRP\n"));
         DbgFreePool(IoBuf);
+        MmUnlockPages(AsyncContext->UserMdl);
+        IoFreeMdl(AsyncContext->UserMdl);
         MyFreePool__(AsyncContext);
         return STATUS_INSUFFICIENT_RESOURCES;
     }

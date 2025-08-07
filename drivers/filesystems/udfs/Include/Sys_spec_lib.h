@@ -32,6 +32,7 @@ typedef struct _UDF_ASYNC_IO_CONTEXT {
     PIRP OriginalIrp;                          // Original IRP if needed
     PVOID Buffer;                              // Original I/O buffer
     PVOID TempBuffer;                          // Temporary I/O buffer
+    PMDL UserMdl;                              // MDL for user buffer (locked pages)
     SIZE_T Length;                             // Buffer length
     ULONG LBA;                                 // Logical block address
     PSIZE_T ResultBytes;                       // Pointer to result bytes
