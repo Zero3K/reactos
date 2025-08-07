@@ -749,8 +749,9 @@ try_exit: NOTHING;
 
 #ifdef UDF_ASYNC_IO
 /*
-    This routine performs asynchronous low-level read
-    Is not used now.
+    This routine performs low-level read (asynchronously if possible)
+    For now, this delegates to the synchronous read function to avoid
+    hangs until true async I/O can be properly implemented with IRP context
  */
 NTSTATUS
 UDFTReadAsync(
@@ -762,75 +763,16 @@ UDFTReadAsync(
     OUT PSIZE_T ReadBytes
     )
 {
-    PEXTENT_MAP RelocExtent;
-    PEXTENT_MAP RelocExtent_saved;
-    NTSTATUS RC = STATUS_SUCCESS;
-//    LARGE_INTEGER delay;
-    uint32 retry = UDF_READ_MAX_RETRY;
-    PVCB Vcb = (PVCB)_Vcb;
-    Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
-    uint32 rLba;
-    uint32 BCount;
-
-    ASSERT(Buffer);
-
-    (*ReadBytes) = 0;
-
-    RelocExtent = UDFRelocateSectors(Vcb, LBA, BCount = Length >> Vcb->BlockSizeBits);
-    if (!RelocExtent) return STATUS_INSUFFICIENT_RESOURCES;
-    if (RelocExtent == UDF_NO_EXTENT_MAP) {
-        rLba = LBA;
-        if (rLba >= (Vcb->CDR_Mode ? Vcb->NWA : Vcb->LastLBA + 1)) {
-            RtlZeroMemory(Buffer, Length);
-            return STATUS_SUCCESS;
-        }
-retry_1:
-        RC = UDFPrepareForReadOperation(NULL, Vcb, rLba, BCount);
-        if (!NT_SUCCESS(RC)) return RC;
-        rLba = UDFFixFPAddress(Vcb, rLba);
-        RC = UDFPhReadSynchronous(NULL, Vcb->TargetDeviceObject, Buffer, Length,
-                   ((uint64)rLba) << Vcb->BlockSizeBits, ReadBytes, 0);
-        Vcb->VcbState &= ~UDF_VCB_LAST_WRITE;
-        Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
-        if (!NT_SUCCESS(RC) &&
-            NT_SUCCESS(RC = UDFRecoverFromError(Vcb, FALSE, RC, rLba, BCount, &retry)) )
-            goto retry_1;
-        return RC;
-    }
-    // read according to relocation table
-    RelocExtent_saved = RelocExtent;
-    for(uint32 i=0; RelocExtent->extLength; i++, RelocExtent++) {
-        SIZE_T _ReadBytes;
-        rLba = RelocExtent->extLocation;
-        if (rLba >= (Vcb->CDR_Mode ? Vcb->NWA : Vcb->LastLBA + 1)) {
-            RtlZeroMemory(Buffer, _ReadBytes = RelocExtent->extLength);
-            RC = STATUS_SUCCESS;
-            goto TR_continue;
-        }
-        BCount = RelocExtent->extLength>>Vcb->BlockSizeBits;
-retry_2:
-        RC = UDFPrepareForReadOperation(NULL, Vcb, rLba, RelocExtent->extLength >> Vcb->BlockSizeBits);
-        if (!NT_SUCCESS(RC)) break;
-        rLba = UDFFixFPAddress(Vcb, rLba);
-        RC = UDFPhReadSynchronous(NULL, Vcb->TargetDeviceObject, Buffer, RelocExtent->extLength,
-                   ((uint64)rLba) << Vcb->BlockSizeBits, &_ReadBytes, 0);
-        Vcb->VcbState &= ~UDF_VCB_LAST_WRITE;
-        Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
-        if (!NT_SUCCESS(RC) &&
-            NT_SUCCESS(RC = UDFRecoverFromError(Vcb, FALSE, RC, rLba, BCount, &retry)) )
-            goto retry_2;
-TR_continue:
-        (*ReadBytes) += _ReadBytes;
-        if (!NT_SUCCESS(RC)) break;
-        *((uint32*)&Buffer) += RelocExtent->extLength;
-    }
-    MyFreePool__(RelocExtent_saved);
-    return RC;
+    // Delegate to the synchronous read function with NULL IrpContext
+    // This avoids the hanging issue that occurs when calling helper functions
+    // with NULL parameters that expect valid IrpContext
+    return UDFTRead(NULL, _Vcb, Buffer, Length, LBA, ReadBytes, PH_VCB_IN_RETLEN);
 } // end UDFTReadAsync()
 
 /*
-    This routine performs asynchronous low-level write
-    Based on the UDFTWrite pattern and follows UDFTReadAsync pattern
+    This routine performs low-level write (asynchronously if possible)  
+    For now, this delegates to the synchronous write function to avoid
+    hangs until true async I/O can be properly implemented with IRP context
  */
 NTSTATUS
 UDFTWriteAsync(
@@ -843,83 +785,17 @@ UDFTWriteAsync(
     )
 {
 #ifndef UDF_READ_ONLY_BUILD
-    PEXTENT_MAP RelocExtent;
-    PEXTENT_MAP RelocExtent_saved;
-    NTSTATUS RC = STATUS_SUCCESS;
-    uint32 retry = UDF_WRITE_MAX_RETRY;
-    PVCB Vcb = (PVCB)_Vcb;
-    Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
-    uint32 rLba;
-    uint32 BCount;
-
-    ASSERT(Buffer);
-
-    (*WrittenBytes) = 0;
-    BCount = Length >> Vcb->BlockSizeBits;
-
-    Vcb->VcbState |= (UDF_VCB_SKIP_EJECT_CHECK | UDF_VCB_LAST_WRITE);
-
-    RelocExtent = UDFRelocateSectors(Vcb, LBA, BCount);
-    if (!RelocExtent) {
-        if (FreeBuffer && Buffer) {
-            MyFreePool__(Buffer);
-        }
-        return STATUS_INSUFFICIENT_RESOURCES;
-    }
-    if (RelocExtent == UDF_NO_EXTENT_MAP) {
-        rLba = LBA;
-        if (rLba >= (Vcb->CDR_Mode ? Vcb->NWA : Vcb->LastLBA + 1)) {
-            if (FreeBuffer && Buffer) {
-                MyFreePool__(Buffer);
-            }
-            return STATUS_INVALID_PARAMETER;
-        }
-retry_1:
-        RC = UDFPrepareForWriteOperation(Vcb, rLba, BCount);
-        if (!NT_SUCCESS(RC)) return RC;
-        rLba = UDFFixFPAddress(Vcb, rLba);
-        RC = UDFPhWriteSynchronous(Vcb->TargetDeviceObject, Buffer, Length,
-                   ((uint64)rLba) << Vcb->BlockSizeBits, (PSIZE_T)WrittenBytes, 0);
-        Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
-        if (!NT_SUCCESS(RC) &&
-            NT_SUCCESS(RC = UDFRecoverFromError(Vcb, TRUE, RC, rLba, BCount, &retry)) )
-            goto retry_1;
-        
-        // Free buffer if requested
-        if (FreeBuffer && Buffer) {
-            MyFreePool__(Buffer);
-        }
-        
-        return RC;
-    }
-    // write according to relocation table
-    RelocExtent_saved = RelocExtent;
-    for(uint32 i=0; RelocExtent->extLength; i++, RelocExtent++) {
-        SIZE_T _WrittenBytes;
-        rLba = RelocExtent->extLocation;
-        if (rLba >= (Vcb->CDR_Mode ? Vcb->NWA : Vcb->LastLBA + 1)) {
-            RC = STATUS_INVALID_PARAMETER;
-            goto TW_continue;
-        }
-        BCount = RelocExtent->extLength>>Vcb->BlockSizeBits;
-retry_2:
-        RC = UDFPrepareForWriteOperation(Vcb, rLba, RelocExtent->extLength >> Vcb->BlockSizeBits);
-        if (!NT_SUCCESS(RC)) break;
-        rLba = UDFFixFPAddress(Vcb, rLba);
-        RC = UDFPhWriteSynchronous(Vcb->TargetDeviceObject, Buffer, RelocExtent->extLength,
-                   ((uint64)rLba) << Vcb->BlockSizeBits, &_WrittenBytes, 0);
-        Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
-        if (!NT_SUCCESS(RC) &&
-            NT_SUCCESS(RC = UDFRecoverFromError(Vcb, TRUE, RC, rLba, BCount, &retry)) )
-            goto retry_2;
-TW_continue:
-        (*WrittenBytes) += (ULONG)_WrittenBytes;
-        if (!NT_SUCCESS(RC)) break;
-        *((uint32*)&Buffer) += RelocExtent->extLength;
-    }
-    MyFreePool__(RelocExtent_saved);
+    SIZE_T _WrittenBytes = 0;
+    NTSTATUS RC;
     
-    // Free buffer if requested
+    // Delegate to the synchronous write function with NULL IrpContext
+    // This avoids the hanging issue that occurs when calling helper functions
+    // with NULL parameters that expect valid IrpContext
+    RC = UDFTWrite(NULL, _Vcb, Buffer, Length, LBA, &_WrittenBytes);
+    
+    *WrittenBytes = (ULONG)_WrittenBytes;
+    
+    // Free buffer if requested (this was missing in the sync version)
     if (FreeBuffer && Buffer) {
         MyFreePool__(Buffer);
     }
