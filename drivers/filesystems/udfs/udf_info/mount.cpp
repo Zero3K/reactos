@@ -1635,10 +1635,11 @@ err_addxsbm_1:
         uint32 available_uint32_elements = available_bitmap_bytes / sizeof(uint32);
         
         // Ensure UDFGetBitmapLen won't access beyond available uint32 elements
-        // Since UDFGetBitmapLen uses while(i<=Lim) and Lim = safe_bitmap_bits>>5,
-        // we need safe_bitmap_bits>>5 < available_uint32_elements
-        uint32 max_safe_bits = available_uint32_elements > 0 ? 
-                               (available_uint32_elements - 1) * 32 + 31 : 0;
+        // Since UDFGetBitmapLen uses while(i<=Lim) followed by i++ and Bitmap[i] access,
+        // the function can access Bitmap[Lim + 1], so we need Lim + 1 < available_uint32_elements
+        // This means safe_bitmap_bits>>5 <= available_uint32_elements - 2
+        uint32 max_safe_bits = available_uint32_elements > 1 ? 
+                               (available_uint32_elements - 2) * 32 + 31 : 0;
         uint32 safe_bitmap_bits = min(lim2, max_safe_bits);
         
         UDFPrint(("UDFAddXSpaceBitmap: numOfBits=%u, available_bytes=%u, available_uint32s=%u, max_safe_bits=%u, using safe_bits=%u\n", 
