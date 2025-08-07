@@ -822,8 +822,10 @@ UDFTReadAsync(
     RC = IoCallDriver(Vcb->TargetDeviceObject, Irp);
     
     if (RC == STATUS_PENDING) {
-        UDFPrint(("UDFTReadAsync: Operation pending - waiting for completion\n"));
-        // Wait for completion
+        UDFPrint(("UDFTReadAsync: Operation pending - returning STATUS_PENDING\n"));
+        // For true async I/O, we would return STATUS_PENDING here
+        // But since the current UDF code expects synchronous completion,
+        // we wait for completion to maintain compatibility
         KeWaitForSingleObject(&AsyncContext->event, Executive, KernelMode, FALSE, NULL);
         RC = AsyncContext->IosbToUse.Status;
         *ReadBytes = AsyncContext->IosbToUse.Information;
@@ -832,6 +834,8 @@ UDFTReadAsync(
         *ReadBytes = AsyncContext->IosbToUse.Information;
     }
     
+    // Clean up IRP - it's safe since we used STATUS_MORE_PROCESSING_REQUIRED
+    IoFreeIrp(Irp);
     MyFreePool__(AsyncContext);
     return RC;
 } // end UDFTReadAsync()
@@ -910,8 +914,10 @@ UDFTWriteAsync(
     RC = IoCallDriver(Vcb->TargetDeviceObject, Irp);
     
     if (RC == STATUS_PENDING) {
-        UDFPrint(("UDFTWriteAsync: Operation pending - waiting for completion\n"));
-        // Wait for completion
+        UDFPrint(("UDFTWriteAsync: Operation pending - returning STATUS_PENDING\n"));
+        // For true async I/O, we would return STATUS_PENDING here
+        // But since the current UDF code expects synchronous completion,
+        // we wait for completion to maintain compatibility
         KeWaitForSingleObject(&AsyncContext->event, Executive, KernelMode, FALSE, NULL);
         RC = AsyncContext->IosbToUse.Status;
         *WrittenBytes = (ULONG)AsyncContext->IosbToUse.Information;
@@ -925,6 +931,8 @@ UDFTWriteAsync(
         DbgFreePool(Buffer);
     }
     
+    // Clean up IRP - it's safe since we used STATUS_MORE_PROCESSING_REQUIRED
+    IoFreeIrp(Irp);
     MyFreePool__(AsyncContext);
     return RC;
 #else //UDF_READ_ONLY_BUILD

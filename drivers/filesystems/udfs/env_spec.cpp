@@ -124,7 +124,7 @@ UDFSimpleAsyncCompletionRoutine(
     IN PVOID Contxt
     )
 {
-    UDFPrint(("UDFSimpleAsyncCompletionRoutine ctx=%x\n", Contxt));
+    UDFPrint(("UDFSimpleAsyncCompletionRoutine ctx=%x, status=%x\n", Contxt, Irp->IoStatus.Status));
     PUDF_PH_CALL_CONTEXT Context = (PUDF_PH_CALL_CONTEXT)Contxt;
 
     // Store the I/O status from the IRP
@@ -135,6 +135,8 @@ UDFSimpleAsyncCompletionRoutine(
 
     UNREFERENCED_PARAMETER(DeviceObject);
     
+    // Return STATUS_MORE_PROCESSING_REQUIRED to prevent IRP completion
+    // The caller will free the IRP when ready
     return STATUS_MORE_PROCESSING_REQUIRED;
 } // end UDFSimpleAsyncCompletionRoutine()
 
