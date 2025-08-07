@@ -430,45 +430,7 @@ try_exit: NOTHING;
     return(RC);
 } // end UDFPhWriteSynchronous()
 
-#if 0
-NTSTATUS
-UDFPhWriteVerifySynchronous(
-    PDEVICE_OBJECT  DeviceObject,   // the physical device object
-    PVOID           Buffer,
-    SIZE_T          Length,
-    LONGLONG        Offset,
-    PSIZE_T         WrittenBytes,
-    ULONG           Flags
-    )
-{
-    NTSTATUS RC;
-    //PUCHAR v_buff = NULL;
-    //ULONG ReadBytes;
 
-    RC = UDFPhWriteSynchronous(DeviceObject, Buffer, Length, Offset, WrittenBytes, Flags);
-/*
-    if (!Verify)
-        return RC;
-    v_buff = (PUCHAR)DbgAllocatePoolWithTag(NonPagedPool, Length, 'bNWD');
-    if (!v_buff)
-        return RC;
-    RC = UDFPhReadSynchronous(DeviceObject, v_buff, Length, Offset, &ReadBytes, Flags);
-    if (!NT_SUCCESS(RC)) {
-        BrutePoint();
-        DbgFreePool(v_buff);
-        return RC;
-    }
-    if (RtlCompareMemory(v_buff, Buffer, ReadBytes) == Length) {
-        DbgFreePool(v_buff);
-        return RC;
-    }
-    BrutePoint();
-    DbgFreePool(v_buff);
-    return STATUS_LOST_WRITEBEHIND_DATA;
-*/
-    return RC;
-} // end UDFPhWriteVerifySynchronous()
-#endif //0
 
 NTSTATUS
 NTAPI

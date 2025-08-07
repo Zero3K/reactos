@@ -35,15 +35,6 @@ extern NTSTATUS NTAPI UDFPhWriteSynchronous(
                    LONGLONG        Offset,
                    PSIZE_T         WrittenBytes,
                    ULONG           Flags);
-/*
-extern NTSTATUS UDFPhWriteVerifySynchronous(
-                   PDEVICE_OBJECT  DeviceObject,   // the physical device object
-                   PVOID           Buffer,
-                   SIZE_T          Length,
-                   LONGLONG        Offset,
-                   PSIZE_T         WrittenBytes,
-                   ULONG           Flags);
-*/
 #define UDFPhWriteVerifySynchronous UDFPhWriteSynchronous
 
 NTSTATUS
