@@ -1628,13 +1628,16 @@ err_addxsbm_1:
         // Calculate the maximum number of bits that can be safely accessed from the available buffer
         // This prevents memory corruption while handling legitimate UDF structures where numOfBits
         // may be larger than the data actually stored in this extent
+        // UDFGetBitmapLen accesses bitmap data in uint32 chunks, so we need to ensure the buffer
+        // has enough uint32 elements to prevent buffer overruns
         uint32 available_bitmap_bytes = (uint32)(Length > sizeof(SPACE_BITMAP_DESC) ? 
                                                  Length - sizeof(SPACE_BITMAP_DESC) : 0);
-        uint32 max_safe_bits = available_bitmap_bytes * 8;
+        uint32 available_uint32_elements = available_bitmap_bytes / sizeof(uint32);
+        uint32 max_safe_bits = available_uint32_elements * 32; // 32 bits per uint32
         uint32 safe_bitmap_bits = min(lim2, max_safe_bits);
         
-        UDFPrint(("UDFAddXSpaceBitmap: numOfBits=%u, available_bytes=%u, using safe_bits=%u\n", 
-                 lim2, available_bitmap_bytes, safe_bitmap_bits));
+        UDFPrint(("UDFAddXSpaceBitmap: numOfBits=%u, available_bytes=%u, available_uint32s=%u, using safe_bits=%u\n", 
+                 lim2, available_bitmap_bytes, available_uint32_elements, safe_bitmap_bits));
         
         lim = min(i + (safe_bitmap_bits << Vcb->LB2B_Bits), Vcb->FSBM_BitCount);
         j = 0;
