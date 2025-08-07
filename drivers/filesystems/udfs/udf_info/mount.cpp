@@ -1628,16 +1628,21 @@ err_addxsbm_1:
         // Calculate the maximum number of bits that can be safely accessed from the available buffer
         // This prevents memory corruption while handling legitimate UDF structures where numOfBits
         // may be larger than the data actually stored in this extent
-        // UDFGetBitmapLen accesses bitmap data in uint32 chunks, so we need to ensure the buffer
-        // has enough uint32 elements to prevent buffer overruns
+        // UDFGetBitmapLen accesses bitmap data in uint32 chunks using array indices, and uses 
+        // while(i<=Lim) where Lim = safe_bitmap_bits>>5, so we must ensure Lim < available_uint32_elements
         uint32 available_bitmap_bytes = (uint32)(Length > sizeof(SPACE_BITMAP_DESC) ? 
                                                  Length - sizeof(SPACE_BITMAP_DESC) : 0);
         uint32 available_uint32_elements = available_bitmap_bytes / sizeof(uint32);
-        uint32 max_safe_bits = available_uint32_elements * 32; // 32 bits per uint32
+        
+        // Ensure UDFGetBitmapLen won't access beyond available uint32 elements
+        // Since UDFGetBitmapLen uses while(i<=Lim) and Lim = safe_bitmap_bits>>5,
+        // we need safe_bitmap_bits>>5 < available_uint32_elements
+        uint32 max_safe_bits = available_uint32_elements > 0 ? 
+                               (available_uint32_elements - 1) * 32 + 31 : 0;
         uint32 safe_bitmap_bits = min(lim2, max_safe_bits);
         
-        UDFPrint(("UDFAddXSpaceBitmap: numOfBits=%u, available_bytes=%u, available_uint32s=%u, using safe_bits=%u\n", 
-                 lim2, available_bitmap_bytes, available_uint32_elements, safe_bitmap_bits));
+        UDFPrint(("UDFAddXSpaceBitmap: numOfBits=%u, available_bytes=%u, available_uint32s=%u, max_safe_bits=%u, using safe_bits=%u\n", 
+                 lim2, available_bitmap_bytes, available_uint32_elements, max_safe_bits, safe_bitmap_bits));
         
         lim = min(i + (safe_bitmap_bits << Vcb->LB2B_Bits), Vcb->FSBM_BitCount);
         j = 0;
