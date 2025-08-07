@@ -2417,6 +2417,7 @@ UDFResizeExtent(
                             UDFMarkSpaceAsXXXNoProtect(Vcb, 0, &(ExtInfo->Mapping[i]), AS_USED); // mark as used
                         }*/
                         AdPrint(("Resize reloc last Not-Rec (5)\n"));
+                        RtlZeroMemory(&TmpExtInf, sizeof(EXTENT_INFO));
                         TmpExtInf.Mapping = (PEXTENT_MAP)MyAllocatePoolTag__(NonPagedPool , (i+1)*sizeof(EXTENT_MAP),
                                                                            MEM_EXTMAP_TAG);
                         if (!TmpExtInf.Mapping) {
