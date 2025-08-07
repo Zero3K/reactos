@@ -359,12 +359,6 @@ UDFVerifyVolume(
             if (!NT_SUCCESS(RC)) try_return(RC);
 
             // Windows Cache Manager is initialized automatically - no manual init needed
-#ifdef UDF_ASYNC_IO
-            // Configure cache for asynchronous I/O operations
-            // UDFTWriteAsync, UDFTReadAsync are available
-#else  //UDF_ASYNC_IO
-            // Synchronous I/O mode - async functions not available
-#endif //UDF_ASYNC_IO
             RC = STATUS_SUCCESS;
 
             UDFPrint(("UDFVerifyVolume: Modified=%d\n", Vcb->Modified));
@@ -425,11 +419,6 @@ try_exit: NOTHING;
             UDFPrint(("    !!! VerifyVolume - QUICK REMOUNT !!!\n"));
             // Initialize internal cache
             // Windows Cache Manager handles initialization automatically
-#ifdef UDF_ASYNC_IO
-            // Configure for asynchronous I/O with UDFTWriteAsync, UDFTReadAsync
-#else  //UDF_ASYNC_IO
-            // Configure for synchronous I/O only
-#endif //UDF_ASYNC_IO
             CacheInitialized = TRUE;
             RC = STATUS_SUCCESS;
             if (NT_SUCCESS(RC)) {
@@ -439,11 +428,6 @@ try_exit: NOTHING;
             }
             if (NT_SUCCESS(RC)) {
                 // Windows Cache Manager handles cache initialization and mode automatically
-#ifdef UDF_ASYNC_IO
-                // Enable asynchronous I/O operations with UDFTWriteAsync, UDFTReadAsync
-#else  //UDF_ASYNC_IO
-                // Use synchronous I/O operations only
-#endif //UDF_ASYNC_IO
                 
                 // we can't record ACL on old format disks
                 if (!UDFNtAclSupported(Vcb)) {

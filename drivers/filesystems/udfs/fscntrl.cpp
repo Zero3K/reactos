@@ -466,11 +466,6 @@ UDFMountVolume(
 
         ASSERT(!Vcb->Modified);
         // Windows Cache Manager handles flags automatically
-#ifdef UDF_ASYNC_IO
-        // Configure cache for asynchronous I/O with UDFTWriteAsync, UDFTReadAsync
-#else  //UDF_ASYNC_IO
-        // Configure cache for synchronous I/O only
-#endif //UDF_ASYNC_IO
 
         if (!NT_SUCCESS(RC)) {
 
