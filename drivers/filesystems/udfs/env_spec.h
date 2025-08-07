@@ -90,6 +90,33 @@ extern NTSTATUS UDFTWriteAsync(
     OUT PULONG WrittenBytes,
     IN BOOLEAN FreeBuffer);
 
+#ifdef UDF_ASYNC_IO
+// Optimized asynchronous I/O functions for better performance
+extern NTSTATUS UDFPhReadOptimizedAsync(
+    IN PIRP_CONTEXT IrpContext,
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PVOID Buffer,
+    IN SIZE_T Length,
+    IN LONGLONG Offset,
+    OUT PSIZE_T ReadBytes,
+    IN SIZE_T OriginalLength);
+
+extern NTSTATUS UDFPhWriteOptimizedAsync(
+    IN PIRP_CONTEXT IrpContext,
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PVOID Buffer,
+    IN SIZE_T Length,
+    IN LONGLONG Offset,
+    OUT PSIZE_T WrittenBytes,
+    IN BOOLEAN FreeBuffer,
+    IN SIZE_T OriginalLength);
+
+extern NTSTATUS NTAPI UDFOptimizedAsyncCompletionRoutine(
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PIRP Irp,
+    IN PVOID Context);
+#endif
+
 VOID
 UDFNotifyFullReportChange(
     PVCB Vcb,
