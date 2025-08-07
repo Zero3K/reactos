@@ -820,6 +820,108 @@ TR_continue:
     return RC;
 } // end UDFTReadAsync()
 
+/*
+    This routine performs asynchronous low-level write
+    Based on the UDFTWrite pattern and follows UDFTReadAsync pattern
+ */
+NTSTATUS
+UDFTWriteAsync(
+    IN PVOID _Vcb,
+    IN PVOID Buffer,     // Target buffer
+    IN ULONG Length,
+    IN ULONG LBA,
+    OUT PULONG WrittenBytes,
+    IN BOOLEAN FreeBuffer
+    )
+{
+#ifndef UDF_READ_ONLY_BUILD
+    PEXTENT_MAP RelocExtent;
+    PEXTENT_MAP RelocExtent_saved;
+    NTSTATUS RC = STATUS_SUCCESS;
+    uint32 retry = UDF_WRITE_MAX_RETRY;
+    PVCB Vcb = (PVCB)_Vcb;
+    Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
+    uint32 rLba;
+    uint32 BCount;
+
+    ASSERT(Buffer);
+
+    (*WrittenBytes) = 0;
+    BCount = Length >> Vcb->BlockSizeBits;
+
+    Vcb->VcbState |= (UDF_VCB_SKIP_EJECT_CHECK | UDF_VCB_LAST_WRITE);
+
+    RelocExtent = UDFRelocateSectors(Vcb, LBA, BCount);
+    if (!RelocExtent) {
+        if (FreeBuffer && Buffer) {
+            MyFreePool__(Buffer);
+        }
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    if (RelocExtent == UDF_NO_EXTENT_MAP) {
+        rLba = LBA;
+        if (rLba >= (Vcb->CDR_Mode ? Vcb->NWA : Vcb->LastLBA + 1)) {
+            if (FreeBuffer && Buffer) {
+                MyFreePool__(Buffer);
+            }
+            return STATUS_INVALID_PARAMETER;
+        }
+retry_1:
+        RC = UDFPrepareForWriteOperation(Vcb, rLba, BCount);
+        if (!NT_SUCCESS(RC)) return RC;
+        rLba = UDFFixFPAddress(Vcb, rLba);
+        RC = UDFPhWriteSynchronous(Vcb->TargetDeviceObject, Buffer, Length,
+                   ((uint64)rLba) << Vcb->BlockSizeBits, (PSIZE_T)WrittenBytes, 0);
+        Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
+        if (!NT_SUCCESS(RC) &&
+            NT_SUCCESS(RC = UDFRecoverFromError(Vcb, TRUE, RC, rLba, BCount, &retry)) )
+            goto retry_1;
+        
+        // Free buffer if requested
+        if (FreeBuffer && Buffer) {
+            MyFreePool__(Buffer);
+        }
+        
+        return RC;
+    }
+    // write according to relocation table
+    RelocExtent_saved = RelocExtent;
+    for(uint32 i=0; RelocExtent->extLength; i++, RelocExtent++) {
+        SIZE_T _WrittenBytes;
+        rLba = RelocExtent->extLocation;
+        if (rLba >= (Vcb->CDR_Mode ? Vcb->NWA : Vcb->LastLBA + 1)) {
+            RC = STATUS_INVALID_PARAMETER;
+            goto TW_continue;
+        }
+        BCount = RelocExtent->extLength>>Vcb->BlockSizeBits;
+retry_2:
+        RC = UDFPrepareForWriteOperation(Vcb, rLba, RelocExtent->extLength >> Vcb->BlockSizeBits);
+        if (!NT_SUCCESS(RC)) break;
+        rLba = UDFFixFPAddress(Vcb, rLba);
+        RC = UDFPhWriteSynchronous(Vcb->TargetDeviceObject, Buffer, RelocExtent->extLength,
+                   ((uint64)rLba) << Vcb->BlockSizeBits, &_WrittenBytes, 0);
+        Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
+        if (!NT_SUCCESS(RC) &&
+            NT_SUCCESS(RC = UDFRecoverFromError(Vcb, TRUE, RC, rLba, BCount, &retry)) )
+            goto retry_2;
+TW_continue:
+        (*WrittenBytes) += (ULONG)_WrittenBytes;
+        if (!NT_SUCCESS(RC)) break;
+        *((uint32*)&Buffer) += RelocExtent->extLength;
+    }
+    MyFreePool__(RelocExtent_saved);
+    
+    // Free buffer if requested
+    if (FreeBuffer && Buffer) {
+        MyFreePool__(Buffer);
+    }
+    
+    return RC;
+#else //UDF_READ_ONLY_BUILD
+    return STATUS_ACCESS_DENIED;
+#endif //UDF_READ_ONLY_BUILD
+} // end UDFTWriteAsync()
+
 #endif //UDF_ASYNC_IO
 
 /*
