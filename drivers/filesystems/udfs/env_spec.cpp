@@ -112,86 +112,31 @@ UDFSyncCompletionRoutine2(
 */
 
 /*
- * True async I/O completion routine for asynchronous operations
- * This routine handles completion of truly asynchronous I/O operations
- * and does not block the calling thread
+ * Simple async I/O completion routine following FastFAT pattern
+ * This routine handles completion of asynchronous I/O operations
+ * and signals completion events for callers that need to wait
  */
 NTSTATUS
 NTAPI
-UDFTrueAsyncCompletionRoutine(
+UDFSimpleAsyncCompletionRoutine(
     IN PDEVICE_OBJECT DeviceObject,
     IN PIRP Irp,
     IN PVOID Contxt
     )
 {
-    UDFPrint(("UDFTrueAsyncCompletionRoutine ctx=%x\n", Contxt));
-    PUDF_ASYNC_IO_CONTEXT AsyncContext = (PUDF_ASYNC_IO_CONTEXT)Contxt;
-    PMDL Mdl, NextMdl;
-    PVOID SystemBuffer = NULL;
+    UDFPrint(("UDFSimpleAsyncCompletionRoutine ctx=%x\n", Contxt));
+    PUDF_PH_CALL_CONTEXT Context = (PUDF_PH_CALL_CONTEXT)Contxt;
 
-    // Store the I/O status
-    AsyncContext->IoStatus = Irp->IoStatus;
+    // Store the I/O status from the IRP
+    Context->IosbToUse = Irp->IoStatus;
     
-    // Set result bytes if requested
-    if (AsyncContext->ResultBytes) {
-        *AsyncContext->ResultBytes = Irp->IoStatus.Information;
-    }
+    // Signal completion event for any waiting threads
+    KeSetEvent(&Context->event, IO_NO_INCREMENT, FALSE);
 
-    // For read operations, copy data from temp buffer to original buffer using MDL
-    if (!AsyncContext->IsWrite && NT_SUCCESS(Irp->IoStatus.Status) && 
-        AsyncContext->TempBuffer && AsyncContext->UserMdl) {
-        
-        // Get system address for the user buffer MDL (safe at DISPATCH_LEVEL)
-        SystemBuffer = MmGetSystemAddressForMdlSafe(AsyncContext->UserMdl, HighPagePriority);
-        if (SystemBuffer) {
-            SIZE_T BytesToCopy = min(AsyncContext->Length, Irp->IoStatus.Information);
-            RtlCopyMemory(SystemBuffer, AsyncContext->TempBuffer, BytesToCopy);
-            UDFPrint(("UDFTrueAsyncCompletionRoutine: Copied %x bytes to user buffer\n", BytesToCopy));
-        } else {
-            UDFPrint(("UDFTrueAsyncCompletionRoutine: Failed to get system address for user MDL\n"));
-        }
-    }
-
-    // Unlock and free user MDL if we created it
-    if (AsyncContext->UserMdl) {
-        MmPrint(("    True Async Unlock User MDL=%x\n", AsyncContext->UserMdl));
-        MmUnlockPages(AsyncContext->UserMdl);
-        IoFreeMdl(AsyncContext->UserMdl);
-        AsyncContext->UserMdl = NULL;
-    }
-
-    // Clean up IRP MDL (for temporary buffer)
-    Mdl = Irp->MdlAddress;
-    while(Mdl) {
-        MmPrint(("    True Async Unlock IRP MDL=%x\n", Mdl));
-        NextMdl = Mdl->Next;
-        IoFreeMdl(Mdl);
-        Mdl = NextMdl;
-    }
+    UNREFERENCED_PARAMETER(DeviceObject);
     
-    Irp->MdlAddress = NULL;
-    IoFreeIrp(Irp);
-
-    // Free temporary buffer
-    if (AsyncContext->TempBuffer) {
-        DbgFreePool(AsyncContext->TempBuffer);
-    }
-
-    // Free original buffer if requested and this was a write operation
-    if (AsyncContext->FreeBuffer && AsyncContext->Buffer && AsyncContext->IsWrite) {
-        DbgFreePool(AsyncContext->Buffer);
-    }
-
-    // Call the original completion routine if provided
-    if (AsyncContext->CompletionRoutine) {
-        AsyncContext->CompletionRoutine(DeviceObject, AsyncContext->OriginalIrp, AsyncContext->CompletionContext);
-    }
-
-    // Free the async context
-    MyFreePool__(AsyncContext);
-
     return STATUS_MORE_PROCESSING_REQUIRED;
-} // end UDFTrueAsyncCompletionRoutine()
+} // end UDFSimpleAsyncCompletionRoutine()
 
 /*
 

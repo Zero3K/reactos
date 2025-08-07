@@ -749,14 +749,14 @@ try_exit: NOTHING;
 
 #ifdef UDF_ASYNC_IO
 /*
-    This routine performs low-level read asynchronously with true async I/O
-    Returns immediately without waiting for completion
+ * Simple async read following FastFAT pattern
+ * Returns STATUS_PENDING for async operations or completed status for immediate completion
  */
 NTSTATUS
 UDFTReadAsync(
     IN void* _Vcb,
-    IN void* _WContext,  // Not used in true async implementation
-    IN void* Buffer,     // Target buffer
+    IN void* _WContext,
+    IN void* Buffer,
     IN SIZE_T Length,
     IN uint32 LBA,
     OUT PSIZE_T ReadBytes
@@ -764,122 +764,81 @@ UDFTReadAsync(
 {
     NTSTATUS RC = STATUS_SUCCESS;
     PVCB Vcb = (PVCB)_Vcb;
-    PUDF_ASYNC_IO_CONTEXT AsyncContext = NULL;
+    PIRP_CONTEXT IrpContext = NULL;
+    PUDF_PH_CALL_CONTEXT AsyncContext = NULL;
     PIRP Irp = NULL;
     PIO_STACK_LOCATION IrpSp;
     LARGE_INTEGER Offset;
-    PVOID IoBuf = NULL;
     
     UDFPrint(("UDFTReadAsync: LBA %x, Length %x\n", LBA, Length));
     
-    // Allocate async context
-    AsyncContext = (PUDF_ASYNC_IO_CONTEXT)MyAllocatePool__(NonPagedPool, sizeof(UDF_ASYNC_IO_CONTEXT));
+    // Allocate context for async operation
+    AsyncContext = (PUDF_PH_CALL_CONTEXT)MyAllocatePool__(NonPagedPool, sizeof(UDF_PH_CALL_CONTEXT));
     if (!AsyncContext) {
-        UDFPrint(("UDFTReadAsync: Failed to allocate async context\n"));
+        UDFPrint(("UDFTReadAsync: Failed to allocate context\n"));
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     
-    // Initialize the async context
-    RtlZeroMemory(AsyncContext, sizeof(UDF_ASYNC_IO_CONTEXT));
-    AsyncContext->Vcb = Vcb;
-    AsyncContext->Buffer = Buffer;  // Original buffer
-    AsyncContext->Length = Length;
-    AsyncContext->LBA = LBA;
-    AsyncContext->ResultBytes = ReadBytes;
-    AsyncContext->IsWrite = FALSE;
-    AsyncContext->FreeBuffer = FALSE;
-    AsyncContext->UserMdl = NULL;
-    
-    // Create and lock MDL for user buffer to safely access it at DISPATCH_LEVEL
-    __try {
-        AsyncContext->UserMdl = IoAllocateMdl(Buffer, Length, FALSE, FALSE, NULL);
-        if (!AsyncContext->UserMdl) {
-            UDFPrint(("UDFTReadAsync: Failed to allocate user MDL\n"));
-            MyFreePool__(AsyncContext);
-            return STATUS_INSUFFICIENT_RESOURCES;
-        }
-        
-        // Lock the user buffer pages in memory
-        MmProbeAndLockPages(AsyncContext->UserMdl, UserMode, IoWriteAccess);
-        UDFPrint(("UDFTReadAsync: Locked user buffer pages\n"));
-        
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        UDFPrint(("UDFTReadAsync: Exception while locking user buffer\n"));
-        if (AsyncContext->UserMdl) {
-            IoFreeMdl(AsyncContext->UserMdl);
-        }
-        MyFreePool__(AsyncContext);
-        return STATUS_INVALID_USER_BUFFER;
-    }
+    // Initialize context
+    RtlZeroMemory(AsyncContext, sizeof(UDF_PH_CALL_CONTEXT));
+    KeInitializeEvent(&AsyncContext->event, NotificationEvent, FALSE);
+    AsyncContext->IosbToUse.Status = STATUS_SUCCESS;
+    AsyncContext->IosbToUse.Information = 0;
     
     // Calculate physical offset
     Offset.QuadPart = ((LONGLONG)LBA) << Vcb->BlockSizeBits;
-    
-    // Allocate temporary buffer for the operation
-    IoBuf = DbgAllocatePoolWithTag(NonPagedPool, Length, 'bNWD');
-    if (!IoBuf) {
-        UDFPrint(("UDFTReadAsync: Failed to allocate I/O buffer\n"));
-        MmUnlockPages(AsyncContext->UserMdl);
-        IoFreeMdl(AsyncContext->UserMdl);
-        MyFreePool__(AsyncContext);
-        return STATUS_INSUFFICIENT_RESOURCES;
-    }
-    AsyncContext->TempBuffer = IoBuf;  // Store temp buffer for cleanup
     
     // Build asynchronous read IRP
     Irp = IoBuildAsynchronousFsdRequest(
         IRP_MJ_READ,
         Vcb->TargetDeviceObject,
-        IoBuf,
+        Buffer,
         Length,
         &Offset,
-        &AsyncContext->IoStatus
+        &AsyncContext->IosbToUse
     );
     
     if (!Irp) {
         UDFPrint(("UDFTReadAsync: Failed to build async IRP\n"));
-        DbgFreePool(IoBuf);
-        MmUnlockPages(AsyncContext->UserMdl);
-        IoFreeMdl(AsyncContext->UserMdl);
         MyFreePool__(AsyncContext);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     
-    // Set up completion routine for true async operation
+    // Set up completion routine
     IoSetCompletionRoutine(
         Irp,
-        UDFTrueAsyncCompletionRoutine,
+        UDFSimpleAsyncCompletionRoutine,
         AsyncContext,
         TRUE,  // InvokeOnSuccess
-        TRUE,  // InvokeOnError  
+        TRUE,  // InvokeOnError
         TRUE   // InvokeOnCancel
     );
     
-    // Set IRP stack location flags
+    // Set IRP flags
     IrpSp = IoGetNextIrpStackLocation(Irp);
     SetFlag(IrpSp->Flags, SL_OVERRIDE_VERIFY_VOLUME);
     
-    // Initialize ReadBytes to 0 before async operation
-    *ReadBytes = 0;
-    
-    // Submit the IRP and return immediately (true async behavior)
+    // Submit the IRP
     RC = IoCallDriver(Vcb->TargetDeviceObject, Irp);
     
-    // For async operations, we expect STATUS_PENDING or immediate completion
     if (RC == STATUS_PENDING) {
-        UDFPrint(("UDFTReadAsync: Operation pending (true async)\n"));
-        RC = STATUS_SUCCESS; // Return success for async operation
+        UDFPrint(("UDFTReadAsync: Operation pending - waiting for completion\n"));
+        // Wait for completion
+        KeWaitForSingleObject(&AsyncContext->event, Executive, KernelMode, FALSE, NULL);
+        RC = AsyncContext->IosbToUse.Status;
+        *ReadBytes = AsyncContext->IosbToUse.Information;
     } else {
         UDFPrint(("UDFTReadAsync: Operation completed immediately with status %x\n", RC));
-        // Even if completed immediately, let completion routine handle cleanup
+        *ReadBytes = AsyncContext->IosbToUse.Information;
     }
     
+    MyFreePool__(AsyncContext);
     return RC;
 } // end UDFTReadAsync()
 
 /*
-    This routine performs low-level write asynchronously with true async I/O
-    Returns immediately without waiting for completion
+ * Simple async write following FastFAT pattern
+ * Returns STATUS_PENDING for async operations or completed status for immediate completion
  */
 NTSTATUS
 UDFTWriteAsync(
@@ -894,128 +853,79 @@ UDFTWriteAsync(
 #ifndef UDF_READ_ONLY_BUILD
     NTSTATUS RC = STATUS_SUCCESS;
     PVCB Vcb = (PVCB)_Vcb;
-    PUDF_ASYNC_IO_CONTEXT AsyncContext = NULL;
+    PUDF_PH_CALL_CONTEXT AsyncContext = NULL;
     PIRP Irp = NULL;
     PIO_STACK_LOCATION IrpSp;
     LARGE_INTEGER Offset;
-    PVOID IoBuf = NULL;
     
     UDFPrint(("UDFTWriteAsync: LBA %x, Length %x\n", LBA, Length));
     
-    // Allocate async context
-    AsyncContext = (PUDF_ASYNC_IO_CONTEXT)MyAllocatePool__(NonPagedPool, sizeof(UDF_ASYNC_IO_CONTEXT));
+    // Allocate context for async operation
+    AsyncContext = (PUDF_PH_CALL_CONTEXT)MyAllocatePool__(NonPagedPool, sizeof(UDF_PH_CALL_CONTEXT));
     if (!AsyncContext) {
-        UDFPrint(("UDFTWriteAsync: Failed to allocate async context\n"));
+        UDFPrint(("UDFTWriteAsync: Failed to allocate context\n"));
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     
-    // Initialize the async context
-    RtlZeroMemory(AsyncContext, sizeof(UDF_ASYNC_IO_CONTEXT));
-    AsyncContext->Vcb = Vcb;
-    AsyncContext->Buffer = Buffer;  // Original buffer
-    AsyncContext->Length = Length;
-    AsyncContext->LBA = LBA;
-    AsyncContext->ResultBytes = (PSIZE_T)WrittenBytes; // Cast for compatibility
-    AsyncContext->IsWrite = TRUE;
-    AsyncContext->FreeBuffer = FreeBuffer;
-    AsyncContext->UserMdl = NULL;
-    
-    // For write operations, create MDL for user buffer to safely access it at DISPATCH_LEVEL
-    __try {
-        AsyncContext->UserMdl = IoAllocateMdl(Buffer, Length, FALSE, FALSE, NULL);
-        if (!AsyncContext->UserMdl) {
-            UDFPrint(("UDFTWriteAsync: Failed to allocate user MDL\n"));
-            MyFreePool__(AsyncContext);
-            return STATUS_INSUFFICIENT_RESOURCES;
-        }
-        
-        // Lock the user buffer pages in memory for read access
-        MmProbeAndLockPages(AsyncContext->UserMdl, UserMode, IoReadAccess);
-        UDFPrint(("UDFTWriteAsync: Locked user buffer pages\n"));
-        
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        UDFPrint(("UDFTWriteAsync: Exception while locking user buffer\n"));
-        if (AsyncContext->UserMdl) {
-            IoFreeMdl(AsyncContext->UserMdl);
-        }
-        MyFreePool__(AsyncContext);
-        return STATUS_INVALID_USER_BUFFER;
-    }
+    // Initialize context
+    RtlZeroMemory(AsyncContext, sizeof(UDF_PH_CALL_CONTEXT));
+    KeInitializeEvent(&AsyncContext->event, NotificationEvent, FALSE);
+    AsyncContext->IosbToUse.Status = STATUS_SUCCESS;
+    AsyncContext->IosbToUse.Information = 0;
     
     // Calculate physical offset
     Offset.QuadPart = ((LONGLONG)LBA) << Vcb->BlockSizeBits;
-    
-    // Allocate and copy to temporary buffer for the operation
-    IoBuf = DbgAllocatePool(NonPagedPool, Length);
-    if (!IoBuf) {
-        UDFPrint(("UDFTWriteAsync: Failed to allocate I/O buffer\n"));
-        MmUnlockPages(AsyncContext->UserMdl);
-        IoFreeMdl(AsyncContext->UserMdl);
-        MyFreePool__(AsyncContext);
-        return STATUS_INSUFFICIENT_RESOURCES;
-    }
-    
-    // Use safe method to copy from locked user buffer
-    PVOID SystemBuffer = MmGetSystemAddressForMdlSafe(AsyncContext->UserMdl, HighPagePriority);
-    if (!SystemBuffer) {
-        UDFPrint(("UDFTWriteAsync: Failed to get system address for user buffer\n"));
-        DbgFreePool(IoBuf);
-        MmUnlockPages(AsyncContext->UserMdl);
-        IoFreeMdl(AsyncContext->UserMdl);
-        MyFreePool__(AsyncContext);
-        return STATUS_INSUFFICIENT_RESOURCES;
-    }
-    RtlCopyMemory(IoBuf, SystemBuffer, Length);
-    AsyncContext->TempBuffer = IoBuf;  // Store temp buffer for cleanup
     
     // Build asynchronous write IRP
     Irp = IoBuildAsynchronousFsdRequest(
         IRP_MJ_WRITE,
         Vcb->TargetDeviceObject,
-        IoBuf,
+        Buffer,
         Length,
         &Offset,
-        &AsyncContext->IoStatus
+        &AsyncContext->IosbToUse
     );
     
     if (!Irp) {
         UDFPrint(("UDFTWriteAsync: Failed to build async IRP\n"));
-        DbgFreePool(IoBuf);
-        MmUnlockPages(AsyncContext->UserMdl);
-        IoFreeMdl(AsyncContext->UserMdl);
         MyFreePool__(AsyncContext);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     
-    // Set up completion routine for true async operation
+    // Set up completion routine
     IoSetCompletionRoutine(
         Irp,
-        UDFTrueAsyncCompletionRoutine,
+        UDFSimpleAsyncCompletionRoutine,
         AsyncContext,
         TRUE,  // InvokeOnSuccess
         TRUE,  // InvokeOnError
         TRUE   // InvokeOnCancel
     );
     
-    // Set IRP stack location flags
+    // Set IRP flags
     IrpSp = IoGetNextIrpStackLocation(Irp);
     SetFlag(IrpSp->Flags, SL_OVERRIDE_VERIFY_VOLUME);
     
-    // Initialize WrittenBytes to 0 before async operation
-    *WrittenBytes = 0;
-    
-    // Submit the IRP and return immediately (true async behavior)
+    // Submit the IRP
     RC = IoCallDriver(Vcb->TargetDeviceObject, Irp);
     
-    // For async operations, we expect STATUS_PENDING or immediate completion
     if (RC == STATUS_PENDING) {
-        UDFPrint(("UDFTWriteAsync: Operation pending (true async)\n"));
-        RC = STATUS_SUCCESS; // Return success for async operation
+        UDFPrint(("UDFTWriteAsync: Operation pending - waiting for completion\n"));
+        // Wait for completion
+        KeWaitForSingleObject(&AsyncContext->event, Executive, KernelMode, FALSE, NULL);
+        RC = AsyncContext->IosbToUse.Status;
+        *WrittenBytes = (ULONG)AsyncContext->IosbToUse.Information;
     } else {
         UDFPrint(("UDFTWriteAsync: Operation completed immediately with status %x\n", RC));
-        // Even if completed immediately, let completion routine handle cleanup
+        *WrittenBytes = (ULONG)AsyncContext->IosbToUse.Information;
     }
     
+    // Free buffer if requested
+    if (FreeBuffer && Buffer) {
+        DbgFreePool(Buffer);
+    }
+    
+    MyFreePool__(AsyncContext);
     return RC;
 #else //UDF_READ_ONLY_BUILD
     return STATUS_ACCESS_DENIED;

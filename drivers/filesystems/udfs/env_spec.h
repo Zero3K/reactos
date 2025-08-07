@@ -109,10 +109,10 @@ NTSTATUS NTAPI UDFSyncCompletionRoutine2(IN PDEVICE_OBJECT DeviceObject,
                                          IN PIRP Irp,
                                          IN PVOID Contxt);
 
-// Async I/O completion routine for true asynchronous operations
-NTSTATUS NTAPI UDFTrueAsyncCompletionRoutine(IN PDEVICE_OBJECT DeviceObject,
-                                             IN PIRP Irp,
-                                             IN PVOID Contxt);
+// Simple async I/O completion routine following FastFAT pattern
+NTSTATUS NTAPI UDFSimpleAsyncCompletionRoutine(IN PDEVICE_OBJECT DeviceObject,
+                                               IN PIRP Irp,
+                                               IN PVOID Contxt);
 
 #define UDFGetDevType(DevObj)    (DevObj->DeviceType)
 
