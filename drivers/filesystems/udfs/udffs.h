@@ -36,7 +36,7 @@
 #define IFS_40
 //#define PRETEND_NTFS
 
-#define UDF_ASYNC_IO
+//#define UDF_ASYNC_IO
 
 // Custom cache was replaced with Windows Cache Manager approach
 
