@@ -1622,8 +1622,23 @@ err_addxsbm_1:
         if (!NT_SUCCESS(status = UDFReadData(IrpContext, Vcb, FALSE, ((uint64)lba)<<Vcb->BlockSizeBits, Length, FALSE, tmp, &ReadBytes)))
             goto err_addxsbm_1;
 
-        lim = min(i + ((lim2 = ((PSPACE_BITMAP_DESC)tmp)->numOfBits) << Vcb->LB2B_Bits), Vcb->FSBM_BitCount);
+        lim2 = ((PSPACE_BITMAP_DESC)tmp)->numOfBits;
         tmp_bm = tmp + sizeof(SPACE_BITMAP_DESC);
+        
+        // Validate that the bitmap size doesn't exceed the allocated buffer
+        // Each bit requires 1 bit of storage, so we need (lim2 + 7) / 8 bytes
+        uint32 required_bitmap_bytes = (lim2 + 7) / 8;
+        uint32 available_bitmap_bytes = (uint32)(Length > sizeof(SPACE_BITMAP_DESC) ? 
+                                                 Length - sizeof(SPACE_BITMAP_DESC) : 0);
+        
+        if (required_bitmap_bytes > available_bitmap_bytes) {
+            UDFPrint(("UDFAddXSpaceBitmap: Invalid bitmap size - required %u bytes, available %u bytes\n", 
+                     required_bitmap_bytes, available_bitmap_bytes));
+            status = STATUS_DISK_CORRUPT_ERROR;
+            goto err_addxsbm_1;
+        }
+        
+        lim = min(i + (lim2 << Vcb->LB2B_Bits), Vcb->FSBM_BitCount);
         j = 0;
         for(;(l = UDFGetBitmapLen((uint32*)tmp_bm, j, lim2)) && (i<lim);) {
             // expand LBlocks to Sectors...
