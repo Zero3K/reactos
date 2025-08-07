@@ -208,6 +208,10 @@ UDFUpdateXSpaceBitmaps(
 
     UDF_CHECK_BITMAP_RESOURCE(Vcb);
 
+    // Initialize EXTENT_INFO structures to prevent memory corruption
+    RtlZeroMemory(&FSBMExtInfo, sizeof(EXTENT_INFO));
+    RtlZeroMemory(&USBMExtInfo, sizeof(EXTENT_INFO));
+
     plen = UDFPartLen(Vcb, RefPartNum);
     // prepare bitmaps for updating
 
