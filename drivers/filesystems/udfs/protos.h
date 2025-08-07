@@ -814,6 +814,16 @@ UDFCreateFileLock(
     _In_ BOOLEAN RaiseOnError
 );
 
+extern VOID UDFLockFcb(
+    _In_opt_ PIRP_CONTEXT IrpContext,
+    _Inout_ PFCB Fcb
+);
+
+extern VOID UDFUnlockFcb(
+    _In_opt_ PIRP_CONTEXT IrpContext,
+    _Inout_ PFCB Fcb
+);
+
 /*************************************************************************
 * Prototypes for the file NameSup.cpp
 *************************************************************************/
