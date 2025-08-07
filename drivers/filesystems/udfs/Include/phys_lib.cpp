@@ -150,10 +150,18 @@ UDFTIOVerify(
     tmp_wb = (SIZE_T)_Vcb;
     if (Flags & PH_EX_WRITE) {
         UDFPrint(("IO-Write-Verify\n"));
+#ifdef UDF_ASYNC_IO
+        RC = UDFTWriteAsync(_Vcb, Buffer, Length, LBA, (PULONG)&tmp_wb, FALSE);
+#else
         RC = UDFTWrite(IrpContext, _Vcb, Buffer, Length, LBA, &tmp_wb, Flags | PH_VCB_IN_RETLEN);
+#endif
     } else {
         UDFPrint(("IO-Read-Verify\n"));
+#ifdef UDF_ASYNC_IO
+        RC = UDFTReadAsync(_Vcb, NULL, Buffer, Length, LBA, &tmp_wb);
+#else
         RC = UDFTRead(IrpContext, _Vcb, Buffer, Length, LBA, &tmp_wb, Flags | PH_VCB_IN_RETLEN);
+#endif
     }
     (*IOBytes) = tmp_wb;
 
@@ -1643,7 +1651,11 @@ UDFReadSectors(
     )
 {
     // Always use direct I/O now that Windows Cache Manager is used
+#ifdef UDF_ASYNC_IO
+    return UDFTReadAsync(Vcb, NULL, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
+#else
     return UDFTRead(IrpContext, Vcb, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
+#endif
 } // end UDFReadSectors()
 
 #ifdef _BROWSE_UDF_
@@ -1778,7 +1790,11 @@ UDFWriteSectors(
 #endif //_BROWSE_UDF_
 
     // Always use direct I/O now that Windows Cache Manager is used
+#ifdef UDF_ASYNC_IO
+    status = UDFTWriteAsync(Vcb, Buffer, BCount<<Vcb->BlockSizeBits, Lba, (PULONG)WrittenBytes, FALSE);
+#else
     status = UDFTWrite(IrpContext, Vcb, Buffer, BCount<<Vcb->BlockSizeBits, Lba, WrittenBytes);
+#endif
     ASSERT(NT_SUCCESS(status));
 #ifdef _BROWSE_UDF_
     UDFClrZeroBits(Vcb->ZSBM_Bitmap, Lba, BCount);
