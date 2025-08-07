@@ -749,30 +749,110 @@ try_exit: NOTHING;
 
 #ifdef UDF_ASYNC_IO
 /*
-    This routine performs low-level read (asynchronously if possible)
-    For now, this delegates to the synchronous read function to avoid
-    hangs until true async I/O can be properly implemented with IRP context
+    This routine performs low-level read asynchronously with true async I/O
+    Returns immediately without waiting for completion
  */
 NTSTATUS
 UDFTReadAsync(
     IN void* _Vcb,
-    IN void* _WContext,
+    IN void* _WContext,  // Not used in true async implementation
     IN void* Buffer,     // Target buffer
     IN SIZE_T Length,
     IN uint32 LBA,
     OUT PSIZE_T ReadBytes
     )
 {
-    // Delegate to the synchronous read function with NULL IrpContext
-    // This avoids the hanging issue that occurs when calling helper functions
-    // with NULL parameters that expect valid IrpContext
-    return UDFTRead(NULL, _Vcb, Buffer, Length, LBA, ReadBytes, PH_VCB_IN_RETLEN);
+    NTSTATUS RC = STATUS_SUCCESS;
+    PVCB Vcb = (PVCB)_Vcb;
+    PUDF_ASYNC_IO_CONTEXT AsyncContext = NULL;
+    PIRP Irp = NULL;
+    PIO_STACK_LOCATION IrpSp;
+    LARGE_INTEGER Offset;
+    PVOID IoBuf = NULL;
+    
+    UDFPrint(("UDFTReadAsync: LBA %x, Length %x\n", LBA, Length));
+    
+    // Allocate async context
+    AsyncContext = (PUDF_ASYNC_IO_CONTEXT)MyAllocatePool__(NonPagedPool, sizeof(UDF_ASYNC_IO_CONTEXT));
+    if (!AsyncContext) {
+        UDFPrint(("UDFTReadAsync: Failed to allocate async context\n"));
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    
+    // Initialize the async context
+    RtlZeroMemory(AsyncContext, sizeof(UDF_ASYNC_IO_CONTEXT));
+    AsyncContext->Vcb = Vcb;
+    AsyncContext->Buffer = Buffer;  // Original buffer
+    AsyncContext->Length = Length;
+    AsyncContext->LBA = LBA;
+    AsyncContext->ResultBytes = ReadBytes;
+    AsyncContext->IsWrite = FALSE;
+    AsyncContext->FreeBuffer = FALSE;
+    
+    // Calculate physical offset
+    Offset.QuadPart = ((LONGLONG)LBA) << Vcb->BlockSizeBits;
+    
+    // Allocate temporary buffer for the operation
+    IoBuf = DbgAllocatePoolWithTag(NonPagedPool, Length, 'bNWD');
+    if (!IoBuf) {
+        UDFPrint(("UDFTReadAsync: Failed to allocate I/O buffer\n"));
+        MyFreePool__(AsyncContext);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    AsyncContext->TempBuffer = IoBuf;  // Store temp buffer for cleanup
+    
+    // Build asynchronous read IRP
+    Irp = IoBuildAsynchronousFsdRequest(
+        IRP_MJ_READ,
+        Vcb->TargetDeviceObject,
+        IoBuf,
+        Length,
+        &Offset,
+        &AsyncContext->IoStatus
+    );
+    
+    if (!Irp) {
+        UDFPrint(("UDFTReadAsync: Failed to build async IRP\n"));
+        DbgFreePool(IoBuf);
+        MyFreePool__(AsyncContext);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    
+    // Set up completion routine for true async operation
+    IoSetCompletionRoutine(
+        Irp,
+        UDFTrueAsyncCompletionRoutine,
+        AsyncContext,
+        TRUE,  // InvokeOnSuccess
+        TRUE,  // InvokeOnError  
+        TRUE   // InvokeOnCancel
+    );
+    
+    // Set IRP stack location flags
+    IrpSp = IoGetNextIrpStackLocation(Irp);
+    SetFlag(IrpSp->Flags, SL_OVERRIDE_VERIFY_VOLUME);
+    
+    // Initialize ReadBytes to 0 before async operation
+    *ReadBytes = 0;
+    
+    // Submit the IRP and return immediately (true async behavior)
+    RC = IoCallDriver(Vcb->TargetDeviceObject, Irp);
+    
+    // For async operations, we expect STATUS_PENDING or immediate completion
+    if (RC == STATUS_PENDING) {
+        UDFPrint(("UDFTReadAsync: Operation pending (true async)\n"));
+        RC = STATUS_SUCCESS; // Return success for async operation
+    } else {
+        UDFPrint(("UDFTReadAsync: Operation completed immediately with status %x\n", RC));
+        // Even if completed immediately, let completion routine handle cleanup
+    }
+    
+    return RC;
 } // end UDFTReadAsync()
 
 /*
-    This routine performs low-level write (asynchronously if possible)  
-    For now, this delegates to the synchronous write function to avoid
-    hangs until true async I/O can be properly implemented with IRP context
+    This routine performs low-level write asynchronously with true async I/O
+    Returns immediately without waiting for completion
  */
 NTSTATUS
 UDFTWriteAsync(
@@ -785,19 +865,90 @@ UDFTWriteAsync(
     )
 {
 #ifndef UDF_READ_ONLY_BUILD
-    SIZE_T _WrittenBytes = 0;
-    NTSTATUS RC;
+    NTSTATUS RC = STATUS_SUCCESS;
+    PVCB Vcb = (PVCB)_Vcb;
+    PUDF_ASYNC_IO_CONTEXT AsyncContext = NULL;
+    PIRP Irp = NULL;
+    PIO_STACK_LOCATION IrpSp;
+    LARGE_INTEGER Offset;
+    PVOID IoBuf = NULL;
     
-    // Delegate to the synchronous write function with NULL IrpContext
-    // This avoids the hanging issue that occurs when calling helper functions
-    // with NULL parameters that expect valid IrpContext
-    RC = UDFTWrite(NULL, _Vcb, Buffer, Length, LBA, &_WrittenBytes);
+    UDFPrint(("UDFTWriteAsync: LBA %x, Length %x\n", LBA, Length));
     
-    *WrittenBytes = (ULONG)_WrittenBytes;
+    // Allocate async context
+    AsyncContext = (PUDF_ASYNC_IO_CONTEXT)MyAllocatePool__(NonPagedPool, sizeof(UDF_ASYNC_IO_CONTEXT));
+    if (!AsyncContext) {
+        UDFPrint(("UDFTWriteAsync: Failed to allocate async context\n"));
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
     
-    // Free buffer if requested (this was missing in the sync version)
-    if (FreeBuffer && Buffer) {
-        MyFreePool__(Buffer);
+    // Initialize the async context
+    RtlZeroMemory(AsyncContext, sizeof(UDF_ASYNC_IO_CONTEXT));
+    AsyncContext->Vcb = Vcb;
+    AsyncContext->Buffer = Buffer;  // Original buffer
+    AsyncContext->Length = Length;
+    AsyncContext->LBA = LBA;
+    AsyncContext->ResultBytes = (PSIZE_T)WrittenBytes; // Cast for compatibility
+    AsyncContext->IsWrite = TRUE;
+    AsyncContext->FreeBuffer = FreeBuffer;
+    
+    // Calculate physical offset
+    Offset.QuadPart = ((LONGLONG)LBA) << Vcb->BlockSizeBits;
+    
+    // Allocate and copy to temporary buffer for the operation
+    IoBuf = DbgAllocatePool(NonPagedPool, Length);
+    if (!IoBuf) {
+        UDFPrint(("UDFTWriteAsync: Failed to allocate I/O buffer\n"));
+        MyFreePool__(AsyncContext);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    RtlCopyMemory(IoBuf, Buffer, Length);
+    AsyncContext->TempBuffer = IoBuf;  // Store temp buffer for cleanup
+    
+    // Build asynchronous write IRP
+    Irp = IoBuildAsynchronousFsdRequest(
+        IRP_MJ_WRITE,
+        Vcb->TargetDeviceObject,
+        IoBuf,
+        Length,
+        &Offset,
+        &AsyncContext->IoStatus
+    );
+    
+    if (!Irp) {
+        UDFPrint(("UDFTWriteAsync: Failed to build async IRP\n"));
+        DbgFreePool(IoBuf);
+        MyFreePool__(AsyncContext);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    
+    // Set up completion routine for true async operation
+    IoSetCompletionRoutine(
+        Irp,
+        UDFTrueAsyncCompletionRoutine,
+        AsyncContext,
+        TRUE,  // InvokeOnSuccess
+        TRUE,  // InvokeOnError
+        TRUE   // InvokeOnCancel
+    );
+    
+    // Set IRP stack location flags
+    IrpSp = IoGetNextIrpStackLocation(Irp);
+    SetFlag(IrpSp->Flags, SL_OVERRIDE_VERIFY_VOLUME);
+    
+    // Initialize WrittenBytes to 0 before async operation
+    *WrittenBytes = 0;
+    
+    // Submit the IRP and return immediately (true async behavior)
+    RC = IoCallDriver(Vcb->TargetDeviceObject, Irp);
+    
+    // For async operations, we expect STATUS_PENDING or immediate completion
+    if (RC == STATUS_PENDING) {
+        UDFPrint(("UDFTWriteAsync: Operation pending (true async)\n"));
+        RC = STATUS_SUCCESS; // Return success for async operation
+    } else {
+        UDFPrint(("UDFTWriteAsync: Operation completed immediately with status %x\n", RC));
+        // Even if completed immediately, let completion routine handle cleanup
     }
     
     return RC;

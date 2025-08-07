@@ -24,6 +24,22 @@ typedef struct _UDF_PH_CALL_CONTEXT {
     IO_STATUS_BLOCK IosbToUse;
 } UDF_PH_CALL_CONTEXT, *PUDF_PH_CALL_CONTEXT;
 
+// Async I/O context structure for true asynchronous operations
+typedef struct _UDF_ASYNC_IO_CONTEXT {
+    PIO_COMPLETION_ROUTINE CompletionRoutine;  // Completion routine to call
+    PVOID CompletionContext;                   // Context for completion routine
+    PVCB Vcb;                                  // Volume control block
+    PIRP OriginalIrp;                          // Original IRP if needed
+    PVOID Buffer;                              // Original I/O buffer
+    PVOID TempBuffer;                          // Temporary I/O buffer
+    SIZE_T Length;                             // Buffer length
+    ULONG LBA;                                 // Logical block address
+    PSIZE_T ResultBytes;                       // Pointer to result bytes
+    IO_STATUS_BLOCK IoStatus;                  // I/O status block
+    BOOLEAN IsWrite;                           // TRUE for write, FALSE for read
+    BOOLEAN FreeBuffer;                        // TRUE if buffer should be freed
+} UDF_ASYNC_IO_CONTEXT, *PUDF_ASYNC_IO_CONTEXT;
+
 #ifdef _BROWSE_UDF_
 
 // convert UDF timestamp to NT time
