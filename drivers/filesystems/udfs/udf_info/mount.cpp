@@ -1625,22 +1625,20 @@ err_addxsbm_1:
         lim2 = ((PSPACE_BITMAP_DESC)tmp)->numOfBits;
         tmp_bm = tmp + sizeof(SPACE_BITMAP_DESC);
         
-        // Validate that the bitmap size doesn't exceed the allocated buffer
-        // Each bit requires 1 bit of storage, so we need (lim2 + 7) / 8 bytes
-        uint32 required_bitmap_bytes = (lim2 + 7) / 8;
+        // Calculate the maximum number of bits that can be safely accessed from the available buffer
+        // This prevents memory corruption while handling legitimate UDF structures where numOfBits
+        // may be larger than the data actually stored in this extent
         uint32 available_bitmap_bytes = (uint32)(Length > sizeof(SPACE_BITMAP_DESC) ? 
                                                  Length - sizeof(SPACE_BITMAP_DESC) : 0);
+        uint32 max_safe_bits = available_bitmap_bytes * 8;
+        uint32 safe_bitmap_bits = min(lim2, max_safe_bits);
         
-        if (required_bitmap_bytes > available_bitmap_bytes) {
-            UDFPrint(("UDFAddXSpaceBitmap: Invalid bitmap size - required %u bytes, available %u bytes\n", 
-                     required_bitmap_bytes, available_bitmap_bytes));
-            status = STATUS_DISK_CORRUPT_ERROR;
-            goto err_addxsbm_1;
-        }
+        UDFPrint(("UDFAddXSpaceBitmap: numOfBits=%u, available_bytes=%u, using safe_bits=%u\n", 
+                 lim2, available_bitmap_bytes, safe_bitmap_bits));
         
-        lim = min(i + (lim2 << Vcb->LB2B_Bits), Vcb->FSBM_BitCount);
+        lim = min(i + (safe_bitmap_bits << Vcb->LB2B_Bits), Vcb->FSBM_BitCount);
         j = 0;
-        for(;(l = UDFGetBitmapLen((uint32*)tmp_bm, j, lim2)) && (i<lim);) {
+        for(;(l = UDFGetBitmapLen((uint32*)tmp_bm, j, safe_bitmap_bits)) && (i<lim);) {
             // expand LBlocks to Sectors...
             l2 = l << Vcb->LB2B_Bits;
             // ...and mark them
