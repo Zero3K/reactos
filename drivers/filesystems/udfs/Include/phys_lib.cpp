@@ -1744,7 +1744,15 @@ UDFReadSectors(
 {
     // Always use direct I/O now that Windows Cache Manager is used
 #ifdef UDF_ASYNC_IO
-    return UDFTReadAsync(Vcb, NULL, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
+    // Always use synchronous I/O for critical metadata operations
+    // This ensures bitmap data is available immediately for volume queries
+    if (!Vcb->FSBM_Bitmap ||                      // Bitmap not yet loaded - this is metadata read
+        Vcb->BitmapModified ||                    // Bitmap needs recalculation for volume queries  
+        KeGetCurrentIrql() >= DISPATCH_LEVEL) {   // Safety: never async at elevated IRQL
+        return UDFTRead(IrpContext, Vcb, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
+    } else {
+        return UDFTReadAsync(Vcb, NULL, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
+    }
 #else
     return UDFTRead(IrpContext, Vcb, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
 #endif
@@ -1883,7 +1891,15 @@ UDFWriteSectors(
 
     // Always use direct I/O now that Windows Cache Manager is used
 #ifdef UDF_ASYNC_IO
-    status = UDFTWriteAsync(Vcb, Buffer, BCount<<Vcb->BlockSizeBits, Lba, (PULONG)WrittenBytes, FALSE);
+    // Always use synchronous I/O for critical metadata operations
+    // This ensures bitmap data is written immediately for volume consistency
+    if (!Vcb->FSBM_Bitmap ||                      // Bitmap not yet loaded - this is metadata write
+        Vcb->BitmapModified ||                    // Bitmap needs updating for volume consistency
+        KeGetCurrentIrql() >= DISPATCH_LEVEL) {   // Safety: never async at elevated IRQL
+        status = UDFTWrite(IrpContext, Vcb, Buffer, BCount<<Vcb->BlockSizeBits, Lba, WrittenBytes);
+    } else {
+        status = UDFTWriteAsync(Vcb, Buffer, BCount<<Vcb->BlockSizeBits, Lba, (PULONG)WrittenBytes, FALSE);
+    }
 #else
     status = UDFTWrite(IrpContext, Vcb, Buffer, BCount<<Vcb->BlockSizeBits, Lba, WrittenBytes);
 #endif
