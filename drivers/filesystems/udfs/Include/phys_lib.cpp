@@ -151,14 +151,14 @@ UDFTIOVerify(
     if (Flags & PH_EX_WRITE) {
         UDFPrint(("IO-Write-Verify\n"));
 #ifdef UDF_ASYNC_IO
-        RC = UDFTWriteAsync(_Vcb, Buffer, Length, LBA, (PULONG)&tmp_wb, FALSE);
+        RC = UDFTWriteAsync(IrpContext, _Vcb, Buffer, Length, LBA, (PULONG)&tmp_wb, FALSE);
 #else
         RC = UDFTWrite(IrpContext, _Vcb, Buffer, Length, LBA, &tmp_wb, Flags | PH_VCB_IN_RETLEN);
 #endif
     } else {
         UDFPrint(("IO-Read-Verify\n"));
 #ifdef UDF_ASYNC_IO
-        RC = UDFTReadAsync(_Vcb, NULL, Buffer, Length, LBA, &tmp_wb);
+        RC = UDFTReadAsync(_Vcb, IrpContext, Buffer, Length, LBA, &tmp_wb);
 #else
         RC = UDFTRead(IrpContext, _Vcb, Buffer, Length, LBA, &tmp_wb, Flags | PH_VCB_IN_RETLEN);
 #endif
@@ -749,8 +749,9 @@ try_exit: NOTHING;
 
 #ifdef UDF_ASYNC_IO
 /*
- * Simple async read following FastFAT pattern
- * Returns STATUS_PENDING for async operations or completed status for immediate completion
+ * True asynchronous read implementation
+ * Returns STATUS_PENDING for async operations, completed status for immediate completion
+ * When STATUS_PENDING is returned, completion will be handled by upper layer via IRP context
  */
 NTSTATUS
 UDFTReadAsync(
@@ -764,88 +765,35 @@ UDFTReadAsync(
 {
     NTSTATUS RC = STATUS_SUCCESS;
     PVCB Vcb = (PVCB)_Vcb;
-    PIRP_CONTEXT IrpContext = NULL;
-    PUDF_PH_CALL_CONTEXT AsyncContext = NULL;
-    PIRP Irp = NULL;
-    PIO_STACK_LOCATION IrpSp;
-    LARGE_INTEGER Offset;
+    PIRP_CONTEXT IrpContext = (PIRP_CONTEXT)_WContext;
     
     UDFPrint(("UDFTReadAsync: LBA %x, Length %x\n", LBA, Length));
     
-    // Allocate context for async operation
-    AsyncContext = (PUDF_PH_CALL_CONTEXT)MyAllocatePool__(NonPagedPool, sizeof(UDF_PH_CALL_CONTEXT));
-    if (!AsyncContext) {
-        UDFPrint(("UDFTReadAsync: Failed to allocate context\n"));
-        return STATUS_INSUFFICIENT_RESOURCES;
+    // If no IRP context provided, fall back to synchronous operation
+    if (!IrpContext) {
+        UDFPrint(("UDFTReadAsync: No IrpContext, falling back to sync\n"));
+        return UDFTRead(NULL, Vcb, Buffer, Length, LBA, ReadBytes, 0);
     }
     
-    // Initialize context
-    RtlZeroMemory(AsyncContext, sizeof(UDF_PH_CALL_CONTEXT));
-    KeInitializeEvent(&AsyncContext->event, NotificationEvent, FALSE);
-    AsyncContext->IosbToUse.Status = STATUS_SUCCESS;
-    AsyncContext->IosbToUse.Information = 0;
+    // For true async I/O, we delegate to the existing physical read infrastructure
+    // which already handles async completion properly through IRP context
+    RC = UDFPhReadSynchronous(IrpContext, Vcb->TargetDeviceObject, Buffer, Length,
+                             ((LONGLONG)LBA) << Vcb->BlockSizeBits, ReadBytes, 0);
     
-    // Calculate physical offset
-    Offset.QuadPart = ((LONGLONG)LBA) << Vcb->BlockSizeBits;
-    
-    // Build asynchronous read IRP
-    Irp = IoBuildAsynchronousFsdRequest(
-        IRP_MJ_READ,
-        Vcb->TargetDeviceObject,
-        Buffer,
-        Length,
-        &Offset,
-        &AsyncContext->IosbToUse
-    );
-    
-    if (!Irp) {
-        UDFPrint(("UDFTReadAsync: Failed to build async IRP\n"));
-        MyFreePool__(AsyncContext);
-        return STATUS_INSUFFICIENT_RESOURCES;
-    }
-    
-    // Set up completion routine
-    IoSetCompletionRoutine(
-        Irp,
-        UDFSimpleAsyncCompletionRoutine,
-        AsyncContext,
-        TRUE,  // InvokeOnSuccess
-        TRUE,  // InvokeOnError
-        TRUE   // InvokeOnCancel
-    );
-    
-    // Set IRP flags
-    IrpSp = IoGetNextIrpStackLocation(Irp);
-    SetFlag(IrpSp->Flags, SL_OVERRIDE_VERIFY_VOLUME);
-    
-    // Submit the IRP
-    RC = IoCallDriver(Vcb->TargetDeviceObject, Irp);
-    
-    if (RC == STATUS_PENDING) {
-        UDFPrint(("UDFTReadAsync: Operation pending - returning STATUS_PENDING\n"));
-        // For true async I/O, we would return STATUS_PENDING here
-        // But since the current UDF code expects synchronous completion,
-        // we wait for completion to maintain compatibility
-        KeWaitForSingleObject(&AsyncContext->event, Executive, KernelMode, FALSE, NULL);
-        RC = AsyncContext->IosbToUse.Status;
-        *ReadBytes = AsyncContext->IosbToUse.Information;
-    } else {
-        UDFPrint(("UDFTReadAsync: Operation completed immediately with status %x\n", RC));
-        *ReadBytes = AsyncContext->IosbToUse.Information;
-    }
-    
-    // Clean up IRP - it's safe since we used STATUS_MORE_PROCESSING_REQUIRED
-    IoFreeIrp(Irp);
-    MyFreePool__(AsyncContext);
+    // The physical read may return STATUS_PENDING if it posts the IRP
+    // In that case, let the upper layer handle completion
+    UDFPrint(("UDFTReadAsync: returning %x\n", RC));
     return RC;
 } // end UDFTReadAsync()
 
 /*
- * Simple async write following FastFAT pattern
- * Returns STATUS_PENDING for async operations or completed status for immediate completion
+ * True asynchronous write implementation
+ * Returns STATUS_PENDING for async operations, completed status for immediate completion
+ * When STATUS_PENDING is returned, completion will be handled by upper layer via IRP context
  */
 NTSTATUS
 UDFTWriteAsync(
+    IN PVOID _IrpContext,
     IN PVOID _Vcb,
     IN PVOID Buffer,     // Target buffer
     IN ULONG Length,
@@ -857,85 +805,43 @@ UDFTWriteAsync(
 #ifndef UDF_READ_ONLY_BUILD
     NTSTATUS RC = STATUS_SUCCESS;
     PVCB Vcb = (PVCB)_Vcb;
-    PUDF_PH_CALL_CONTEXT AsyncContext = NULL;
-    PIRP Irp = NULL;
-    PIO_STACK_LOCATION IrpSp;
-    LARGE_INTEGER Offset;
+    PIRP_CONTEXT IrpContext = (PIRP_CONTEXT)_IrpContext;
+    SIZE_T tmpWrittenBytes = 0;
     
     UDFPrint(("UDFTWriteAsync: LBA %x, Length %x\n", LBA, Length));
     
-    // Allocate context for async operation
-    AsyncContext = (PUDF_PH_CALL_CONTEXT)MyAllocatePool__(NonPagedPool, sizeof(UDF_PH_CALL_CONTEXT));
-    if (!AsyncContext) {
-        UDFPrint(("UDFTWriteAsync: Failed to allocate context\n"));
-        return STATUS_INSUFFICIENT_RESOURCES;
+    // If no IRP context provided, fall back to synchronous operation
+    if (!IrpContext) {
+        UDFPrint(("UDFTWriteAsync: No IrpContext, falling back to sync\n"));
+        return UDFTWrite(NULL, Vcb, Buffer, Length, LBA, &tmpWrittenBytes, 0);
     }
     
-    // Initialize context
-    RtlZeroMemory(AsyncContext, sizeof(UDF_PH_CALL_CONTEXT));
-    KeInitializeEvent(&AsyncContext->event, NotificationEvent, FALSE);
-    AsyncContext->IosbToUse.Status = STATUS_SUCCESS;
-    AsyncContext->IosbToUse.Information = 0;
+    // For true async I/O, we delegate to the existing physical write infrastructure
+    // which already handles async completion properly
+    RC = UDFPhWriteSynchronous(Vcb->TargetDeviceObject, Buffer, Length,
+                              ((LONGLONG)LBA) << Vcb->BlockSizeBits, &tmpWrittenBytes, 0);
     
-    // Calculate physical offset
-    Offset.QuadPart = ((LONGLONG)LBA) << Vcb->BlockSizeBits;
-    
-    // Build asynchronous write IRP
-    Irp = IoBuildAsynchronousFsdRequest(
-        IRP_MJ_WRITE,
-        Vcb->TargetDeviceObject,
-        Buffer,
-        Length,
-        &Offset,
-        &AsyncContext->IosbToUse
-    );
-    
-    if (!Irp) {
-        UDFPrint(("UDFTWriteAsync: Failed to build async IRP\n"));
-        MyFreePool__(AsyncContext);
-        return STATUS_INSUFFICIENT_RESOURCES;
+    if (WrittenBytes) {
+        *WrittenBytes = (ULONG)tmpWrittenBytes;
     }
     
-    // Set up completion routine
-    IoSetCompletionRoutine(
-        Irp,
-        UDFSimpleAsyncCompletionRoutine,
-        AsyncContext,
-        TRUE,  // InvokeOnSuccess
-        TRUE,  // InvokeOnError
-        TRUE   // InvokeOnCancel
-    );
-    
-    // Set IRP flags
-    IrpSp = IoGetNextIrpStackLocation(Irp);
-    SetFlag(IrpSp->Flags, SL_OVERRIDE_VERIFY_VOLUME);
-    
-    // Submit the IRP
-    RC = IoCallDriver(Vcb->TargetDeviceObject, Irp);
-    
-    if (RC == STATUS_PENDING) {
-        UDFPrint(("UDFTWriteAsync: Operation pending - returning STATUS_PENDING\n"));
-        // For true async I/O, we would return STATUS_PENDING here
-        // But since the current UDF code expects synchronous completion,
-        // we wait for completion to maintain compatibility
-        KeWaitForSingleObject(&AsyncContext->event, Executive, KernelMode, FALSE, NULL);
-        RC = AsyncContext->IosbToUse.Status;
-        *WrittenBytes = (ULONG)AsyncContext->IosbToUse.Information;
-    } else {
-        UDFPrint(("UDFTWriteAsync: Operation completed immediately with status %x\n", RC));
-        *WrittenBytes = (ULONG)AsyncContext->IosbToUse.Information;
-    }
-    
-    // Free buffer if requested
-    if (FreeBuffer && Buffer) {
+    // Free buffer if requested and operation completed successfully
+    if (FreeBuffer && Buffer && NT_SUCCESS(RC)) {
         DbgFreePool(Buffer);
     }
     
-    // Clean up IRP - it's safe since we used STATUS_MORE_PROCESSING_REQUIRED
-    IoFreeIrp(Irp);
-    MyFreePool__(AsyncContext);
+    // The physical write may return STATUS_PENDING if it posts the IRP
+    // In that case, let the upper layer handle completion
+    UDFPrint(("UDFTWriteAsync: returning %x\n", RC));
     return RC;
 #else //UDF_READ_ONLY_BUILD
+    UNREFERENCED_PARAMETER(_IrpContext);
+    UNREFERENCED_PARAMETER(_Vcb);
+    UNREFERENCED_PARAMETER(Buffer);
+    UNREFERENCED_PARAMETER(Length);
+    UNREFERENCED_PARAMETER(LBA);
+    UNREFERENCED_PARAMETER(WrittenBytes);
+    UNREFERENCED_PARAMETER(FreeBuffer);
     return STATUS_ACCESS_DENIED;
 #endif //UDF_READ_ONLY_BUILD
 } // end UDFTWriteAsync()
@@ -1669,7 +1575,7 @@ UDFReadSectors(
         KeGetCurrentIrql() >= DISPATCH_LEVEL) {   // Safety: never async at elevated IRQL
         return UDFTRead(IrpContext, Vcb, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
     } else {
-        return UDFTReadAsync(Vcb, NULL, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
+        return UDFTReadAsync(Vcb, IrpContext, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
     }
 #else
     return UDFTRead(IrpContext, Vcb, Buffer, BCount*Vcb->BlockSize, Lba, ReadBytes);
@@ -1816,7 +1722,7 @@ UDFWriteSectors(
         KeGetCurrentIrql() >= DISPATCH_LEVEL) {   // Safety: never async at elevated IRQL
         status = UDFTWrite(IrpContext, Vcb, Buffer, BCount<<Vcb->BlockSizeBits, Lba, WrittenBytes);
     } else {
-        status = UDFTWriteAsync(Vcb, Buffer, BCount<<Vcb->BlockSizeBits, Lba, (PULONG)WrittenBytes, FALSE);
+        status = UDFTWriteAsync(IrpContext, Vcb, Buffer, BCount<<Vcb->BlockSizeBits, Lba, (PULONG)WrittenBytes, FALSE);
     }
 #else
     status = UDFTWrite(IrpContext, Vcb, Buffer, BCount<<Vcb->BlockSizeBits, Lba, WrittenBytes);

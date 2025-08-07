@@ -82,6 +82,7 @@ extern NTSTATUS UDFTReadAsync(
 
 // This routine performs low-level write (asynchronously if possible)
 extern NTSTATUS UDFTWriteAsync(
+    IN PVOID IrpContext,
     IN PVOID _Vcb,
     IN PVOID Buffer,     // Target buffer
     IN ULONG Length,

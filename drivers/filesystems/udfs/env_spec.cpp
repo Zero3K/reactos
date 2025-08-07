@@ -112,35 +112,6 @@ UDFSyncCompletionRoutine2(
 */
 
 /*
- * Simple async I/O completion routine following FastFAT pattern
- * This routine handles completion of asynchronous I/O operations
- * and signals completion events for callers that need to wait
- */
-NTSTATUS
-NTAPI
-UDFSimpleAsyncCompletionRoutine(
-    IN PDEVICE_OBJECT DeviceObject,
-    IN PIRP Irp,
-    IN PVOID Contxt
-    )
-{
-    UDFPrint(("UDFSimpleAsyncCompletionRoutine ctx=%x, status=%x\n", Contxt, Irp->IoStatus.Status));
-    PUDF_PH_CALL_CONTEXT Context = (PUDF_PH_CALL_CONTEXT)Contxt;
-
-    // Store the I/O status from the IRP
-    Context->IosbToUse = Irp->IoStatus;
-    
-    // Signal completion event for any waiting threads
-    KeSetEvent(&Context->event, IO_NO_INCREMENT, FALSE);
-
-    UNREFERENCED_PARAMETER(DeviceObject);
-    
-    // Return STATUS_MORE_PROCESSING_REQUIRED to prevent IRP completion
-    // The caller will free the IRP when ready
-    return STATUS_MORE_PROCESSING_REQUIRED;
-} // end UDFSimpleAsyncCompletionRoutine()
-
-/*
 
  Function: UDFPhReadSynchronous()
 

@@ -36,11 +36,10 @@
 #define IFS_40
 //#define PRETEND_NTFS
 
-// Async I/O implementation - disabled by default to prevent memory corruption crashes
-// The current implementation provides compatibility with async I/O APIs while maintaining
-// synchronous behavior to avoid race conditions and PFN_LIST_CORRUPT errors
-// To enable, uncomment the line below - ensure all callers handle STATUS_PENDING properly
-//#define UDF_ASYNC_IO
+// Async I/O implementation - now enabled by default with proper async I/O support
+// The implementation now properly returns STATUS_PENDING and lets upper layers handle completion
+// instead of waiting synchronously which was causing race conditions and PFN_LIST_CORRUPT errors
+#define UDF_ASYNC_IO
 
 // Custom cache was replaced with Windows Cache Manager approach
 

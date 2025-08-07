@@ -312,7 +312,7 @@ UDFCommonWrite(
             Vcb->SerialNumber--;
             // Perform actual Write
 #ifdef UDF_ASYNC_IO
-            RC = UDFTWriteAsync(Vcb, SystemBuffer, WriteLength,
+            RC = UDFTWriteAsync(IrpContext, Vcb, SystemBuffer, WriteLength,
                            (ULONG)(ByteOffset.QuadPart >> Vcb->BlockSizeBits),
                            &NumberBytesWritten, FALSE);
 #else
