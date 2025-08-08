@@ -383,7 +383,9 @@ UDFQueryDirectory(
             if (FsRtlDoesNameContainWildCards(PtrSearchPattern)) {
                 Ccb->Flags |= UDF_CCB_WILDCARD_PRESENT;
             } else {
-                UDFBuildHashEntry(Vcb, PtrSearchPattern, cur_hashes = &(Ccb->hashes), HASH_POSIX | HASH_ULFN);
+                // Hash building removed - no longer needed for directory search
+                // UDFBuildHashEntry(Vcb, PtrSearchPattern, cur_hashes = &(Ccb->hashes), HASH_POSIX | HASH_ULFN);
+                cur_hashes = NULL; // Ensure hash pointer is NULL
             }
             if (UDFCanNameBeA8dot3(PtrSearchPattern))
                 Ccb->Flags |= UDF_CCB_CAN_BE_8_DOT_3;
@@ -410,7 +412,9 @@ UDFQueryDirectory(
             } else {
                 PtrSearchPattern = Ccb->DirectorySearchPattern;
                 if (!(Ccb->Flags & UDF_CCB_WILDCARD_PRESENT)) {
-                    cur_hashes = &(Ccb->hashes);
+                    // Hash usage removed - no longer needed
+                    // cur_hashes = &(Ccb->hashes);
+                    cur_hashes = NULL;
                 }
             }
         }
@@ -635,11 +639,12 @@ UDFFindNextMatch(
         if (!DirNdx->FName.Buffer ||
            UDFIsDeleted(DirNdx))
             continue;
-        if (hashes &&
-           (DirNdx->hashes.hLfn != hashes->hLfn) &&
-           (DirNdx->hashes.hPosix != hashes->hPosix) &&
-           (!CanBe8dot3 || ((DirNdx->hashes.hDos != hashes->hLfn) && (DirNdx->hashes.hDos != hashes->hPosix))) )
-            continue;
+        // Hash-based filtering removed - always perform string comparison
+        // if (hashes &&
+        //    (DirNdx->hashes.hLfn != hashes->hLfn) &&
+        //    (DirNdx->hashes.hPosix != hashes->hPosix) &&
+        //    (!CanBe8dot3 || ((DirNdx->hashes.hDos != hashes->hLfn) && (DirNdx->hashes.hDos != hashes->hPosix))) )
+        //     continue;
         if (UDFIsNameInExpression(Vcb, &(DirNdx->FName),PtrSearchPattern, NULL,IgnoreCase,
                                 ContainsWC, CanBe8dot3 && !(DirNdx->FI_Flags & UDF_FI_FLAG_DOS),
                                 EntryNumber < 2) &&
