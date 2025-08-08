@@ -957,7 +957,8 @@ UDFFindFile(
     HASH_ENTRY hashes;
     BOOLEAN CanBe8d3;
 
-    UDFBuildHashEntry(Vcb, Name, &hashes, HASH_POSIX | HASH_ULFN);
+    // Hash building removed - no longer needed for directory search
+    // UDFBuildHashEntry(Vcb, Name, &hashes, HASH_POSIX | HASH_ULFN);
 
     if ((CanBe8d3 = UDFCanNameBeA8dot3(Name))) {
         ShortName.MaximumLength = 13 * sizeof(WCHAR);
@@ -971,7 +972,8 @@ UDFFindFile(
         // perform case sensetive sequential directory scan
 
         while((DirNdx = UDFDirIndexScan(&ScanContext, NULL))) {
-            if ( (DirNdx->hashes.hPosix == hashes.hPosix) &&
+            // Hash-based filtering removed - always perform string comparison
+            if ( /* (DirNdx->hashes.hPosix == hashes.hPosix) && */
                  DirNdx->FName.Buffer &&
                 (!RtlCompareUnicodeString(&(DirNdx->FName), Name, FALSE)) &&
                ( (!UDFIsDeleted(DirNdx)) || (!NotDeleted) ) ) {
@@ -982,20 +984,22 @@ UDFFindFile(
         return STATUS_OBJECT_NAME_NOT_FOUND;
     }
 
-    if (hashes.hPosix == hashes.hLfn) {
+    // Simplified logic - removed hash optimization, check all entries
+    // if (hashes.hPosix == hashes.hLfn) {
 
         while((DirNdx = UDFDirIndexScan(&ScanContext, NULL))) {
             if (!DirNdx->FName.Buffer ||
                (NotDeleted && UDFIsDeleted(DirNdx)) )
                 continue;
-            if ( (DirNdx->hashes.hLfn == hashes.hLfn) &&
+            // Hash-based filtering removed - always perform string comparison
+            if ( /* (DirNdx->hashes.hLfn == hashes.hLfn) && */
                 (!RtlCompareUnicodeString(&(DirNdx->FName), Name, IgnoreCase)) ) {
                 (*Index) = ScanContext.i;
                 return STATUS_SUCCESS;
             } else
             if ( CanBe8d3 &&
                 !(DirNdx->FI_Flags & UDF_FI_FLAG_DOS) &&
-                (DirNdx->hashes.hDos == hashes.hLfn) &&
+                /* (DirNdx->hashes.hDos == hashes.hLfn) && */
                 (k == (uint_di)(-1))) {
                 UDFDOSName(Vcb, &ShortName, &(DirNdx->FName), ScanContext.i < 2) ;
                 if (!RtlCompareUnicodeString(&ShortName, Name, IgnoreCase))
@@ -1003,9 +1007,10 @@ UDFFindFile(
             }
         }
 
-    } else {
+    // } else {
+    // Note: else branch removed since we no longer use hash comparisons
 
-        while((DirNdx = UDFDirIndexScan(&ScanContext, NULL))) {
+        /* while((DirNdx = UDFDirIndexScan(&ScanContext, NULL))) {
             // perform sequential directory scan
             if (!DirNdx->FName.Buffer ||
                (NotDeleted && UDFIsDeleted(DirNdx)) )
@@ -1030,7 +1035,7 @@ UDFFindFile(
                 }
             }
         }
-    }
+    } */
 
     if (j != (uint_di)(-1)) {
         (*Index) = j;
