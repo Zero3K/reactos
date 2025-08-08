@@ -100,6 +100,10 @@ extern NTSTATUS NTAPI UDFPhWriteSGL(
 extern BOOLEAN NTAPI UDFDeviceSupportsScatterGather(
     PDEVICE_OBJECT DeviceObject);
 
+// Validate SGL configuration at initialization
+extern NTSTATUS NTAPI UDFValidateSGLConfiguration(
+    VOID);
+
 // Enhanced read function that automatically chooses between SGL and synchronous IO
 extern NTSTATUS NTAPI UDFPhReadEnhanced(
     PIRP_CONTEXT IrpContext,

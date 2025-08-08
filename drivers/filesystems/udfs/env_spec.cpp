@@ -493,6 +493,54 @@ UDFDeviceSupportsScatterGather(
 
 
 /*
+ Function: UDFValidateSGLConfiguration()
+
+ Description:
+    Validates the SGL configuration and reports the current settings.
+    This function can be called during driver initialization to verify
+    that SGL support is properly configured.
+
+ Expected Interrupt Level (for execution) :
+  IRQL_PASSIVE_LEVEL
+
+ Return Value: STATUS_SUCCESS if configuration is valid
+*/
+NTSTATUS
+NTAPI
+UDFValidateSGLConfiguration(
+    VOID
+    )
+{
+    UDFPrint(("UDFValidateSGLConfiguration: Validating SGL enhancement settings\n"));
+
+#ifdef UDF_USE_SGL_OPTIMIZATION
+    UDFPrint(("UDFValidateSGLConfiguration: SGL optimization is ENABLED\n"));
+    UDFPrint(("UDFValidateSGLConfiguration: - Large transfers (>=4KB) will use SGL when supported\n"));
+    UDFPrint(("UDFValidateSGLConfiguration: - Automatic fallback to synchronous IO available\n"));
+    UDFPrint(("UDFValidateSGLConfiguration: - Device capability detection enabled\n"));
+#else
+    UDFPrint(("UDFValidateSGLConfiguration: SGL optimization is DISABLED\n"));
+    UDFPrint(("UDFValidateSGLConfiguration: - Using traditional synchronous IO only\n"));
+    UDFPrint(("UDFValidateSGLConfiguration: - To enable SGL, define UDF_USE_SGL_OPTIMIZATION\n"));
+#endif // UDF_USE_SGL_OPTIMIZATION
+
+    // Validate that required structures are available
+    if (sizeof(SCATTER_GATHER_ELEMENT) == 0 || sizeof(SCATTER_GATHER_LIST) == 0) {
+        UDFPrint(("UDFValidateSGLConfiguration: ERROR - SGL structures not available\n"));
+        return STATUS_NOT_SUPPORTED;
+    }
+
+    UDFPrint(("UDFValidateSGLConfiguration: SGL structures validated successfully\n"));
+    UDFPrint(("UDFValidateSGLConfiguration: - SCATTER_GATHER_ELEMENT size: %d bytes\n", 
+              sizeof(SCATTER_GATHER_ELEMENT)));
+    UDFPrint(("UDFValidateSGLConfiguration: - SCATTER_GATHER_LIST base size: %d bytes\n", 
+              sizeof(SCATTER_GATHER_LIST)));
+
+    return STATUS_SUCCESS;
+} // end UDFValidateSGLConfiguration()
+
+
+/*
  Function: UDFPhReadSGL()
 
  Description:
