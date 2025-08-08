@@ -188,6 +188,77 @@ NTSTATUS UDFResetDeviceDriver(IN PVCB Vcb,
                               IN PDEVICE_OBJECT TargetDeviceObject,
                               IN BOOLEAN Unlock);
 
+#ifdef UDF_ASYNC_IO
+/*
+ * Scatter-Gather List (SGL) function declarations for high-performance async I/O
+ * These functions enable batching multiple buffers into single I/O operations
+ */
+
+// Forward declaration for SGL context structure
+typedef struct _UDF_SGL_CONTEXT *PUDF_SGL_CONTEXT;
+
+// Create SGL context for batching multiple I/O operations  
+PUDF_SGL_CONTEXT
+UDFCreateSglContext(
+    VOID
+    );
+
+// Add buffer to SGL chain for batched processing
+NTSTATUS
+UDFAddToSglChain(
+    IN PUDF_SGL_CONTEXT Context,
+    IN PVOID Buffer,
+    IN SIZE_T Length,
+    IN LONGLONG DiskOffset
+    );
+
+// Execute batched SGL read operation
+NTSTATUS
+UDFExecuteSglRead(
+    IN PIRP_CONTEXT IrpContext,
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PUDF_SGL_CONTEXT Context
+    );
+
+// Execute batched SGL write operation  
+NTSTATUS
+UDFExecuteSglWrite(
+    IN PIRP_CONTEXT IrpContext,
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PUDF_SGL_CONTEXT Context
+    );
+
+// Clean up SGL context and free resources
+VOID
+UDFFreeSglContext(
+    IN PUDF_SGL_CONTEXT Context
+    );
+
+// High-performance batch SGL operations for multiple buffers
+NTSTATUS
+UDFSglBatchRead(
+    IN PIRP_CONTEXT IrpContext,
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PVOID* Buffers,
+    IN PSIZE_T Lengths,
+    IN PLONGLONG DiskOffsets,
+    IN ULONG BufferCount,
+    OUT PSIZE_T TotalBytesRead
+    );
+
+NTSTATUS
+UDFSglBatchWrite(
+    IN PIRP_CONTEXT IrpContext,
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PVOID* Buffers,
+    IN PSIZE_T Lengths,
+    IN PLONGLONG DiskOffsets,
+    IN ULONG BufferCount,
+    OUT PSIZE_T TotalBytesWritten
+    );
+
+#endif //UDF_ASYNC_IO
+
 // This macro copies an unaligned src longword to a dst longword,
 // performing an little/big endian swap.
 

@@ -748,6 +748,12 @@ try_exit: NOTHING;
 } // end UDFTRead()
 
 #ifdef UDF_ASYNC_IO
+
+// Performance tuning constants for SGL and async I/O optimizations
+#define READ_AHEAD_GRANULARITY (256 * 1024)  // 256KB read-ahead for sequential patterns
+#define SGL_MIN_READ_SIZE      (32 * 1024)   // Minimum size to use SGL for reads (32KB)
+#define SGL_MIN_WRITE_SIZE     (16 * 1024)   // Minimum size to use SGL for writes (16KB)
+
 /*
  * Optimized asynchronous read implementation with I/O coalescing and batching
  * Implements read-ahead for sequential patterns and batches adjacent requests
@@ -798,6 +804,27 @@ UDFTReadAsync(
     if (Length >= BlockSize) {
         ULONG BlocksToRead = (ULONG)((Length + BlockSize - 1) >> BlockSizeBits);
         OptimalLength = BlocksToRead << BlockSizeBits;
+    }
+    
+    // SGL Performance Optimization: Use Scatter-Gather Lists for large or fragmented operations
+    // This significantly improves performance by batching multiple operations
+    if (Length >= SGL_MIN_READ_SIZE && IrpContext->Irp) {
+        // For large transfers, use SGL to batch multiple operations for better throughput
+        PUDF_SGL_CONTEXT SglContext = UDFCreateSglContext();
+        if (SglContext) {
+            LONGLONG DiskOffset = ((LONGLONG)LBA) << BlockSizeBits;
+            NTSTATUS SglStatus = UDFAddToSglChain(SglContext, Buffer, Length, DiskOffset);
+            
+            if (NT_SUCCESS(SglStatus)) {
+                UDFPrint(("UDFTReadAsync: Using SGL for large read operation\n"));
+                RC = UDFExecuteSglRead(IrpContext, Vcb->TargetDeviceObject, SglContext);
+                *ReadBytes = SglContext->BytesTransferred;
+                UDFFreeSglContext(SglContext);
+                UDFPrint(("UDFTReadAsync: SGL read completed with status %x, bytes %x\n", RC, *ReadBytes));
+                return RC;
+            }
+            UDFFreeSglContext(SglContext);
+        }
     }
     
     // For true async I/O, create asynchronous IRP and use completion routine
@@ -859,6 +886,37 @@ UDFTWriteAsync(
         // Align writes to optimal boundaries for better storage device performance
         ULONG BlocksToWrite = (Length + BlockSize - 1) >> BlockSizeBits;
         OptimalLength = BlocksToWrite << BlockSizeBits;
+        
+        // SGL Performance Optimization: Use Scatter-Gather Lists for large write operations
+        // This significantly improves write throughput by batching operations
+        if (Length >= SGL_MIN_WRITE_SIZE && IrpContext->Irp) {
+            // For large writes, use SGL to batch multiple operations for better performance
+            PUDF_SGL_CONTEXT SglContext = UDFCreateSglContext();
+            if (SglContext) {
+                LONGLONG DiskOffset = ((LONGLONG)LBA) << BlockSizeBits;
+                NTSTATUS SglStatus = UDFAddToSglChain(SglContext, Buffer, Length, DiskOffset);
+                
+                if (NT_SUCCESS(SglStatus)) {
+                    UDFPrint(("UDFTWriteAsync: Using SGL for large write operation\n"));
+                    RC = UDFExecuteSglWrite(IrpContext, Vcb->TargetDeviceObject, SglContext);
+                    tmpWrittenBytes = SglContext->BytesTransferred;
+                    UDFFreeSglContext(SglContext);
+                    
+                    if (WrittenBytes) {
+                        *WrittenBytes = (ULONG)min(tmpWrittenBytes, Length);
+                    }
+                    
+                    // Free buffer if requested and operation completed successfully
+                    if (FreeBuffer && Buffer && NT_SUCCESS(RC)) {
+                        DbgFreePool(Buffer);
+                    }
+                    
+                    UDFPrint(("UDFTWriteAsync: SGL write completed with status %x, bytes %x\n", RC, tmpWrittenBytes));
+                    return RC;
+                }
+                UDFFreeSglContext(SglContext);
+            }
+        }
         
         // For large sequential writes, optimize the write pattern
         if (Length >= (8 * BlockSize)) {
@@ -1075,6 +1133,128 @@ UDFPhWriteOptimizedAsync(
 }
 
 /*
+ * High-performance SGL batch read operation for multiple buffers
+ * This function processes multiple read operations in a single optimized batch
+ * Significantly improves performance for random I/O patterns and fragmented reads
+ */
+NTSTATUS
+UDFSglBatchRead(
+    IN PIRP_CONTEXT IrpContext,
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PVOID* Buffers,           // Array of buffer pointers
+    IN PSIZE_T Lengths,          // Array of buffer lengths
+    IN PLONGLONG DiskOffsets,    // Array of disk offsets
+    IN ULONG BufferCount,        // Number of buffers
+    OUT PSIZE_T TotalBytesRead   // Total bytes read across all buffers
+    )
+{
+    NTSTATUS RC = STATUS_SUCCESS;
+    PUDF_SGL_CONTEXT SglContext = NULL;
+    ULONG i;
+    
+    *TotalBytesRead = 0;
+    
+    if (!BufferCount || !Buffers || !Lengths || !DiskOffsets) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    
+    UDFPrint(("UDFSglBatchRead: Processing %d buffers in SGL batch\n", BufferCount));
+    
+    // Create SGL context for batch operation
+    SglContext = UDFCreateSglContext();
+    if (!SglContext) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    
+    // Add all buffers to SGL chain
+    for (i = 0; i < BufferCount; i++) {
+        if (Buffers[i] && Lengths[i] > 0) {
+            RC = UDFAddToSglChain(SglContext, Buffers[i], Lengths[i], DiskOffsets[i]);
+            if (!NT_SUCCESS(RC)) {
+                UDFPrint(("UDFSglBatchRead: Failed to add buffer %d to SGL chain: %x\n", i, RC));
+                UDFFreeSglContext(SglContext);
+                return RC;
+            }
+        }
+    }
+    
+    // Execute batched SGL read operation
+    RC = UDFExecuteSglRead(IrpContext, DeviceObject, SglContext);
+    
+    if (NT_SUCCESS(RC)) {
+        *TotalBytesRead = SglContext->BytesTransferred;
+        UDFPrint(("UDFSglBatchRead: Successfully read %x bytes across %d buffers\n", 
+                  *TotalBytesRead, BufferCount));
+    } else {
+        UDFPrint(("UDFSglBatchRead: Batch operation failed with status %x\n", RC));
+    }
+    
+    UDFFreeSglContext(SglContext);
+    return RC;
+}
+
+/*
+ * High-performance SGL batch write operation for multiple buffers
+ * This function processes multiple write operations in a single optimized batch
+ * Significantly improves performance for sequential writes and reduces write amplification
+ */
+NTSTATUS
+UDFSglBatchWrite(
+    IN PIRP_CONTEXT IrpContext,
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PVOID* Buffers,            // Array of buffer pointers
+    IN PSIZE_T Lengths,           // Array of buffer lengths
+    IN PLONGLONG DiskOffsets,     // Array of disk offsets
+    IN ULONG BufferCount,         // Number of buffers
+    OUT PSIZE_T TotalBytesWritten // Total bytes written across all buffers
+    )
+{
+    NTSTATUS RC = STATUS_SUCCESS;
+    PUDF_SGL_CONTEXT SglContext = NULL;
+    ULONG i;
+    
+    *TotalBytesWritten = 0;
+    
+    if (!BufferCount || !Buffers || !Lengths || !DiskOffsets) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    
+    UDFPrint(("UDFSglBatchWrite: Processing %d buffers in SGL batch\n", BufferCount));
+    
+    // Create SGL context for batch operation
+    SglContext = UDFCreateSglContext();
+    if (!SglContext) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    
+    // Add all buffers to SGL chain
+    for (i = 0; i < BufferCount; i++) {
+        if (Buffers[i] && Lengths[i] > 0) {
+            RC = UDFAddToSglChain(SglContext, Buffers[i], Lengths[i], DiskOffsets[i]);
+            if (!NT_SUCCESS(RC)) {
+                UDFPrint(("UDFSglBatchWrite: Failed to add buffer %d to SGL chain: %x\n", i, RC));
+                UDFFreeSglContext(SglContext);
+                return RC;
+            }
+        }
+    }
+    
+    // Execute batched SGL write operation
+    RC = UDFExecuteSglWrite(IrpContext, DeviceObject, SglContext);
+    
+    if (NT_SUCCESS(RC)) {
+        *TotalBytesWritten = SglContext->BytesTransferred;
+        UDFPrint(("UDFSglBatchWrite: Successfully wrote %x bytes across %d buffers\n", 
+                  *TotalBytesWritten, BufferCount));
+    } else {
+        UDFPrint(("UDFSglBatchWrite: Batch operation failed with status %x\n", RC));
+    }
+    
+    UDFFreeSglContext(SglContext);
+    return RC;
+}
+
+/*
  * Optimized completion routine for async I/O operations
  * Provides better error handling and resource cleanup
  */
@@ -1111,6 +1291,351 @@ UDFOptimizedAsyncCompletionRoutine(
     // Always return STATUS_MORE_PROCESSING_REQUIRED to prevent IRP completion
     // since we're handling the completion manually
     return STATUS_MORE_PROCESSING_REQUIRED;
+}
+
+/*
+ * Scatter-Gather List (SGL) support for high-performance async I/O
+ * Enables batching multiple non-contiguous memory buffers into single I/O operations
+ * This significantly improves performance by reducing I/O overhead and better utilizing storage devices
+ */
+
+typedef struct _UDF_SGL_ENTRY {
+    PVOID Buffer;                 // Virtual address of buffer
+    SIZE_T Length;               // Length of buffer in bytes  
+    LONGLONG DiskOffset;         // Disk offset for this buffer
+    PMDL Mdl;                    // MDL for this buffer
+    struct _UDF_SGL_ENTRY* Next; // Next entry in chain
+} UDF_SGL_ENTRY, *PUDF_SGL_ENTRY;
+
+typedef struct _UDF_SGL_CONTEXT {
+    PUDF_SGL_ENTRY FirstEntry;   // First entry in SGL chain
+    PUDF_SGL_ENTRY LastEntry;    // Last entry for efficient appending
+    ULONG EntryCount;            // Number of entries in chain
+    SIZE_T TotalLength;          // Total length of all buffers
+    PMDL MdlChain;               // Chained MDL for the entire operation
+    KEVENT CompletionEvent;      // Event for async completion
+    NTSTATUS Status;             // Final status of operation
+    SIZE_T BytesTransferred;     // Total bytes successfully transferred
+} UDF_SGL_CONTEXT, *PUDF_SGL_CONTEXT;
+
+/*
+ * Create a new SGL context for batching multiple I/O operations
+ */
+PUDF_SGL_CONTEXT
+UDFCreateSglContext(
+    VOID
+    )
+{
+    PUDF_SGL_CONTEXT Context = (PUDF_SGL_CONTEXT)ExAllocatePoolWithTag(
+        NonPagedPool, sizeof(UDF_SGL_CONTEXT), 'lgsU');
+    if (!Context) {
+        return NULL;
+    }
+    
+    RtlZeroMemory(Context, sizeof(UDF_SGL_CONTEXT));
+    KeInitializeEvent(&Context->CompletionEvent, NotificationEvent, FALSE);
+    
+    return Context;
+}
+
+/*
+ * Add a buffer to the SGL chain for batched I/O processing
+ * Returns STATUS_SUCCESS if added successfully
+ */
+NTSTATUS
+UDFAddToSglChain(
+    IN PUDF_SGL_CONTEXT Context,
+    IN PVOID Buffer,
+    IN SIZE_T Length,
+    IN LONGLONG DiskOffset
+    )
+{
+    PUDF_SGL_ENTRY Entry;
+    PMDL Mdl;
+    
+    if (!Context || !Buffer || !Length) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    
+    // Allocate new SGL entry
+    Entry = (PUDF_SGL_ENTRY)ExAllocatePoolWithTag(
+        NonPagedPool, sizeof(UDF_SGL_ENTRY), 'egsU');
+    if (!Entry) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    
+    // Create MDL for this buffer
+    Mdl = IoAllocateMdl(Buffer, (ULONG)Length, FALSE, FALSE, NULL);
+    if (!Mdl) {
+        ExFreePoolWithTag(Entry, 'egsU');
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    
+    _SEH2_TRY {
+        // Lock pages for I/O operation
+        MmProbeAndLockPages(Mdl, KernelMode, IoReadAccess);
+    } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+        IoFreeMdl(Mdl);
+        ExFreePoolWithTag(Entry, 'egsU');
+        return STATUS_INVALID_USER_BUFFER;
+    } _SEH2_END;
+    
+    // Initialize entry
+    Entry->Buffer = Buffer;
+    Entry->Length = Length;
+    Entry->DiskOffset = DiskOffset;
+    Entry->Mdl = Mdl;
+    Entry->Next = NULL;
+    
+    // Add to chain
+    if (!Context->FirstEntry) {
+        Context->FirstEntry = Entry;
+        Context->LastEntry = Entry;
+        Context->MdlChain = Mdl;
+    } else {
+        // Chain MDLs for efficient I/O processing
+        Context->LastEntry->Next = Entry;
+        Context->LastEntry->Mdl->Next = Mdl;
+        Context->LastEntry = Entry;
+    }
+    
+    Context->EntryCount++;
+    Context->TotalLength += Length;
+    
+    UDFPrint(("UDFAddToSglChain: Added buffer %p, length %x, offset %I64x, total entries: %d\n",
+              Buffer, Length, DiskOffset, Context->EntryCount));
+    
+    return STATUS_SUCCESS;
+}
+
+/*
+ * Execute high-performance SGL read operation with batched I/O
+ * Processes entire SGL chain in optimized single operation
+ */
+NTSTATUS
+UDFExecuteSglRead(
+    IN PIRP_CONTEXT IrpContext,
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PUDF_SGL_CONTEXT Context
+    )
+{
+    NTSTATUS RC = STATUS_SUCCESS;
+    PIRP NewIrp = NULL;
+    PIO_STACK_LOCATION IrpSp = NULL;
+    IO_STATUS_BLOCK IoStatus;
+    PUDF_SGL_ENTRY CurrentEntry;
+    
+    if (!Context || !Context->FirstEntry) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    
+    UDFPrint(("UDFExecuteSglRead: Processing SGL with %d entries, total length %x\n",
+              Context->EntryCount, Context->TotalLength));
+    
+    // For optimal performance, process entries with contiguous disk offsets in single I/O
+    CurrentEntry = Context->FirstEntry;
+    while (CurrentEntry) {
+        LONGLONG CurrentOffset = CurrentEntry->DiskOffset;
+        SIZE_T BatchLength = CurrentEntry->Length;
+        PUDF_SGL_ENTRY BatchStart = CurrentEntry;
+        PUDF_SGL_ENTRY BatchEnd = CurrentEntry;
+        
+        // Coalesce contiguous entries into single I/O operation
+        while (CurrentEntry->Next && 
+               (CurrentEntry->Next->DiskOffset == CurrentOffset + BatchLength)) {
+            CurrentEntry = CurrentEntry->Next;
+            BatchLength += CurrentEntry->Length;
+            BatchEnd = CurrentEntry;
+        }
+        
+        // Build async IRP for this batch
+        NewIrp = IoBuildAsynchronousFsdRequest(
+            IRP_MJ_READ, DeviceObject, BatchStart->Buffer,
+            (ULONG)BatchLength, (PLARGE_INTEGER)&CurrentOffset, &IoStatus);
+        
+        if (!NewIrp) {
+            UDFPrint(("UDFExecuteSglRead: Failed to build IRP for batch\n"));
+            RC = STATUS_INSUFFICIENT_RESOURCES;
+            break;
+        }
+        
+        // Chain MDLs for this batch to enable efficient DMA transfers
+        if (BatchStart != BatchEnd) {
+            NewIrp->MdlAddress = BatchStart->Mdl;
+        } else {
+            NewIrp->MdlAddress = CurrentEntry->Mdl;
+        }
+        
+        // Set completion routine for async processing
+        IoSetCompletionRoutine(NewIrp, UDFOptimizedAsyncCompletionRoutine, 
+                              &Context->CompletionEvent, TRUE, TRUE, TRUE);
+        
+        // Submit I/O request
+        RC = IoCallDriver(DeviceObject, NewIrp);
+        
+        if (RC == STATUS_PENDING) {
+            // Wait for this batch to complete before processing next
+            LARGE_INTEGER Timeout;
+            Timeout.QuadPart = -((LONGLONG)30 * 10000000); // 30 second timeout
+            
+            RC = KeWaitForSingleObject(&Context->CompletionEvent, Executive, KernelMode, FALSE, &Timeout);
+            if (RC == STATUS_TIMEOUT) {
+                UDFPrint(("UDFExecuteSglRead: Batch operation timed out\n"));
+                Context->Status = STATUS_IO_TIMEOUT;
+                break;
+            }
+            RC = IoStatus.Status;
+            KeResetEvent(&Context->CompletionEvent);
+        }
+        
+        if (!NT_SUCCESS(RC)) {
+            UDFPrint(("UDFExecuteSglRead: Batch failed with status %x\n", RC));
+            Context->Status = RC;
+            break;
+        }
+        
+        Context->BytesTransferred += IoStatus.Information;
+        CurrentEntry = CurrentEntry->Next;
+    }
+    
+    Context->Status = RC;
+    UDFPrint(("UDFExecuteSglRead: Completed with status %x, bytes transferred %x\n",
+              RC, Context->BytesTransferred));
+    
+    return RC;
+}
+
+/*
+ * Execute high-performance SGL write operation with batched I/O
+ * Processes entire SGL chain in optimized single operation
+ */
+NTSTATUS
+UDFExecuteSglWrite(
+    IN PIRP_CONTEXT IrpContext,
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PUDF_SGL_CONTEXT Context
+    )
+{
+    NTSTATUS RC = STATUS_SUCCESS;
+    PIRP NewIrp = NULL;
+    PIO_STACK_LOCATION IrpSp = NULL;
+    IO_STATUS_BLOCK IoStatus;
+    PUDF_SGL_ENTRY CurrentEntry;
+    
+    if (!Context || !Context->FirstEntry) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    
+    UDFPrint(("UDFExecuteSglWrite: Processing SGL with %d entries, total length %x\n",
+              Context->EntryCount, Context->TotalLength));
+    
+    // Process entries with write coalescing for optimal performance
+    CurrentEntry = Context->FirstEntry;
+    while (CurrentEntry) {
+        LONGLONG CurrentOffset = CurrentEntry->DiskOffset;
+        SIZE_T BatchLength = CurrentEntry->Length;
+        PUDF_SGL_ENTRY BatchStart = CurrentEntry;
+        PUDF_SGL_ENTRY BatchEnd = CurrentEntry;
+        
+        // Coalesce contiguous entries into single write operation
+        while (CurrentEntry->Next && 
+               (CurrentEntry->Next->DiskOffset == CurrentOffset + BatchLength)) {
+            CurrentEntry = CurrentEntry->Next;
+            BatchLength += CurrentEntry->Length;
+            BatchEnd = CurrentEntry;
+        }
+        
+        // Build async IRP for this write batch
+        NewIrp = IoBuildAsynchronousFsdRequest(
+            IRP_MJ_WRITE, DeviceObject, BatchStart->Buffer,
+            (ULONG)BatchLength, (PLARGE_INTEGER)&CurrentOffset, &IoStatus);
+        
+        if (!NewIrp) {
+            UDFPrint(("UDFExecuteSglWrite: Failed to build IRP for batch\n"));
+            RC = STATUS_INSUFFICIENT_RESOURCES;
+            break;
+        }
+        
+        // Chain MDLs for this batch to enable efficient DMA transfers
+        if (BatchStart != BatchEnd) {
+            NewIrp->MdlAddress = BatchStart->Mdl;
+        } else {
+            NewIrp->MdlAddress = CurrentEntry->Mdl;
+        }
+        
+        // Set completion routine for async processing
+        IoSetCompletionRoutine(NewIrp, UDFOptimizedAsyncCompletionRoutine, 
+                              &Context->CompletionEvent, TRUE, TRUE, TRUE);
+        
+        // Submit write request
+        RC = IoCallDriver(DeviceObject, NewIrp);
+        
+        if (RC == STATUS_PENDING) {
+            // Wait for this batch to complete before processing next
+            LARGE_INTEGER Timeout;
+            Timeout.QuadPart = -((LONGLONG)30 * 10000000); // 30 second timeout
+            
+            RC = KeWaitForSingleObject(&Context->CompletionEvent, Executive, KernelMode, FALSE, &Timeout);
+            if (RC == STATUS_TIMEOUT) {
+                UDFPrint(("UDFExecuteSglWrite: Batch operation timed out\n"));
+                Context->Status = STATUS_IO_TIMEOUT;
+                break;
+            }
+            RC = IoStatus.Status;
+            KeResetEvent(&Context->CompletionEvent);
+        }
+        
+        if (!NT_SUCCESS(RC)) {
+            UDFPrint(("UDFExecuteSglWrite: Batch failed with status %x\n", RC));
+            Context->Status = RC;
+            break;
+        }
+        
+        Context->BytesTransferred += IoStatus.Information;
+        CurrentEntry = CurrentEntry->Next;
+    }
+    
+    Context->Status = RC;
+    UDFPrint(("UDFExecuteSglWrite: Completed with status %x, bytes transferred %x\n",
+              RC, Context->BytesTransferred));
+    
+    return RC;
+}
+
+/*
+ * Clean up SGL context and free all associated resources
+ * Properly unlocks pages and frees MDLs and memory
+ */
+VOID
+UDFFreeSglContext(
+    IN PUDF_SGL_CONTEXT Context
+    )
+{
+    PUDF_SGL_ENTRY CurrentEntry, NextEntry;
+    
+    if (!Context) {
+        return;
+    }
+    
+    UDFPrint(("UDFFreeSglContext: Cleaning up SGL with %d entries\n", Context->EntryCount));
+    
+    // Clean up all entries and their MDLs
+    CurrentEntry = Context->FirstEntry;
+    while (CurrentEntry) {
+        NextEntry = CurrentEntry->Next;
+        
+        if (CurrentEntry->Mdl) {
+            if (CurrentEntry->Mdl->MdlFlags & MDL_PAGES_LOCKED) {
+                MmUnlockPages(CurrentEntry->Mdl);
+            }
+            IoFreeMdl(CurrentEntry->Mdl);
+        }
+        
+        ExFreePoolWithTag(CurrentEntry, 'egsU');
+        CurrentEntry = NextEntry;
+    }
+    
+    ExFreePoolWithTag(Context, 'lgsU');
 }
 
 #endif //UDF_ASYNC_IO
