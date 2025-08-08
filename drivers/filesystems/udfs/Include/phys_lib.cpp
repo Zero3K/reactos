@@ -750,7 +750,7 @@ try_exit: NOTHING;
 #ifdef UDF_ASYNC_IO
 
 // Performance tuning constants for SGL and async I/O optimizations
-#define READ_AHEAD_GRANULARITY (256 * 1024)  // 256KB read-ahead for sequential patterns
+// Note: READ_AHEAD_GRANULARITY is already defined in udffs.h
 #define SGL_MIN_READ_SIZE      (32 * 1024)   // Minimum size to use SGL for reads (32KB)
 #define SGL_MIN_WRITE_SIZE     (16 * 1024)   // Minimum size to use SGL for writes (16KB)
 
@@ -1298,25 +1298,6 @@ UDFOptimizedAsyncCompletionRoutine(
  * Enables batching multiple non-contiguous memory buffers into single I/O operations
  * This significantly improves performance by reducing I/O overhead and better utilizing storage devices
  */
-
-typedef struct _UDF_SGL_ENTRY {
-    PVOID Buffer;                 // Virtual address of buffer
-    SIZE_T Length;               // Length of buffer in bytes  
-    LONGLONG DiskOffset;         // Disk offset for this buffer
-    PMDL Mdl;                    // MDL for this buffer
-    struct _UDF_SGL_ENTRY* Next; // Next entry in chain
-} UDF_SGL_ENTRY, *PUDF_SGL_ENTRY;
-
-typedef struct _UDF_SGL_CONTEXT {
-    PUDF_SGL_ENTRY FirstEntry;   // First entry in SGL chain
-    PUDF_SGL_ENTRY LastEntry;    // Last entry for efficient appending
-    ULONG EntryCount;            // Number of entries in chain
-    SIZE_T TotalLength;          // Total length of all buffers
-    PMDL MdlChain;               // Chained MDL for the entire operation
-    KEVENT CompletionEvent;      // Event for async completion
-    NTSTATUS Status;             // Final status of operation
-    SIZE_T BytesTransferred;     // Total bytes successfully transferred
-} UDF_SGL_CONTEXT, *PUDF_SGL_CONTEXT;
 
 /*
  * Create a new SGL context for batching multiple I/O operations
