@@ -806,10 +806,8 @@ UDFTReadAsync(
         OptimalLength = BlocksToRead << BlockSizeBits;
     }
     
-    // SGL Performance Optimization: Use Scatter-Gather Lists for large or fragmented operations
-    // Disable SGL temporarily due to BAD_POOL_HEADER crashes from MDL chaining corruption
-    // TODO: Fix UDFAddToSglChain MDL corruption (line 1379) before re-enabling SGL
-    /*
+    // SGL Performance Optimization: Use Windows DDK compliant Scatter-Gather Lists for large operations
+    // Fixed: Now uses proper independent MDLs and IRP coordination without dangerous chaining
     // This significantly improves performance by batching multiple operations
     if (Length >= SGL_MIN_READ_SIZE && IrpContext->Irp) {
         // For large transfers, use SGL to batch multiple operations for better throughput
@@ -819,7 +817,7 @@ UDFTReadAsync(
             NTSTATUS SglStatus = UDFAddToSglChain(SglContext, Buffer, Length, DiskOffset);
             
             if (NT_SUCCESS(SglStatus)) {
-                UDFPrint(("UDFTReadAsync: Using SGL for large read operation\n"));
+                UDFPrint(("UDFTReadAsync: Using Windows DDK compliant SGL for large read operation\n"));
                 RC = UDFExecuteSglRead(IrpContext, Vcb->TargetDeviceObject, SglContext);
                 *ReadBytes = SglContext->BytesTransferred;
                 UDFFreeSglContext(SglContext);
@@ -829,7 +827,6 @@ UDFTReadAsync(
             UDFFreeSglContext(SglContext);
         }
     }
-    */
     
     // For true async I/O, create asynchronous IRP and use completion routine
     if (UseReadAhead && IrpContext->Irp) {
@@ -891,10 +888,8 @@ UDFTWriteAsync(
         ULONG BlocksToWrite = (Length + BlockSize - 1) >> BlockSizeBits;
         OptimalLength = BlocksToWrite << BlockSizeBits;
         
-        // Disable SGL temporarily due to BAD_POOL_HEADER crashes from MDL chaining corruption  
-        // TODO: Fix UDFAddToSglChain MDL corruption (line 1379) before re-enabling SGL
-        /*
-        // SGL Performance Optimization: Use Scatter-Gather Lists for large write operations
+        // SGL Performance Optimization: Use Windows DDK compliant Scatter-Gather Lists for large write operations
+        // Fixed: Now uses proper independent MDLs and IRP coordination without dangerous chaining
         // This significantly improves write throughput by batching operations
         if (Length >= SGL_MIN_WRITE_SIZE && IrpContext->Irp) {
             // For large writes, use SGL to batch multiple operations for better performance
@@ -904,7 +899,7 @@ UDFTWriteAsync(
                 NTSTATUS SglStatus = UDFAddToSglChain(SglContext, Buffer, Length, DiskOffset);
                 
                 if (NT_SUCCESS(SglStatus)) {
-                    UDFPrint(("UDFTWriteAsync: Using SGL for large write operation\n"));
+                    UDFPrint(("UDFTWriteAsync: Using Windows DDK compliant SGL for large write operation\n"));
                     RC = UDFExecuteSglWrite(IrpContext, Vcb->TargetDeviceObject, SglContext);
                     tmpWrittenBytes = SglContext->BytesTransferred;
                     UDFFreeSglContext(SglContext);
@@ -924,7 +919,6 @@ UDFTWriteAsync(
                 UDFFreeSglContext(SglContext);
             }
         }
-        */
         
         // For large sequential writes, optimize the write pattern
         if (Length >= (8 * BlockSize)) {
@@ -1308,7 +1302,8 @@ UDFOptimizedAsyncCompletionRoutine(
  */
 
 /*
- * Create a new SGL context for batching multiple I/O operations
+ * Create SGL context following Windows DDK patterns for coordinating multiple I/O operations
+ * Each operation gets its own IRP and MDL without dangerous chaining
  */
 PUDF_SGL_CONTEXT
 UDFCreateSglContext(
@@ -1323,13 +1318,15 @@ UDFCreateSglContext(
     
     RtlZeroMemory(Context, sizeof(UDF_SGL_CONTEXT));
     KeInitializeEvent(&Context->CompletionEvent, NotificationEvent, FALSE);
+    KeInitializeSpinLock(&Context->SpinLock);
     
+    UDFPrint(("UDFCreateSglContext: Created new SGL context %p\n", Context));
     return Context;
 }
 
 /*
- * Add a buffer to the SGL chain for batched I/O processing
- * Returns STATUS_SUCCESS if added successfully
+ * Add buffer to SGL using proper Windows DDK patterns
+ * Creates independent MDL and IRP for each buffer - no dangerous chaining
  */
 NTSTATUS
 UDFAddToSglChain(
@@ -1353,7 +1350,7 @@ UDFAddToSglChain(
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     
-    // Create MDL for this buffer
+    // Create independent MDL for this buffer (following Windows DDK patterns)
     Mdl = IoAllocateMdl(Buffer, (ULONG)Length, FALSE, FALSE, NULL);
     if (!Mdl) {
         ExFreePoolWithTag(Entry, 'egsU');
@@ -1369,38 +1366,104 @@ UDFAddToSglChain(
         return STATUS_INVALID_USER_BUFFER;
     } _SEH2_END;
     
-    // Initialize entry
+    // Initialize entry with independent structures (no chaining)
+    RtlZeroMemory(Entry, sizeof(UDF_SGL_ENTRY));
     Entry->Buffer = Buffer;
     Entry->Length = Length;
     Entry->DiskOffset = DiskOffset;
     Entry->Mdl = Mdl;
     Entry->Next = NULL;
+    Entry->Irp = NULL; // Will be created during execution
     
-    // Add to chain - Fixed: Remove dangerous MDL chaining that corrupts pool headers
+    // Add to software list (no MDL chaining - Windows DDK compliant)
     if (!Context->FirstEntry) {
         Context->FirstEntry = Entry;
         Context->LastEntry = Entry;
-        Context->MdlChain = Mdl;
     } else {
-        // Add entry to linked list safely without corrupting MDL internal structures
+        // Safe software chaining - never touch MDL->Next
         Context->LastEntry->Next = Entry;
         Context->LastEntry = Entry;
-        // NOTE: Removed dangerous "Context->LastEntry->Mdl->Next = Mdl" that was corrupting pool
-        // Individual MDLs are handled separately to prevent I/O manager corruption
     }
     
     Context->EntryCount++;
     Context->TotalLength += Length;
     
-    UDFPrint(("UDFAddToSglChain: Added buffer %p, length %x, offset %I64x, total entries: %d\n",
+    UDFPrint(("UDFAddToSglChain: Added buffer %p, length %x, offset %I64x, entries: %d\n",
               Buffer, Length, DiskOffset, Context->EntryCount));
     
     return STATUS_SUCCESS;
 }
 
 /*
- * Execute high-performance SGL read operation with batched I/O
- * Processes entire SGL chain in optimized single operation
+ * Windows DDK compliant completion routine for SGL operations
+ * Coordinates multiple independent I/O operations safely
+ */
+NTSTATUS
+NTAPI
+UDFSglCompletionRoutine(
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PIRP Irp,
+    IN PVOID Context
+    )
+{
+    PUDF_SGL_CONTEXT SglContext = (PUDF_SGL_CONTEXT)Context;
+    PUDF_SGL_ENTRY Entry = NULL;
+    KIRQL OldIrql;
+    ULONG CompletedCount;
+    BOOLEAN AllCompleted = FALSE;
+    
+    UNREFERENCED_PARAMETER(DeviceObject);
+    
+    if (!SglContext) {
+        return STATUS_MORE_PROCESSING_REQUIRED;
+    }
+    
+    // Find the entry associated with this IRP
+    Entry = SglContext->FirstEntry;
+    while (Entry && Entry->Irp != Irp) {
+        Entry = Entry->Next;
+    }
+    
+    if (Entry) {
+        // Update entry status
+        Entry->IoStatus = Irp->IoStatus;
+        
+        // Thread-safe completion tracking
+        KeAcquireSpinLock(&SglContext->SpinLock, &OldIrql);
+        
+        SglContext->CompletedCount++;
+        CompletedCount = SglContext->CompletedCount;
+        
+        // Update overall status and bytes transferred
+        if (NT_SUCCESS(Irp->IoStatus.Status)) {
+            SglContext->BytesTransferred += Irp->IoStatus.Information;
+        } else if (NT_SUCCESS(SglContext->Status)) {
+            // Record first error
+            SglContext->Status = Irp->IoStatus.Status;
+        }
+        
+        // Check if all operations completed
+        AllCompleted = (CompletedCount >= SglContext->EntryCount);
+        
+        KeReleaseSpinLock(&SglContext->SpinLock, OldIrql);
+        
+        UDFPrint(("UDFSglCompletionRoutine: Entry completed, status %x, bytes %x, total completed %d/%d\n",
+                  Irp->IoStatus.Status, Irp->IoStatus.Information, CompletedCount, SglContext->EntryCount));
+        
+        // Signal completion if all operations are done
+        if (AllCompleted) {
+            UDFPrint(("UDFSglCompletionRoutine: All SGL operations completed, signaling event\n"));
+            KeSetEvent(&SglContext->CompletionEvent, IO_DISK_INCREMENT, FALSE);
+        }
+    }
+    
+    // Always return MORE_PROCESSING_REQUIRED to maintain IRP ownership
+    return STATUS_MORE_PROCESSING_REQUIRED;
+}
+
+/*
+ * Execute SGL read operations using proper Windows DDK patterns
+ * Each buffer gets its own independent IRP - no dangerous chaining
  */
 NTSTATUS
 UDFExecuteSglRead(
@@ -1410,44 +1473,115 @@ UDFExecuteSglRead(
     )
 {
     NTSTATUS RC = STATUS_SUCCESS;
-    PIRP NewIrp = NULL;
-    PIO_STACK_LOCATION IrpSp = NULL;
-    IO_STATUS_BLOCK IoStatus;
     PUDF_SGL_ENTRY CurrentEntry;
+    PIRP NewIrp;
+    PIO_STACK_LOCATION IrpSp;
+    ULONG SubmittedCount = 0;
     
-    if (!Context || !Context->FirstEntry) {
+    if (!Context || !Context->FirstEntry || !DeviceObject) {
         return STATUS_INVALID_PARAMETER;
     }
     
-    UDFPrint(("UDFExecuteSglRead: Processing SGL with %d entries, total length %x\n",
-              Context->EntryCount, Context->TotalLength));
+    UDFPrint(("UDFExecuteSglRead: Starting SGL read with %d entries\n", Context->EntryCount));
     
-    // For optimal performance, process entries with contiguous disk offsets in single I/O
+    // Store context information for completion coordination
+    Context->IrpContext = IrpContext;
+    Context->DeviceObject = DeviceObject;
+    Context->IsWrite = FALSE;
+    Context->Status = STATUS_SUCCESS;
+    Context->BytesTransferred = 0;
+    Context->CompletedCount = 0;
+    
+    // Submit individual IRPs for each buffer (Windows DDK compliant approach)
     CurrentEntry = Context->FirstEntry;
-    while (CurrentEntry) {
-        LONGLONG CurrentOffset = CurrentEntry->DiskOffset;
-        SIZE_T BatchLength = CurrentEntry->Length;
-        PUDF_SGL_ENTRY BatchStart = CurrentEntry;
-        PUDF_SGL_ENTRY BatchEnd = CurrentEntry;
+    while (CurrentEntry && NT_SUCCESS(RC)) {
         
-        // Coalesce contiguous entries into single I/O operation
-        while (CurrentEntry->Next && 
-               (CurrentEntry->Next->DiskOffset == CurrentOffset + BatchLength)) {
-            CurrentEntry = CurrentEntry->Next;
-            BatchLength += CurrentEntry->Length;
-            BatchEnd = CurrentEntry;
-        }
-        
-        // Build async IRP for this batch
+        // Create independent IRP for this buffer
         NewIrp = IoBuildAsynchronousFsdRequest(
-            IRP_MJ_READ, DeviceObject, BatchStart->Buffer,
-            (ULONG)BatchLength, (PLARGE_INTEGER)&CurrentOffset, &IoStatus);
+            IRP_MJ_READ,
+            DeviceObject,
+            CurrentEntry->Buffer,
+            (ULONG)CurrentEntry->Length,
+            (PLARGE_INTEGER)&CurrentEntry->DiskOffset,
+            &CurrentEntry->IoStatus
+        );
         
         if (!NewIrp) {
-            UDFPrint(("UDFExecuteSglRead: Failed to build IRP for batch\n"));
+            UDFPrint(("UDFExecuteSglRead: Failed to create IRP for entry %p\n", CurrentEntry));
             RC = STATUS_INSUFFICIENT_RESOURCES;
             break;
         }
+        
+        // Store IRP reference for completion tracking
+        CurrentEntry->Irp = NewIrp;
+        
+        // Set up completion routine for coordination
+        IoSetCompletionRoutine(
+            NewIrp,
+            UDFSglCompletionRoutine,
+            Context,
+            TRUE,  // InvokeOnSuccess
+            TRUE,  // InvokeOnError  
+            TRUE   // InvokeOnCancel
+        );
+        
+        // Get stack location and set up MDL
+        IrpSp = IoGetNextIrpStackLocation(NewIrp);
+        IrpSp->Parameters.Read.Length = (ULONG)CurrentEntry->Length;
+        IrpSp->Parameters.Read.ByteOffset.QuadPart = CurrentEntry->DiskOffset;
+        
+        // Attach the independent MDL (no chaining)
+        NewIrp->MdlAddress = CurrentEntry->Mdl;
+        
+        // Submit the IRP asynchronously
+        RC = IoCallDriver(DeviceObject, NewIrp);
+        if (NT_SUCCESS(RC)) {
+            SubmittedCount++;
+            UDFPrint(("UDFExecuteSglRead: Submitted IRP %p for entry %p, offset %I64x, length %x\n",
+                      NewIrp, CurrentEntry, CurrentEntry->DiskOffset, CurrentEntry->Length));
+        } else {
+            UDFPrint(("UDFExecuteSglRead: Failed to submit IRP for entry %p, status %x\n", CurrentEntry, RC));
+            // Clean up this IRP since it failed to submit
+            CurrentEntry->Irp = NULL;
+            IoFreeIrp(NewIrp);
+            break;
+        }
+        
+        CurrentEntry = CurrentEntry->Next;
+    }
+    
+    // If any IRPs were submitted successfully, wait for completion
+    if (SubmittedCount > 0) {
+        UDFPrint(("UDFExecuteSglRead: Waiting for %d operations to complete\n", SubmittedCount));
+        
+        // Wait for all operations to complete
+        RC = KeWaitForSingleObject(
+            &Context->CompletionEvent,
+            Executive,
+            KernelMode,
+            FALSE,
+            NULL
+        );
+        
+        if (NT_SUCCESS(RC)) {
+            RC = Context->Status; // Use the final status from completion
+            UDFPrint(("UDFExecuteSglRead: All operations completed, final status %x, bytes %x\n",
+                      RC, Context->BytesTransferred));
+        }
+    }
+    
+    // Clean up all IRPs (completion routine maintains ownership)
+    CurrentEntry = Context->FirstEntry;
+    while (CurrentEntry) {
+        if (CurrentEntry->Irp) {
+            IoFreeIrp(CurrentEntry->Irp);
+            CurrentEntry->Irp = NULL;
+        }
+        CurrentEntry = CurrentEntry->Next;
+    }
+    
+    return RC;
+}
         
         // Chain MDLs for this batch to enable efficient DMA transfers
         if (BatchStart != BatchEnd) {
@@ -1496,8 +1630,8 @@ UDFExecuteSglRead(
 }
 
 /*
- * Execute high-performance SGL write operation with batched I/O
- * Processes entire SGL chain in optimized single operation
+ * Execute SGL write operations using proper Windows DDK patterns  
+ * Each buffer gets its own independent IRP - no dangerous chaining
  */
 NTSTATUS
 UDFExecuteSglWrite(
@@ -1507,94 +1641,119 @@ UDFExecuteSglWrite(
     )
 {
     NTSTATUS RC = STATUS_SUCCESS;
-    PIRP NewIrp = NULL;
-    PIO_STACK_LOCATION IrpSp = NULL;
-    IO_STATUS_BLOCK IoStatus;
     PUDF_SGL_ENTRY CurrentEntry;
+    PIRP NewIrp;
+    PIO_STACK_LOCATION IrpSp;
+    ULONG SubmittedCount = 0;
     
-    if (!Context || !Context->FirstEntry) {
+    if (!Context || !Context->FirstEntry || !DeviceObject) {
         return STATUS_INVALID_PARAMETER;
     }
     
-    UDFPrint(("UDFExecuteSglWrite: Processing SGL with %d entries, total length %x\n",
-              Context->EntryCount, Context->TotalLength));
+    UDFPrint(("UDFExecuteSglWrite: Starting SGL write with %d entries\n", Context->EntryCount));
     
-    // Process entries with write coalescing for optimal performance
+    // Store context information for completion coordination
+    Context->IrpContext = IrpContext;
+    Context->DeviceObject = DeviceObject;
+    Context->IsWrite = TRUE;
+    Context->Status = STATUS_SUCCESS;
+    Context->BytesTransferred = 0;
+    Context->CompletedCount = 0;
+    
+    // Submit individual IRPs for each buffer (Windows DDK compliant approach)
     CurrentEntry = Context->FirstEntry;
-    while (CurrentEntry) {
-        LONGLONG CurrentOffset = CurrentEntry->DiskOffset;
-        SIZE_T BatchLength = CurrentEntry->Length;
-        PUDF_SGL_ENTRY BatchStart = CurrentEntry;
-        PUDF_SGL_ENTRY BatchEnd = CurrentEntry;
+    while (CurrentEntry && NT_SUCCESS(RC)) {
         
-        // Coalesce contiguous entries into single write operation
-        while (CurrentEntry->Next && 
-               (CurrentEntry->Next->DiskOffset == CurrentOffset + BatchLength)) {
-            CurrentEntry = CurrentEntry->Next;
-            BatchLength += CurrentEntry->Length;
-            BatchEnd = CurrentEntry;
-        }
-        
-        // Build async IRP for this write batch
+        // Create independent IRP for this buffer
         NewIrp = IoBuildAsynchronousFsdRequest(
-            IRP_MJ_WRITE, DeviceObject, BatchStart->Buffer,
-            (ULONG)BatchLength, (PLARGE_INTEGER)&CurrentOffset, &IoStatus);
+            IRP_MJ_WRITE,
+            DeviceObject,
+            CurrentEntry->Buffer,
+            (ULONG)CurrentEntry->Length,
+            (PLARGE_INTEGER)&CurrentEntry->DiskOffset,
+            &CurrentEntry->IoStatus
+        );
         
         if (!NewIrp) {
-            UDFPrint(("UDFExecuteSglWrite: Failed to build IRP for batch\n"));
+            UDFPrint(("UDFExecuteSglWrite: Failed to create IRP for entry %p\n", CurrentEntry));
             RC = STATUS_INSUFFICIENT_RESOURCES;
             break;
         }
         
-        // Chain MDLs for this batch to enable efficient DMA transfers
-        if (BatchStart != BatchEnd) {
-            NewIrp->MdlAddress = BatchStart->Mdl;
-        } else {
-            NewIrp->MdlAddress = CurrentEntry->Mdl;
-        }
+        // Store IRP reference for completion tracking
+        CurrentEntry->Irp = NewIrp;
         
-        // Set completion routine for async processing
-        IoSetCompletionRoutine(NewIrp, UDFOptimizedAsyncCompletionRoutine, 
-                              &Context->CompletionEvent, TRUE, TRUE, TRUE);
+        // Set up completion routine for coordination
+        IoSetCompletionRoutine(
+            NewIrp,
+            UDFSglCompletionRoutine,
+            Context,
+            TRUE,  // InvokeOnSuccess
+            TRUE,  // InvokeOnError  
+            TRUE   // InvokeOnCancel
+        );
         
-        // Submit write request
+        // Get stack location and set up parameters
+        IrpSp = IoGetNextIrpStackLocation(NewIrp);
+        IrpSp->Parameters.Write.Length = (ULONG)CurrentEntry->Length;
+        IrpSp->Parameters.Write.ByteOffset.QuadPart = CurrentEntry->DiskOffset;
+        
+        // Attach the independent MDL (no chaining)
+        NewIrp->MdlAddress = CurrentEntry->Mdl;
+        
+        // Submit the IRP asynchronously
         RC = IoCallDriver(DeviceObject, NewIrp);
-        
-        if (RC == STATUS_PENDING) {
-            // Wait for this batch to complete before processing next
-            LARGE_INTEGER Timeout;
-            Timeout.QuadPart = -((LONGLONG)30 * 10000000); // 30 second timeout
-            
-            RC = KeWaitForSingleObject(&Context->CompletionEvent, Executive, KernelMode, FALSE, &Timeout);
-            if (RC == STATUS_TIMEOUT) {
-                UDFPrint(("UDFExecuteSglWrite: Batch operation timed out\n"));
-                Context->Status = STATUS_IO_TIMEOUT;
-                break;
-            }
-            RC = IoStatus.Status;
-            KeResetEvent(&Context->CompletionEvent);
-        }
-        
-        if (!NT_SUCCESS(RC)) {
-            UDFPrint(("UDFExecuteSglWrite: Batch failed with status %x\n", RC));
-            Context->Status = RC;
+        if (NT_SUCCESS(RC)) {
+            SubmittedCount++;
+            UDFPrint(("UDFExecuteSglWrite: Submitted IRP %p for entry %p, offset %I64x, length %x\n",
+                      NewIrp, CurrentEntry, CurrentEntry->DiskOffset, CurrentEntry->Length));
+        } else {
+            UDFPrint(("UDFExecuteSglWrite: Failed to submit IRP for entry %p, status %x\n", CurrentEntry, RC));
+            // Clean up this IRP since it failed to submit
+            CurrentEntry->Irp = NULL;
+            IoFreeIrp(NewIrp);
             break;
         }
         
-        Context->BytesTransferred += IoStatus.Information;
         CurrentEntry = CurrentEntry->Next;
     }
     
-    Context->Status = RC;
-    UDFPrint(("UDFExecuteSglWrite: Completed with status %x, bytes transferred %x\n",
-              RC, Context->BytesTransferred));
+    // If any IRPs were submitted successfully, wait for completion
+    if (SubmittedCount > 0) {
+        UDFPrint(("UDFExecuteSglWrite: Waiting for %d operations to complete\n", SubmittedCount));
+        
+        // Wait for all operations to complete
+        RC = KeWaitForSingleObject(
+            &Context->CompletionEvent,
+            Executive,
+            KernelMode,
+            FALSE,
+            NULL
+        );
+        
+        if (NT_SUCCESS(RC)) {
+            RC = Context->Status; // Use the final status from completion
+            UDFPrint(("UDFExecuteSglWrite: All operations completed, final status %x, bytes %x\n",
+                      RC, Context->BytesTransferred));
+        }
+    }
+    
+    // Clean up all IRPs (completion routine maintains ownership)
+    CurrentEntry = Context->FirstEntry;
+    while (CurrentEntry) {
+        if (CurrentEntry->Irp) {
+            IoFreeIrp(CurrentEntry->Irp);
+            CurrentEntry->Irp = NULL;
+        }
+        CurrentEntry = CurrentEntry->Next;
+    }
     
     return RC;
 }
 
 /*
- * Clean up SGL context and free all associated resources
- * Properly unlocks pages and frees MDLs and memory
+ * Clean up SGL context following Windows DDK patterns  
+ * Safely frees all resources without corrupting kernel structures
  */
 VOID
 UDFFreeSglContext(
@@ -1607,37 +1766,53 @@ UDFFreeSglContext(
         return;
     }
     
-    UDFPrint(("UDFFreeSglContext: Cleaning up SGL with %d entries\n", Context->EntryCount));
+    UDFPrint(("UDFFreeSglContext: Cleaning up SGL context %p with %d entries\n", 
+              Context, Context->EntryCount));
     
-    // Clean up all entries and their MDLs safely
+    // Clean up all entries and their independent resources
     CurrentEntry = Context->FirstEntry;
     while (CurrentEntry) {
         NextEntry = CurrentEntry->Next;
         
+        // Clean up IRP if still present (shouldn't happen in normal flow)
+        if (CurrentEntry->Irp) {
+            UDFPrint(("UDFFreeSglContext: Warning - cleaning up orphaned IRP %p\n", CurrentEntry->Irp));
+            IoFreeIrp(CurrentEntry->Irp);
+            CurrentEntry->Irp = NULL;
+        }
+        
+        // Clean up independent MDL (Windows DDK compliant)
         if (CurrentEntry->Mdl) {
-            // Additional safety check to prevent double-unlock
             _SEH2_TRY {
+                // Check if pages are locked before unlocking
                 if (CurrentEntry->Mdl->MdlFlags & MDL_PAGES_LOCKED) {
                     MmUnlockPages(CurrentEntry->Mdl);
                 }
                 IoFreeMdl(CurrentEntry->Mdl);
             } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
-                UDFPrint(("UDFFreeSglContext: Exception while freeing MDL - possible corruption\n"));
+                UDFPrint(("UDFFreeSglContext: Exception freeing MDL %p - continuing cleanup\n", 
+                          CurrentEntry->Mdl));
                 // Continue cleanup to prevent resource leaks
             } _SEH2_END;
-            CurrentEntry->Mdl = NULL; // Prevent double-free
+            CurrentEntry->Mdl = NULL;
         }
         
+        // Free the entry structure
         ExFreePoolWithTag(CurrentEntry, 'egsU');
         CurrentEntry = NextEntry;
     }
     
-    // Clear context to prevent double-free
+    // Clear context fields to prevent double-free scenarios
     Context->FirstEntry = NULL;
     Context->LastEntry = NULL;
     Context->EntryCount = 0;
+    Context->CompletedCount = 0;
+    Context->IrpContext = NULL;
+    Context->DeviceObject = NULL;
     
+    // Free the context structure
     ExFreePoolWithTag(Context, 'lgsU');
+    UDFPrint(("UDFFreeSglContext: SGL context cleanup completed\n"));
 }
 
 #endif //UDF_ASYNC_IO

@@ -194,26 +194,41 @@ NTSTATUS UDFResetDeviceDriver(IN PVCB Vcb,
  * These functions enable batching multiple buffers into single I/O operations
  */
 
-// SGL entry structure for chaining multiple buffers
+// SGL entry structure for independent buffer operations (Windows DDK compliant)
 typedef struct _UDF_SGL_ENTRY {
     PVOID Buffer;                 // Virtual address of buffer
     SIZE_T Length;               // Length of buffer in bytes  
     LONGLONG DiskOffset;         // Disk offset for this buffer
-    PMDL Mdl;                    // MDL for this buffer
-    struct _UDF_SGL_ENTRY* Next; // Next entry in chain
+    PMDL Mdl;                    // Independent MDL for this buffer (never chained)
+    PIRP Irp;                    // Individual IRP for this operation
+    IO_STATUS_BLOCK IoStatus;    // Status block for this operation
+    struct _UDF_SGL_ENTRY* Next; // Next entry in list (software chaining only)
 } UDF_SGL_ENTRY, *PUDF_SGL_ENTRY;
 
-// SGL context structure for managing batched I/O operations
+// SGL context structure for coordinating multiple independent I/O operations
 typedef struct _UDF_SGL_CONTEXT {
-    PUDF_SGL_ENTRY FirstEntry;   // First entry in SGL chain
+    PUDF_SGL_ENTRY FirstEntry;   // First entry in operation list
     PUDF_SGL_ENTRY LastEntry;    // Last entry for efficient appending
-    ULONG EntryCount;            // Number of entries in chain
+    ULONG EntryCount;            // Number of operations in the batch
+    ULONG CompletedCount;        // Number of completed operations (for coordination)
     SIZE_T TotalLength;          // Total length of all buffers
-    PMDL MdlChain;               // Chained MDL for the entire operation
-    KEVENT CompletionEvent;      // Event for async completion
-    NTSTATUS Status;             // Final status of operation
+    KEVENT CompletionEvent;      // Event signaled when all operations complete
+    NTSTATUS Status;             // Final status (first error or SUCCESS)
     SIZE_T BytesTransferred;     // Total bytes successfully transferred
+    PIRP_CONTEXT IrpContext;     // Associated IRP context
+    PDEVICE_OBJECT DeviceObject; // Target device for operations
+    BOOLEAN IsWrite;             // TRUE for write operations, FALSE for read
+    KSPIN_LOCK SpinLock;         // Protects completion coordination
 } UDF_SGL_CONTEXT, *PUDF_SGL_CONTEXT;
+
+// Windows DDK compliant completion routine for coordinating multiple SGL operations
+NTSTATUS
+NTAPI
+UDFSglCompletionRoutine(
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PIRP Irp,
+    IN PVOID Context
+    );
 
 // Create SGL context for batching multiple I/O operations  
 PUDF_SGL_CONTEXT
