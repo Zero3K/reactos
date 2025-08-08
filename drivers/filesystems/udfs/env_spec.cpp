@@ -976,7 +976,15 @@ UDFPhWriteVerifySynchronous(
     //PUCHAR v_buff = NULL;
     //ULONG ReadBytes;
 
+#ifdef UDF_USE_SGL_OPTIMIZATION
+    RC = UDFPhWriteEnhanced(DeviceObject, Buffer, Length, Offset, WrittenBytes, Flags);
+#else
+#ifdef UDF_USE_SGL_OPTIMIZATION
+    RC = UDFPhWriteEnhanced(DeviceObject, Buffer, Length, Offset, WrittenBytes, Flags);
+#else
     RC = UDFPhWriteSynchronous(DeviceObject, Buffer, Length, Offset, WrittenBytes, Flags);
+#endif // UDF_USE_SGL_OPTIMIZATION
+#endif // UDF_USE_SGL_OPTIMIZATION
 /*
     if (!Verify)
         return RC;
