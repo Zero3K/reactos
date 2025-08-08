@@ -897,6 +897,7 @@ UDFTWriteAsync(
     UNREFERENCED_PARAMETER(WrittenBytes);
     UNREFERENCED_PARAMETER(FreeBuffer);
     return STATUS_ACCESS_DENIED;
+#endif //UDF_READ_ONLY_BUILD
 } // end UDFTWriteAsync()
 
 /*
