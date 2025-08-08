@@ -893,17 +893,20 @@ UDFPhReadEnhanced(
             } _SEH2_END;
             
             if (UseSGL) {
-                // Clean up MDL
-                _SEH2_TRY {
-                    MmUnlockPages(Mdl);
-                } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
-                    UDFPrint(("UDFPhReadEnhanced: Exception during MDL unlock\n"));
-                } _SEH2_END;
-                IoFreeMdl(Mdl);
-                
+                // When using SGL path, the I/O subsystem takes ownership of the MDL
+                // and automatically unlocks/frees it when the IRP completes.
+                // We should NOT manually unlock it here to avoid double-unlock BSOD.
                 if (NT_SUCCESS(RC)) {
-                    UDFPrint(("UDFPhReadEnhanced: MDL read completed successfully\n"));
+                    UDFPrint(("UDFPhReadEnhanced: MDL read completed successfully (I/O subsystem handled MDL cleanup)\n"));
                     return RC;
+                } else {
+                    // Only cleanup manually if SGL operation failed
+                    _SEH2_TRY {
+                        MmUnlockPages(Mdl);
+                    } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+                        UDFPrint(("UDFPhReadEnhanced: Exception during MDL unlock after failure\n"));
+                    } _SEH2_END;
+                    IoFreeMdl(Mdl);
                 }
             } else {
                 IoFreeMdl(Mdl);
@@ -973,17 +976,20 @@ UDFPhWriteEnhanced(
             } _SEH2_END;
             
             if (UseSGL) {
-                // Clean up MDL
-                _SEH2_TRY {
-                    MmUnlockPages(Mdl);
-                } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
-                    UDFPrint(("UDFPhWriteEnhanced: Exception during MDL unlock\n"));
-                } _SEH2_END;
-                IoFreeMdl(Mdl);
-                
+                // When using SGL path, the I/O subsystem takes ownership of the MDL
+                // and automatically unlocks/frees it when the IRP completes.
+                // We should NOT manually unlock it here to avoid double-unlock BSOD.
                 if (NT_SUCCESS(RC)) {
-                    UDFPrint(("UDFPhWriteEnhanced: MDL write completed successfully\n"));
+                    UDFPrint(("UDFPhWriteEnhanced: MDL write completed successfully (I/O subsystem handled MDL cleanup)\n"));
                     return RC;
+                } else {
+                    // Only cleanup manually if SGL operation failed
+                    _SEH2_TRY {
+                        MmUnlockPages(Mdl);
+                    } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+                        UDFPrint(("UDFPhWriteEnhanced: Exception during MDL unlock after failure\n"));
+                    } _SEH2_END;
+                    IoFreeMdl(Mdl);
                 }
             } else {
                 IoFreeMdl(Mdl);
