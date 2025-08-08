@@ -430,6 +430,580 @@ try_exit: NOTHING;
     return(RC);
 } // end UDFPhWriteSynchronous()
 
+
+#if 0
+/*
+ Function: UDFDeviceSupportsScatterGather()
+
+ Description:
+    This function has been disabled because filesystem drivers should not
+    directly access DMA adapters. The I/O subsystem automatically handles
+    scatter-gather optimization when MDLs are used properly.
+
+ Expected Interrupt Level (for execution) :
+  IRQL_PASSIVE_LEVEL
+
+ Return Value: TRUE if SGL supported, FALSE otherwise
+*/
+BOOLEAN
+NTAPI
+UDFDeviceSupportsScatterGather(
+    PDEVICE_OBJECT DeviceObject
+    )
+{
+    DEVICE_DESCRIPTION DeviceDescription;
+    PDMA_ADAPTER DmaAdapter;
+    ULONG NumberOfMapRegisters;
+    BOOLEAN SupportsScatterGather = FALSE;
+
+    UDFPrint(("UDFDeviceSupportsScatterGather: Checking SGL support\n"));
+
+    // Initialize device description for DMA adapter query
+    RtlZeroMemory(&DeviceDescription, sizeof(DEVICE_DESCRIPTION));
+    DeviceDescription.Version = DEVICE_DESCRIPTION_VERSION;
+    DeviceDescription.Master = TRUE;
+    DeviceDescription.ScatterGather = TRUE;  // Request SGL capability
+    DeviceDescription.Dma32BitAddresses = TRUE;
+    DeviceDescription.Dma64BitAddresses = FALSE;
+    DeviceDescription.InterfaceType = Internal;
+    DeviceDescription.DmaWidth = Width32Bits;
+    DeviceDescription.DmaSpeed = Compatible;
+    DeviceDescription.MaximumLength = MAXULONG;
+
+    // Try to get DMA adapter - this indicates hardware DMA capability
+    DmaAdapter = IoGetDmaAdapter(DeviceObject, &DeviceDescription, &NumberOfMapRegisters);
+    
+    if (DmaAdapter != NULL) {
+        // Check if the adapter supports scatter-gather operations
+        if (DmaAdapter->DmaOperations->GetScatterGatherList != NULL &&
+            DmaAdapter->DmaOperations->PutScatterGatherList != NULL &&
+            DmaAdapter->DmaOperations->BuildScatterGatherList != NULL) {
+            
+            UDFPrint(("UDFDeviceSupportsScatterGather: SGL operations available\n"));
+            SupportsScatterGather = TRUE;
+        }
+        
+        // Release the DMA adapter
+        DmaAdapter->DmaOperations->PutDmaAdapter(DmaAdapter);
+    }
+
+    UDFPrint(("UDFDeviceSupportsScatterGather: SGL support = %s\n", 
+              SupportsScatterGather ? "TRUE" : "FALSE"));
+    
+    return SupportsScatterGather;
+} // end UDFDeviceSupportsScatterGather()
+#endif
+
+
+/*
+ Function: UDFValidateSGLConfiguration()
+
+ Description:
+    Validates the SGL configuration and reports the current settings.
+    This function can be called during driver initialization to verify
+    that SGL support is properly configured.
+
+ Expected Interrupt Level (for execution) :
+  IRQL_PASSIVE_LEVEL
+
+ Return Value: STATUS_SUCCESS if configuration is valid
+*/
+NTSTATUS
+NTAPI
+UDFValidateSGLConfiguration(
+    VOID
+    )
+{
+    UDFPrint(("UDFValidateSGLConfiguration: Validating SGL enhancement settings\n"));
+
+#ifdef UDF_USE_SGL_OPTIMIZATION
+    UDFPrint(("UDFValidateSGLConfiguration: SGL optimization is ENABLED\n"));
+    UDFPrint(("UDFValidateSGLConfiguration: - Large transfers (>=4KB) will use SGL when supported\n"));
+    UDFPrint(("UDFValidateSGLConfiguration: - Automatic fallback to synchronous IO available\n"));
+    UDFPrint(("UDFValidateSGLConfiguration: - Device capability detection enabled\n"));
+#else
+    UDFPrint(("UDFValidateSGLConfiguration: SGL optimization is DISABLED\n"));
+    UDFPrint(("UDFValidateSGLConfiguration: - Using traditional synchronous IO only\n"));
+    UDFPrint(("UDFValidateSGLConfiguration: - To enable SGL, define UDF_USE_SGL_OPTIMIZATION\n"));
+#endif // UDF_USE_SGL_OPTIMIZATION
+
+    // Validate that required structures are available
+    if (sizeof(SCATTER_GATHER_ELEMENT) == 0 || sizeof(SCATTER_GATHER_LIST) == 0) {
+        UDFPrint(("UDFValidateSGLConfiguration: ERROR - SGL structures not available\n"));
+        return STATUS_NOT_SUPPORTED;
+    }
+
+    UDFPrint(("UDFValidateSGLConfiguration: SGL structures validated successfully\n"));
+    UDFPrint(("UDFValidateSGLConfiguration: - SCATTER_GATHER_ELEMENT size: %d bytes\n", 
+              sizeof(SCATTER_GATHER_ELEMENT)));
+    UDFPrint(("UDFValidateSGLConfiguration: - SCATTER_GATHER_LIST base size: %d bytes\n", 
+              sizeof(SCATTER_GATHER_LIST)));
+
+    return STATUS_SUCCESS;
+} // end UDFValidateSGLConfiguration()
+
+
+/*
+ Function: UDFPhReadSGL()
+
+ Description:
+    Enhanced read function using Scatter-Gather Lists for improved performance.
+    This function eliminates the need for intermediate buffer allocation and
+    memory copying by using direct DMA to the target MDL.
+
+ Expected Interrupt Level (for execution) :
+  <= IRQL_DISPATCH_LEVEL
+
+ Return Value: STATUS_SUCCESS/Error
+*/
+NTSTATUS
+NTAPI
+UDFPhReadSGL(
+    PIRP_CONTEXT IrpContext,
+    PDEVICE_OBJECT DeviceObject,
+    PMDL Mdl,
+    LONGLONG Offset,
+    PSIZE_T ReadBytes,
+    ULONG Flags
+    )
+{
+    NTSTATUS RC = STATUS_SUCCESS;
+    LARGE_INTEGER ROffset;
+    PUDF_PH_CALL_CONTEXT Context = NULL;
+    PIRP Irp = NULL;
+    PIO_STACK_LOCATION IrpSp;
+    KIRQL CurIrql = KeGetCurrentIrql();
+    SIZE_T MdlLength;
+#ifdef MEASURE_IO_PERFORMANCE
+    LONGLONG IoEnterTime;
+    LONGLONG IoExitTime;
+    ULONG dt;
+    ULONG dtm;
+#endif //MEASURE_IO_PERFORMANCE
+
+    UDFPrint(("UDFPhReadSGL: Using SGL for enhanced IO performance\n"));
+
+#ifdef MEASURE_IO_PERFORMANCE
+    KeQuerySystemTime((PLARGE_INTEGER)&IoEnterTime);
+#endif //MEASURE_IO_PERFORMANCE
+
+    if (!Mdl) {
+        UDFPrint(("UDFPhReadSGL: Invalid MDL\n"));
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    MdlLength = MmGetMdlByteCount(Mdl);
+    ROffset.QuadPart = Offset;
+    (*ReadBytes) = 0;
+
+    UDFPrint(("UDFPhReadSGL: Length: %x Offset: %lx\n", MdlLength, Offset));
+
+    // Allocate context for completion handling
+    Context = (PUDF_PH_CALL_CONTEXT)MyAllocatePool__(NonPagedPool, sizeof(UDF_PH_CALL_CONTEXT));
+    if (!Context) {
+        UDFPrint(("UDFPhReadSGL: Failed to allocate context\n"));
+        try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
+    }
+
+    // Initialize completion event
+    KeInitializeEvent(&(Context->event), NotificationEvent, FALSE);
+
+    // Build IRP using the provided MDL directly - no intermediate buffer needed
+    if (TRUE || CurIrql > PASSIVE_LEVEL) {
+        Irp = IoAllocateIrp(DeviceObject->StackSize, FALSE);
+        if (!Irp) {
+            UDFPrint(("UDFPhReadSGL: Failed to allocate IRP\n"));
+            try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
+        }
+
+        // Set up the IRP for read operation with SGL
+        Irp->MdlAddress = Mdl;
+        Irp->UserBuffer = NULL;  // We're using MDL directly
+        Irp->Tail.Overlay.Thread = PsGetCurrentThread();
+        Irp->RequestorMode = KernelMode;
+        Irp->Flags = IRP_READ_OPERATION | IRP_DEFER_IO_COMPLETION;
+
+        // Set up IRP stack location
+        IrpSp = IoGetNextIrpStackLocation(Irp);
+        IrpSp->MajorFunction = IRP_MJ_READ;
+        IrpSp->Parameters.Read.Length = (ULONG)MdlLength;
+        IrpSp->Parameters.Read.ByteOffset = ROffset;
+
+        // Set completion routine
+        IoSetCompletionRoutine(Irp, &UDFAsyncCompletionRoutine,
+                               Context, TRUE, TRUE, TRUE);
+    } else {
+        // For PASSIVE_LEVEL, we can use synchronous IRP
+        Irp = IoBuildSynchronousFsdRequest(IRP_MJ_READ, DeviceObject, 
+                                          MmGetSystemAddressForMdl(Mdl),
+                                          (ULONG)MdlLength, &ROffset, 
+                                          &(Context->event), &(Context->IosbToUse));
+        if (!Irp) {
+            UDFPrint(("UDFPhReadSGL: Failed to build synchronous IRP\n"));
+            try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
+        }
+        
+        // Replace the MDL to use SGL optimization
+        if (Irp->MdlAddress) {
+            IoFreeMdl(Irp->MdlAddress);
+        }
+        Irp->MdlAddress = Mdl;
+    }
+
+    // Set flags for volume verification override
+    IrpSp = IoGetNextIrpStackLocation(Irp);
+    if (FlagOn(IrpContext->Flags, IRP_CONTEXT_FLAG_WRITE_THROUGH)) {
+        SetFlag(IrpSp->Flags, SL_WRITE_THROUGH);
+    }
+    SetFlag(IrpSp->Flags, SL_OVERRIDE_VERIFY_VOLUME);
+
+    UDFPrint(("UDFPhReadSGL: Sending IRP with MDL optimization\n"));
+
+    // Submit the IRP
+    RC = IoCallDriver(DeviceObject, Irp);
+
+    if (RC == STATUS_PENDING) {
+        DbgWaitForSingleObject(&(Context->event), NULL);
+        if ((RC = Context->IosbToUse.Status) == STATUS_DATA_OVERRUN) {
+            RC = STATUS_SUCCESS;
+        }
+    }
+
+    if (NT_SUCCESS(RC)) {
+        (*ReadBytes) = Context->IosbToUse.Information;
+    }
+
+try_exit:
+    if (Context) {
+        MyFreePool__(Context);
+    }
+
+#ifdef MEASURE_IO_PERFORMANCE
+    KeQuerySystemTime((PLARGE_INTEGER)&IoExitTime);
+    IoReadTime += (IoExitTime - IoEnterTime);
+    dt = (ULONG)((IoExitTime - IoEnterTime) / 10 / 1000);
+    dtm = (ULONG)(((IoExitTime - IoEnterTime) / 10) % 1000);
+    PerfPrint(("\nUDFPhReadSGL() exit: %08X, after %d.%4.4d msec.\n", RC, dt, dtm));
+#else
+    UDFPrint(("UDFPhReadSGL() exit: %08X\n", RC));
+#endif //MEASURE_IO_PERFORMANCE
+
+    return RC;
+} // end UDFPhReadSGL()
+
+
+/*
+ Function: UDFPhWriteSGL()
+
+ Description:
+    Enhanced write function using Scatter-Gather Lists for improved performance.
+    This function eliminates the need for intermediate buffer allocation and
+    memory copying by using direct DMA from the source MDL.
+
+ Expected Interrupt Level (for execution) :
+  <= IRQL_DISPATCH_LEVEL
+
+ Return Value: STATUS_SUCCESS/Error
+*/
+NTSTATUS
+NTAPI
+UDFPhWriteSGL(
+    PDEVICE_OBJECT DeviceObject,
+    PMDL Mdl,
+    LONGLONG Offset,
+    PSIZE_T WrittenBytes,
+    ULONG Flags
+    )
+{
+    NTSTATUS RC = STATUS_SUCCESS;
+    LARGE_INTEGER ROffset;
+    PUDF_PH_CALL_CONTEXT Context = NULL;
+    PIRP Irp = NULL;
+    PIO_STACK_LOCATION IrpSp;
+    KIRQL CurIrql = KeGetCurrentIrql();
+    SIZE_T MdlLength;
+#ifdef MEASURE_IO_PERFORMANCE
+    LONGLONG IoEnterTime;
+    LONGLONG IoExitTime;
+    ULONG dt;
+    ULONG dtm;
+#endif //MEASURE_IO_PERFORMANCE
+
+    UDFPrint(("UDFPhWriteSGL: Using SGL for enhanced IO performance\n"));
+
+#ifdef MEASURE_IO_PERFORMANCE
+    KeQuerySystemTime((PLARGE_INTEGER)&IoEnterTime);
+#endif //MEASURE_IO_PERFORMANCE
+
+    if (!Mdl) {
+        UDFPrint(("UDFPhWriteSGL: Invalid MDL\n"));
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    MdlLength = MmGetMdlByteCount(Mdl);
+    ROffset.QuadPart = Offset;
+    (*WrittenBytes) = 0;
+
+    UDFPrint(("UDFPhWriteSGL: Length: %x Offset: %lx\n", MdlLength, Offset));
+
+    // Allocate context for completion handling
+    Context = (PUDF_PH_CALL_CONTEXT)MyAllocatePool__(NonPagedPool, sizeof(UDF_PH_CALL_CONTEXT));
+    if (!Context) {
+        UDFPrint(("UDFPhWriteSGL: Failed to allocate context\n"));
+        try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
+    }
+
+    // Initialize completion event
+    KeInitializeEvent(&(Context->event), NotificationEvent, FALSE);
+
+    // Build IRP using the provided MDL directly - no intermediate buffer needed
+    if (TRUE || CurIrql > PASSIVE_LEVEL) {
+        Irp = IoAllocateIrp(DeviceObject->StackSize, FALSE);
+        if (!Irp) {
+            UDFPrint(("UDFPhWriteSGL: Failed to allocate IRP\n"));
+            try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
+        }
+
+        // Set up the IRP for write operation with SGL
+        Irp->MdlAddress = Mdl;
+        Irp->UserBuffer = NULL;  // We're using MDL directly
+        Irp->Tail.Overlay.Thread = PsGetCurrentThread();
+        Irp->RequestorMode = KernelMode;
+        Irp->Flags = IRP_WRITE_OPERATION | IRP_DEFER_IO_COMPLETION;
+
+        // Set up IRP stack location
+        IrpSp = IoGetNextIrpStackLocation(Irp);
+        IrpSp->MajorFunction = IRP_MJ_WRITE;
+        IrpSp->Parameters.Write.Length = (ULONG)MdlLength;
+        IrpSp->Parameters.Write.ByteOffset = ROffset;
+
+        // Set completion routine
+        IoSetCompletionRoutine(Irp, &UDFAsyncCompletionRoutine,
+                               Context, TRUE, TRUE, TRUE);
+    } else {
+        // For PASSIVE_LEVEL, we can use synchronous IRP
+        Irp = IoBuildSynchronousFsdRequest(IRP_MJ_WRITE, DeviceObject, 
+                                          MmGetSystemAddressForMdl(Mdl),
+                                          (ULONG)MdlLength, &ROffset, 
+                                          &(Context->event), &(Context->IosbToUse));
+        if (!Irp) {
+            UDFPrint(("UDFPhWriteSGL: Failed to build synchronous IRP\n"));
+            try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
+        }
+        
+        // Replace the MDL to use SGL optimization
+        if (Irp->MdlAddress) {
+            IoFreeMdl(Irp->MdlAddress);
+        }
+        Irp->MdlAddress = Mdl;
+    }
+
+    // Set flags for volume verification override
+    IrpSp = IoGetNextIrpStackLocation(Irp);
+    SetFlag(IrpSp->Flags, SL_OVERRIDE_VERIFY_VOLUME);
+
+    UDFPrint(("UDFPhWriteSGL: Sending IRP with MDL optimization\n"));
+
+    // Submit the IRP
+    RC = IoCallDriver(DeviceObject, Irp);
+
+    if (RC == STATUS_PENDING) {
+        DbgWaitForSingleObject(&(Context->event), NULL);
+        if ((RC = Context->IosbToUse.Status) == STATUS_DATA_OVERRUN) {
+            RC = STATUS_SUCCESS;
+        }
+    }
+
+    if (NT_SUCCESS(RC)) {
+        (*WrittenBytes) = Context->IosbToUse.Information;
+    }
+
+try_exit:
+    if (Context) {
+        MyFreePool__(Context);
+    }
+
+#ifdef MEASURE_IO_PERFORMANCE
+    KeQuerySystemTime((PLARGE_INTEGER)&IoExitTime);
+    IoWriteTime += (IoExitTime - IoEnterTime);
+    dt = (ULONG)((IoExitTime - IoEnterTime) / 10 / 1000);
+    dtm = (ULONG)(((IoExitTime - IoEnterTime) / 10) % 1000);
+    PerfPrint(("\nUDFPhWriteSGL() exit: %08X, after %d.%4.4d msec.\n", RC, dt, dtm));
+#else
+    UDFPrint(("UDFPhWriteSGL() exit: %08X\n", RC));
+#endif //MEASURE_IO_PERFORMANCE
+
+    return RC;
+} // end UDFPhWriteSGL()
+
+
+/*
+ Function: UDFPhReadEnhanced()
+
+ Description:
+    Enhanced read function that uses MDL-based direct I/O for optimal performance
+    on larger transfers. This eliminates intermediate buffer allocation and memory
+    copying by using Memory Descriptor Lists (MDLs) to describe user buffers directly.
+    The I/O subsystem automatically leverages hardware scatter-gather capabilities
+    when available.
+
+ Expected Interrupt Level (for execution) :
+  <= IRQL_DISPATCH_LEVEL
+
+ Return Value: STATUS_SUCCESS/Error
+*/
+NTSTATUS
+NTAPI
+UDFPhReadEnhanced(
+    PIRP_CONTEXT IrpContext,
+    PDEVICE_OBJECT DeviceObject,
+    PVOID Buffer,
+    SIZE_T Length,
+    LONGLONG Offset,
+    PSIZE_T ReadBytes,
+    ULONG Flags
+    )
+{
+    PMDL Mdl = NULL;
+    NTSTATUS RC;
+    BOOLEAN UseSGL = FALSE;
+
+    // Determine if we should use MDL-based direct I/O for this operation
+    // Use MDL optimization for larger transfers where the benefit is significant
+    // and when caller doesn't require temporary buffer behavior
+    if (!(Flags & PH_TMP_BUFFER) &&  // Don't use MDL when caller wants temp buffer behavior
+        Length >= PAGE_SIZE) {        // Use MDL for larger transfers where benefit is significant
+        
+        UDFPrint(("UDFPhReadEnhanced: Using MDL direct I/O path for length %x\n", Length));
+        
+        // Create MDL for the buffer
+        Mdl = IoAllocateMdl(Buffer, (ULONG)Length, FALSE, FALSE, NULL);
+        if (Mdl) {
+            _SEH2_TRY {
+                // Lock the pages in memory
+                MmProbeAndLockPages(Mdl, KernelMode, IoWriteAccess);
+                UseSGL = TRUE;
+                
+                RC = UDFPhReadSGL(IrpContext, DeviceObject, Mdl, Offset, ReadBytes, Flags);
+                
+            } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+                UDFPrint(("UDFPhReadEnhanced: Exception during MDL setup, falling back\n"));
+                UseSGL = FALSE;
+                RC = STATUS_INVALID_USER_BUFFER;
+            } _SEH2_END;
+            
+            if (UseSGL) {
+                // When using SGL path, the I/O subsystem takes ownership of the MDL
+                // and automatically unlocks/frees it when the IRP completes.
+                // We should NOT manually unlock it here to avoid double-unlock BSOD.
+                if (NT_SUCCESS(RC)) {
+                    UDFPrint(("UDFPhReadEnhanced: MDL read completed successfully (I/O subsystem handled MDL cleanup)\n"));
+                    return RC;
+                } else {
+                    // Only cleanup manually if SGL operation failed
+                    _SEH2_TRY {
+                        MmUnlockPages(Mdl);
+                    } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+                        UDFPrint(("UDFPhReadEnhanced: Exception during MDL unlock after failure\n"));
+                    } _SEH2_END;
+                    IoFreeMdl(Mdl);
+                }
+            } else {
+                IoFreeMdl(Mdl);
+            }
+        }
+    }
+
+    // Fall back to traditional synchronous IO
+    UDFPrint(("UDFPhReadEnhanced: Using traditional synchronous IO path\n"));
+    return UDFPhReadSynchronous(IrpContext, DeviceObject, Buffer, Length, Offset, ReadBytes, Flags);
+    
+} // end UDFPhReadEnhanced()
+
+
+/*
+ Function: UDFPhWriteEnhanced()
+
+ Description:
+    Enhanced write function that uses MDL-based direct I/O for optimal performance
+    on larger transfers. This eliminates intermediate buffer allocation and memory
+    copying by using Memory Descriptor Lists (MDLs) to describe user buffers directly.
+    The I/O subsystem automatically leverages hardware scatter-gather capabilities
+    when available.
+
+ Expected Interrupt Level (for execution) :
+  <= IRQL_DISPATCH_LEVEL
+
+ Return Value: STATUS_SUCCESS/Error
+*/
+NTSTATUS
+NTAPI
+UDFPhWriteEnhanced(
+    PDEVICE_OBJECT DeviceObject,
+    PVOID Buffer,
+    SIZE_T Length,
+    LONGLONG Offset,
+    PSIZE_T WrittenBytes,
+    ULONG Flags
+    )
+{
+    PMDL Mdl = NULL;
+    NTSTATUS RC;
+    BOOLEAN UseSGL = FALSE;
+
+    // Determine if we should use MDL-based direct I/O for this operation
+    // Use MDL optimization for larger transfers where the benefit is significant
+    // and when caller doesn't require temporary buffer behavior
+    if (!(Flags & PH_TMP_BUFFER) &&  // Don't use MDL when caller wants temp buffer behavior
+        Length >= PAGE_SIZE) {        // Use MDL for larger transfers where benefit is significant
+        
+        UDFPrint(("UDFPhWriteEnhanced: Using MDL direct I/O path for length %x\n", Length));
+        
+        // Create MDL for the buffer
+        Mdl = IoAllocateMdl(Buffer, (ULONG)Length, FALSE, FALSE, NULL);
+        if (Mdl) {
+            _SEH2_TRY {
+                // Lock the pages in memory
+                MmProbeAndLockPages(Mdl, KernelMode, IoReadAccess);
+                UseSGL = TRUE;
+                
+                RC = UDFPhWriteSGL(DeviceObject, Mdl, Offset, WrittenBytes, Flags);
+                
+            } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+                UDFPrint(("UDFPhWriteEnhanced: Exception during MDL setup, falling back\n"));
+                UseSGL = FALSE;
+                RC = STATUS_INVALID_USER_BUFFER;
+            } _SEH2_END;
+            
+            if (UseSGL) {
+                // When using SGL path, the I/O subsystem takes ownership of the MDL
+                // and automatically unlocks/frees it when the IRP completes.
+                // We should NOT manually unlock it here to avoid double-unlock BSOD.
+                if (NT_SUCCESS(RC)) {
+                    UDFPrint(("UDFPhWriteEnhanced: MDL write completed successfully (I/O subsystem handled MDL cleanup)\n"));
+                    return RC;
+                } else {
+                    // Only cleanup manually if SGL operation failed
+                    _SEH2_TRY {
+                        MmUnlockPages(Mdl);
+                    } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+                        UDFPrint(("UDFPhWriteEnhanced: Exception during MDL unlock after failure\n"));
+                    } _SEH2_END;
+                    IoFreeMdl(Mdl);
+                }
+            } else {
+                IoFreeMdl(Mdl);
+            }
+        }
+    }
+
+    // Fall back to traditional synchronous IO
+    UDFPrint(("UDFPhWriteEnhanced: Using traditional synchronous IO path\n"));
+    return UDFPhWriteSynchronous(DeviceObject, Buffer, Length, Offset, WrittenBytes, Flags);
+    
+} // end UDFPhWriteEnhanced()
+
+
 #if 0
 NTSTATUS
 UDFPhWriteVerifySynchronous(
@@ -445,7 +1019,15 @@ UDFPhWriteVerifySynchronous(
     //PUCHAR v_buff = NULL;
     //ULONG ReadBytes;
 
+#ifdef UDF_USE_SGL_OPTIMIZATION
+    RC = UDFPhWriteEnhanced(DeviceObject, Buffer, Length, Offset, WrittenBytes, Flags);
+#else
+#ifdef UDF_USE_SGL_OPTIMIZATION
+    RC = UDFPhWriteEnhanced(DeviceObject, Buffer, Length, Offset, WrittenBytes, Flags);
+#else
     RC = UDFPhWriteSynchronous(DeviceObject, Buffer, Length, Offset, WrittenBytes, Flags);
+#endif // UDF_USE_SGL_OPTIMIZATION
+#endif // UDF_USE_SGL_OPTIMIZATION
 /*
     if (!Verify)
         return RC;

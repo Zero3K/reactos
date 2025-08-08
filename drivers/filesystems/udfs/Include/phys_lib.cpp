@@ -671,8 +671,13 @@ retry_1:
             if (Flags & PH_VCB_IN_RETLEN) {
                 (*ReadBytes) = (SIZE_T)Vcb;
             }
+#ifdef UDF_USE_SGL_OPTIMIZATION
+            RC = UDFPhReadEnhanced(IrpContext, Vcb->TargetDeviceObject, Buffer, Length,
+                       ((uint64)rLba) << Vcb->BlockSizeBits, ReadBytes, Flags);
+#else
             RC = UDFPhReadSynchronous(IrpContext, Vcb->TargetDeviceObject, Buffer, Length,
                        ((uint64)rLba) << Vcb->BlockSizeBits, ReadBytes, Flags);
+#endif // UDF_USE_SGL_OPTIMIZATION
             Vcb->VcbState &= ~UDF_VCB_LAST_WRITE;
 #ifdef _BROWSE_UDF_
             Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
@@ -708,8 +713,13 @@ retry_2:
             if (Flags & PH_VCB_IN_RETLEN) {
                 _ReadBytes = (SIZE_T)Vcb;
             }
+#ifdef UDF_USE_SGL_OPTIMIZATION
+            RC = UDFPhReadEnhanced(IrpContext, Vcb->TargetDeviceObject, Buffer, RelocExtent->extLength,
+                       ((uint64)rLba) << Vcb->BlockSizeBits, &_ReadBytes, Flags);
+#else
             RC = UDFPhReadSynchronous(IrpContext, Vcb->TargetDeviceObject, Buffer, RelocExtent->extLength,
                        ((uint64)rLba) << Vcb->BlockSizeBits, &_ReadBytes, Flags);
+#endif // UDF_USE_SGL_OPTIMIZATION
             Vcb->VcbState &= ~UDF_VCB_LAST_WRITE;
             Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
             if (!NT_SUCCESS(RC) &&
@@ -780,8 +790,13 @@ retry_1:
         RC = UDFPrepareForReadOperation(Vcb, rLba, BCount);
         if (!NT_SUCCESS(RC)) return RC;
         rLba = UDFFixFPAddress(Vcb, rLba);
+#ifdef UDF_USE_SGL_OPTIMIZATION
+        RC = UDFPhReadEnhanced(NULL, Vcb->TargetDeviceObject, Buffer, Length,
+                   ((uint64)rLba) << Vcb->BlockSizeBits, ReadBytes, 0);
+#else
         RC = UDFPhReadSynchronous(Vcb->TargetDeviceObject, Buffer, Length,
                    ((uint64)rLba) << Vcb->BlockSizeBits, ReadBytes, 0);
+#endif // UDF_USE_SGL_OPTIMIZATION
         Vcb->VcbState &= ~UDF_VCB_LAST_WRITE;
         Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
         if (!NT_SUCCESS(RC) &&
@@ -804,8 +819,13 @@ retry_2:
         RC = UDFPrepareForReadOperation(Vcb, rLba, RelocExtent->extLength >> Vcb->BlockSizeBits);
         if (!NT_SUCCESS(RC)) break;
         rLba = UDFFixFPAddress(Vcb, rLba);
+#ifdef UDF_USE_SGL_OPTIMIZATION
+        RC = UDFPhReadEnhanced(NULL, Vcb->TargetDeviceObject, Buffer, RelocExtent->extLength,
+                   ((uint64)rLba) << Vcb->BlockSizeBits, &_ReadBytes, 0);
+#else
         RC = UDFPhReadSynchronous(Vcb->TargetDeviceObject, Buffer, RelocExtent->extLength,
                    ((uint64)rLba) << Vcb->BlockSizeBits, &_ReadBytes, 0);
+#endif // UDF_USE_SGL_OPTIMIZATION
         Vcb->VcbState &= ~UDF_VCB_LAST_WRITE;
         Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
         if (!NT_SUCCESS(RC) &&

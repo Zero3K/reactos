@@ -38,6 +38,10 @@
 
 //#define UDF_ASYNC_IO
 
+// Enable Scatter-Gather List optimization for improved IO performance
+// Comment out this line to disable SGL and use traditional synchronous IO
+#define UDF_USE_SGL_OPTIMIZATION
+
 // Custom cache was replaced with Windows Cache Manager approach
 
 #define UDF_ALLOW_FRAG_AD
