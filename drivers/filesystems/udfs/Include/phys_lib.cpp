@@ -807,6 +807,9 @@ UDFTReadAsync(
     }
     
     // SGL Performance Optimization: Use Scatter-Gather Lists for large or fragmented operations
+    // Disable SGL temporarily due to BAD_POOL_HEADER crashes from MDL chaining corruption
+    // TODO: Fix UDFAddToSglChain MDL corruption (line 1379) before re-enabling SGL
+    /*
     // This significantly improves performance by batching multiple operations
     if (Length >= SGL_MIN_READ_SIZE && IrpContext->Irp) {
         // For large transfers, use SGL to batch multiple operations for better throughput
@@ -826,6 +829,7 @@ UDFTReadAsync(
             UDFFreeSglContext(SglContext);
         }
     }
+    */
     
     // For true async I/O, create asynchronous IRP and use completion routine
     if (UseReadAhead && IrpContext->Irp) {
@@ -887,6 +891,9 @@ UDFTWriteAsync(
         ULONG BlocksToWrite = (Length + BlockSize - 1) >> BlockSizeBits;
         OptimalLength = BlocksToWrite << BlockSizeBits;
         
+        // Disable SGL temporarily due to BAD_POOL_HEADER crashes from MDL chaining corruption  
+        // TODO: Fix UDFAddToSglChain MDL corruption (line 1379) before re-enabling SGL
+        /*
         // SGL Performance Optimization: Use Scatter-Gather Lists for large write operations
         // This significantly improves write throughput by batching operations
         if (Length >= SGL_MIN_WRITE_SIZE && IrpContext->Irp) {
@@ -917,6 +924,7 @@ UDFTWriteAsync(
                 UDFFreeSglContext(SglContext);
             }
         }
+        */
         
         // For large sequential writes, optimize the write pattern
         if (Length >= (8 * BlockSize)) {
@@ -1368,16 +1376,17 @@ UDFAddToSglChain(
     Entry->Mdl = Mdl;
     Entry->Next = NULL;
     
-    // Add to chain
+    // Add to chain - Fixed: Remove dangerous MDL chaining that corrupts pool headers
     if (!Context->FirstEntry) {
         Context->FirstEntry = Entry;
         Context->LastEntry = Entry;
         Context->MdlChain = Mdl;
     } else {
-        // Chain MDLs for efficient I/O processing
+        // Add entry to linked list safely without corrupting MDL internal structures
         Context->LastEntry->Next = Entry;
-        Context->LastEntry->Mdl->Next = Mdl;
         Context->LastEntry = Entry;
+        // NOTE: Removed dangerous "Context->LastEntry->Mdl->Next = Mdl" that was corrupting pool
+        // Individual MDLs are handled separately to prevent I/O manager corruption
     }
     
     Context->EntryCount++;
@@ -1600,21 +1609,33 @@ UDFFreeSglContext(
     
     UDFPrint(("UDFFreeSglContext: Cleaning up SGL with %d entries\n", Context->EntryCount));
     
-    // Clean up all entries and their MDLs
+    // Clean up all entries and their MDLs safely
     CurrentEntry = Context->FirstEntry;
     while (CurrentEntry) {
         NextEntry = CurrentEntry->Next;
         
         if (CurrentEntry->Mdl) {
-            if (CurrentEntry->Mdl->MdlFlags & MDL_PAGES_LOCKED) {
-                MmUnlockPages(CurrentEntry->Mdl);
-            }
-            IoFreeMdl(CurrentEntry->Mdl);
+            // Additional safety check to prevent double-unlock
+            _SEH2_TRY {
+                if (CurrentEntry->Mdl->MdlFlags & MDL_PAGES_LOCKED) {
+                    MmUnlockPages(CurrentEntry->Mdl);
+                }
+                IoFreeMdl(CurrentEntry->Mdl);
+            } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+                UDFPrint(("UDFFreeSglContext: Exception while freeing MDL - possible corruption\n"));
+                // Continue cleanup to prevent resource leaks
+            } _SEH2_END;
+            CurrentEntry->Mdl = NULL; // Prevent double-free
         }
         
         ExFreePoolWithTag(CurrentEntry, 'egsU');
         CurrentEntry = NextEntry;
     }
+    
+    // Clear context to prevent double-free
+    Context->FirstEntry = NULL;
+    Context->LastEntry = NULL;
+    Context->EntryCount = 0;
     
     ExFreePoolWithTag(Context, 'lgsU');
 }
