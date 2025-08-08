@@ -80,6 +80,45 @@ extern NTSTATUS UDFTWriteAsync(
     OUT PULONG WrittenBytes,
     IN BOOLEAN FreeBuffer);
 
+// SGL-enabled IO functions for improved performance
+extern NTSTATUS NTAPI UDFPhReadSGL(
+    PIRP_CONTEXT IrpContext,
+    PDEVICE_OBJECT DeviceObject,
+    PMDL Mdl,
+    LONGLONG Offset,
+    PSIZE_T ReadBytes,
+    ULONG Flags);
+
+extern NTSTATUS NTAPI UDFPhWriteSGL(
+    PDEVICE_OBJECT DeviceObject,
+    PMDL Mdl,
+    LONGLONG Offset,
+    PSIZE_T WrittenBytes,
+    ULONG Flags);
+
+// Helper function to check if device supports SGL
+extern BOOLEAN NTAPI UDFDeviceSupportsScatterGather(
+    PDEVICE_OBJECT DeviceObject);
+
+// Enhanced read function that automatically chooses between SGL and synchronous IO
+extern NTSTATUS NTAPI UDFPhReadEnhanced(
+    PIRP_CONTEXT IrpContext,
+    PDEVICE_OBJECT DeviceObject,
+    PVOID Buffer,
+    SIZE_T Length,
+    LONGLONG Offset,
+    PSIZE_T ReadBytes,
+    ULONG Flags);
+
+// Enhanced write function that automatically chooses between SGL and synchronous IO
+extern NTSTATUS NTAPI UDFPhWriteEnhanced(
+    PDEVICE_OBJECT DeviceObject,
+    PVOID Buffer,
+    SIZE_T Length,
+    LONGLONG Offset,
+    PSIZE_T WrittenBytes,
+    ULONG Flags);
+
 VOID
 UDFNotifyFullReportChange(
     PVCB Vcb,
