@@ -1582,52 +1582,6 @@ UDFExecuteSglRead(
     
     return RC;
 }
-        
-        // Chain MDLs for this batch to enable efficient DMA transfers
-        if (BatchStart != BatchEnd) {
-            NewIrp->MdlAddress = BatchStart->Mdl;
-        } else {
-            NewIrp->MdlAddress = CurrentEntry->Mdl;
-        }
-        
-        // Set completion routine for async processing
-        IoSetCompletionRoutine(NewIrp, UDFOptimizedAsyncCompletionRoutine, 
-                              &Context->CompletionEvent, TRUE, TRUE, TRUE);
-        
-        // Submit I/O request
-        RC = IoCallDriver(DeviceObject, NewIrp);
-        
-        if (RC == STATUS_PENDING) {
-            // Wait for this batch to complete before processing next
-            LARGE_INTEGER Timeout;
-            Timeout.QuadPart = -((LONGLONG)30 * 10000000); // 30 second timeout
-            
-            RC = KeWaitForSingleObject(&Context->CompletionEvent, Executive, KernelMode, FALSE, &Timeout);
-            if (RC == STATUS_TIMEOUT) {
-                UDFPrint(("UDFExecuteSglRead: Batch operation timed out\n"));
-                Context->Status = STATUS_IO_TIMEOUT;
-                break;
-            }
-            RC = IoStatus.Status;
-            KeResetEvent(&Context->CompletionEvent);
-        }
-        
-        if (!NT_SUCCESS(RC)) {
-            UDFPrint(("UDFExecuteSglRead: Batch failed with status %x\n", RC));
-            Context->Status = RC;
-            break;
-        }
-        
-        Context->BytesTransferred += IoStatus.Information;
-        CurrentEntry = CurrentEntry->Next;
-    }
-    
-    Context->Status = RC;
-    UDFPrint(("UDFExecuteSglRead: Completed with status %x, bytes transferred %x\n",
-              RC, Context->BytesTransferred));
-    
-    return RC;
-}
 
 /*
  * Execute SGL write operations using proper Windows DDK patterns  
