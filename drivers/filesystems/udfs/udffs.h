@@ -40,7 +40,8 @@
 
 // Enable Scatter-Gather List optimization for improved IO performance
 // Comment out this line to disable SGL and use traditional synchronous IO
-#define UDF_USE_SGL_OPTIMIZATION
+// DISABLED: SGL optimization causes BSOD due to invalid PDO usage in filesystem context
+//#define UDF_USE_SGL_OPTIMIZATION
 
 // Custom cache was replaced with Windows Cache Manager approach
 
