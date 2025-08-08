@@ -24,6 +24,9 @@ typedef struct _UDF_PH_CALL_CONTEXT {
     IO_STATUS_BLOCK IosbToUse;
 } UDF_PH_CALL_CONTEXT, *PUDF_PH_CALL_CONTEXT;
 
+// Simple async context following FastFAT pattern
+// Note: We now use UDF_PH_CALL_CONTEXT for async operations to simplify the implementation
+
 #ifdef _BROWSE_UDF_
 
 // convert UDF timestamp to NT time
