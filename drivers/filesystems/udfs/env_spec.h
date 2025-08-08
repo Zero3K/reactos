@@ -96,9 +96,12 @@ extern NTSTATUS NTAPI UDFPhWriteSGL(
     PSIZE_T WrittenBytes,
     ULONG Flags);
 
-// Helper function to check if device supports SGL
+// Helper function to check if device supports SGL - DISABLED
+// This function is disabled because filesystem drivers should not directly access DMA adapters
+#if 0
 extern BOOLEAN NTAPI UDFDeviceSupportsScatterGather(
     PDEVICE_OBJECT DeviceObject);
+#endif
 
 // Validate SGL configuration at initialization
 extern NTSTATUS NTAPI UDFValidateSGLConfiguration(

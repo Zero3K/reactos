@@ -431,12 +431,14 @@ try_exit: NOTHING;
 } // end UDFPhWriteSynchronous()
 
 
+#if 0
 /*
  Function: UDFDeviceSupportsScatterGather()
 
  Description:
-    Check if the device supports scatter-gather operations by examining
-    device capabilities and DMA adapter information.
+    This function has been disabled because filesystem drivers should not
+    directly access DMA adapters. The I/O subsystem automatically handles
+    scatter-gather optimization when MDLs are used properly.
 
  Expected Interrupt Level (for execution) :
   IRQL_PASSIVE_LEVEL
@@ -490,6 +492,7 @@ UDFDeviceSupportsScatterGather(
     
     return SupportsScatterGather;
 } // end UDFDeviceSupportsScatterGather()
+#endif
 
 
 /*
@@ -838,9 +841,11 @@ try_exit:
  Function: UDFPhReadEnhanced()
 
  Description:
-    Enhanced read function that automatically chooses between SGL and 
-    traditional synchronous IO based on device capabilities and buffer characteristics.
-    This provides optimal performance while maintaining compatibility.
+    Enhanced read function that uses MDL-based direct I/O for optimal performance
+    on larger transfers. This eliminates intermediate buffer allocation and memory
+    copying by using Memory Descriptor Lists (MDLs) to describe user buffers directly.
+    The I/O subsystem automatically leverages hardware scatter-gather capabilities
+    when available.
 
  Expected Interrupt Level (for execution) :
   <= IRQL_DISPATCH_LEVEL
@@ -862,23 +867,14 @@ UDFPhReadEnhanced(
     PMDL Mdl = NULL;
     NTSTATUS RC;
     BOOLEAN UseSGL = FALSE;
-    static BOOLEAN SGLCapabilityChecked = FALSE;
-    static BOOLEAN DeviceSupportsSGL = FALSE;
 
-    // Check device SGL capability once per device (cache result for performance)
-    if (!SGLCapabilityChecked) {
-        DeviceSupportsSGL = UDFDeviceSupportsScatterGather(DeviceObject);
-        SGLCapabilityChecked = TRUE;
-        UDFPrint(("UDFPhReadEnhanced: SGL capability cached: %s\n", 
-                  DeviceSupportsSGL ? "supported" : "not supported"));
-    }
-
-    // Determine if we should use SGL for this operation
-    if (DeviceSupportsSGL && 
-        !(Flags & PH_TMP_BUFFER) &&  // Don't use SGL when caller wants temp buffer behavior
-        Length >= PAGE_SIZE) {        // Use SGL for larger transfers where benefit is significant
+    // Determine if we should use MDL-based direct I/O for this operation
+    // Use MDL optimization for larger transfers where the benefit is significant
+    // and when caller doesn't require temporary buffer behavior
+    if (!(Flags & PH_TMP_BUFFER) &&  // Don't use MDL when caller wants temp buffer behavior
+        Length >= PAGE_SIZE) {        // Use MDL for larger transfers where benefit is significant
         
-        UDFPrint(("UDFPhReadEnhanced: Using SGL path for length %x\n", Length));
+        UDFPrint(("UDFPhReadEnhanced: Using MDL direct I/O path for length %x\n", Length));
         
         // Create MDL for the buffer
         Mdl = IoAllocateMdl(Buffer, (ULONG)Length, FALSE, FALSE, NULL);
@@ -891,7 +887,7 @@ UDFPhReadEnhanced(
                 RC = UDFPhReadSGL(IrpContext, DeviceObject, Mdl, Offset, ReadBytes, Flags);
                 
             } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
-                UDFPrint(("UDFPhReadEnhanced: Exception during SGL setup, falling back\n"));
+                UDFPrint(("UDFPhReadEnhanced: Exception during MDL setup, falling back\n"));
                 UseSGL = FALSE;
                 RC = STATUS_INVALID_USER_BUFFER;
             } _SEH2_END;
@@ -906,7 +902,7 @@ UDFPhReadEnhanced(
                 IoFreeMdl(Mdl);
                 
                 if (NT_SUCCESS(RC)) {
-                    UDFPrint(("UDFPhReadEnhanced: SGL read completed successfully\n"));
+                    UDFPrint(("UDFPhReadEnhanced: MDL read completed successfully\n"));
                     return RC;
                 }
             } else {
@@ -926,9 +922,11 @@ UDFPhReadEnhanced(
  Function: UDFPhWriteEnhanced()
 
  Description:
-    Enhanced write function that automatically chooses between SGL and 
-    traditional synchronous IO based on device capabilities and buffer characteristics.
-    This provides optimal performance while maintaining compatibility.
+    Enhanced write function that uses MDL-based direct I/O for optimal performance
+    on larger transfers. This eliminates intermediate buffer allocation and memory
+    copying by using Memory Descriptor Lists (MDLs) to describe user buffers directly.
+    The I/O subsystem automatically leverages hardware scatter-gather capabilities
+    when available.
 
  Expected Interrupt Level (for execution) :
   <= IRQL_DISPATCH_LEVEL
@@ -949,23 +947,14 @@ UDFPhWriteEnhanced(
     PMDL Mdl = NULL;
     NTSTATUS RC;
     BOOLEAN UseSGL = FALSE;
-    static BOOLEAN SGLCapabilityChecked = FALSE;
-    static BOOLEAN DeviceSupportsSGL = FALSE;
 
-    // Check device SGL capability once per device (cache result for performance)
-    if (!SGLCapabilityChecked) {
-        DeviceSupportsSGL = UDFDeviceSupportsScatterGather(DeviceObject);
-        SGLCapabilityChecked = TRUE;
-        UDFPrint(("UDFPhWriteEnhanced: SGL capability cached: %s\n", 
-                  DeviceSupportsSGL ? "supported" : "not supported"));
-    }
-
-    // Determine if we should use SGL for this operation
-    if (DeviceSupportsSGL && 
-        !(Flags & PH_TMP_BUFFER) &&  // Don't use SGL when caller wants temp buffer behavior
-        Length >= PAGE_SIZE) {        // Use SGL for larger transfers where benefit is significant
+    // Determine if we should use MDL-based direct I/O for this operation
+    // Use MDL optimization for larger transfers where the benefit is significant
+    // and when caller doesn't require temporary buffer behavior
+    if (!(Flags & PH_TMP_BUFFER) &&  // Don't use MDL when caller wants temp buffer behavior
+        Length >= PAGE_SIZE) {        // Use MDL for larger transfers where benefit is significant
         
-        UDFPrint(("UDFPhWriteEnhanced: Using SGL path for length %x\n", Length));
+        UDFPrint(("UDFPhWriteEnhanced: Using MDL direct I/O path for length %x\n", Length));
         
         // Create MDL for the buffer
         Mdl = IoAllocateMdl(Buffer, (ULONG)Length, FALSE, FALSE, NULL);
@@ -978,7 +967,7 @@ UDFPhWriteEnhanced(
                 RC = UDFPhWriteSGL(DeviceObject, Mdl, Offset, WrittenBytes, Flags);
                 
             } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
-                UDFPrint(("UDFPhWriteEnhanced: Exception during SGL setup, falling back\n"));
+                UDFPrint(("UDFPhWriteEnhanced: Exception during MDL setup, falling back\n"));
                 UseSGL = FALSE;
                 RC = STATUS_INVALID_USER_BUFFER;
             } _SEH2_END;
@@ -993,7 +982,7 @@ UDFPhWriteEnhanced(
                 IoFreeMdl(Mdl);
                 
                 if (NT_SUCCESS(RC)) {
-                    UDFPrint(("UDFPhWriteEnhanced: SGL write completed successfully\n"));
+                    UDFPrint(("UDFPhWriteEnhanced: MDL write completed successfully\n"));
                     return RC;
                 }
             } else {
