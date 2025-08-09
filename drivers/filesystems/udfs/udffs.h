@@ -92,6 +92,9 @@
 // Enable or disable FastIO functionality
 #define UDF_ENABLE_FASTIO
 
+// Enable or disable deferred writes to the Cache Manager
+#define UDF_ENABLE_DEFERRED_WRITES
+
 #define UDF_DEFAULT_BM_FLUSH_TIMEOUT 16         // seconds
 #define UDF_DEFAULT_TREE_FLUSH_TIMEOUT 5        // seconds
 

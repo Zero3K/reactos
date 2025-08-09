@@ -1184,9 +1184,11 @@ extern NTSTATUS UDFCommonWrite(
 PIRP_CONTEXT IrpContext,
 PIRP                        Irp);
 
+#ifdef UDF_ENABLE_DEFERRED_WRITES
 extern VOID NTAPI UDFDeferredWriteCallBack (
 VOID                        *Context1,          // Should be IrpContext
 VOID                        *Context2);         // Should be Irp
+#endif // UDF_ENABLE_DEFERRED_WRITES
 
 extern VOID UDFPurgeCacheEx_(
 PFCB                        Fcb,
