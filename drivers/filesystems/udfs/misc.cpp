@@ -978,8 +978,22 @@ UDFPostRequest(
 
 //    IrpSp = IoGetCurrentIrpStackLocation(Irp);
 
+    // Validate IrpContext before using it
+    if (!IrpContext ||
+        (IrpContext->NodeIdentifier.NodeTypeCode != UDF_NODE_TYPE_IRP_CONTEXT) ||
+        (IrpContext->NodeIdentifier.NodeByteSize != sizeof(IRP_CONTEXT))) {
+        UDFPrint(("UDFPostRequest: Invalid IrpContext\n"));
+        if (Irp) {
+            Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+            IoCompleteRequest(Irp, IO_NO_INCREMENT);
+        }
+        return STATUS_INVALID_PARAMETER;
+    }
+
     // mark the IRP pending if this is not double post
-    if (Irp)
+    // However, do not mark it pending if we're in a deferred write context
+    // as the IRP is already managed by the cache manager
+    if (Irp && !(IrpContext->Flags & IRP_CONTEXT_FLAG_DEFERRED_WRITE))
         IoMarkIrpPending(Irp);
 
     Vcb = (PVCB)(IrpContext->RealDevice->DeviceExtension);
