@@ -353,6 +353,10 @@ UDFCommonWrite(
 
             SetFlag(IrpContext->Flags, IRP_CONTEXT_FLAG_DEFERRED_WRITE);
 
+            // Mark the IRP as pending before calling CcDeferWrite
+            // This is essential for proper deferred write handling
+            IoMarkIrpPending(Irp);
+
             CcDeferWrite(FileObject, UDFDeferredWriteCallBack, IrpContext, Irp, WriteLength, IsThisADeferredWrite);
             try_return(RC = STATUS_PENDING);
         }
