@@ -928,13 +928,28 @@ UDFDeferredWriteCallBack(
     IN PVOID Context2           // Should be Irp
     )
 {
+    PIRP Irp = (PIRP)Context2;
+    PIRP_CONTEXT IrpContext = (PIRP_CONTEXT)Context1;
+    
     UDFPrint(("UDFDeferredWriteCallBack\n"));
-    // We should typically simply post the request to our internal
-    // queue of posted requests (just as we would if the original write
-    // could not be completed because the caller could not block).
-    // Once we post the request, return from this routine. The write
-    // will then be retried in the context of a system worker thread
-    UDFPostRequest((PIRP_CONTEXT)Context1, (PIRP)Context2);
+    
+    // Check the IRP status first, like FastFAT does
+    // If the status is success, we can retry the operation
+    // Otherwise, complete the request with the current status
+    if (Irp && Irp->IoStatus.Status == STATUS_SUCCESS) {
+        // Post the request to our work queue for processing
+        UDFPostRequest(IrpContext, Irp);
+    } else {
+        // The IRP already has an error status, complete it directly
+        if (IrpContext) {
+            UDFPrint(("UDFDeferredWriteCallBack: IRP has error status %x, completing\n", 
+                     Irp ? Irp->IoStatus.Status : STATUS_INVALID_PARAMETER));
+            if (Irp) {
+                IoCompleteRequest(Irp, IO_NO_INCREMENT);
+            }
+            UDFCleanupIrpContext(IrpContext);
+        }
+    }
 
 } // end UDFDeferredWriteCallBack()
 
