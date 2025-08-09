@@ -979,7 +979,9 @@ UDFPostRequest(
 //    IrpSp = IoGetCurrentIrpStackLocation(Irp);
 
     // mark the IRP pending if this is not double post
-    if (Irp)
+    // Skip marking IRP pending in deferred write context to avoid assertion failure
+    // in IoGetCurrentIrpStackLocation when IRP stack may be invalid
+    if (Irp && !BooleanFlagOn(IrpContext->Flags, IRP_CONTEXT_FLAG_DEFERRED_WRITE))
         IoMarkIrpPending(Irp);
 
     Vcb = (PVCB)(IrpContext->RealDevice->DeviceExtension);
