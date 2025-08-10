@@ -880,8 +880,10 @@ struct IRP_CONTEXT_LITE {
     UDFIdentifier                   NodeIdentifier;
     //  Fcb for the file object being closed.
     FCB*                            Fcb;
+#ifdef UDF_DELAYED_CLOSE
     //  List entry to attach to delayed close queue.
     LIST_ENTRY                      DelayedCloseLinks;
+#endif //UDF_DELAYED_CLOSE
     //  User reference count for the file object being closed.
     ULONG                           UserReference;
     //  Real device object.  This represents the physical device closest to the media.
@@ -935,9 +937,12 @@ typedef struct _UDFData {
     LIST_ENTRY AsyncCloseQueue;
     ULONG AsyncCloseCount;
     BOOLEAN FspCloseActive;
+#ifdef UDF_DELAYED_CLOSE
     BOOLEAN ReduceDelayedClose;
+#endif //UDF_DELAYED_CLOSE
     USHORT Flags;
 
+#ifdef UDF_DELAYED_CLOSE
     // The following fields describe the deferred close file objects.
 
     LIST_ENTRY DelayedCloseQueue;
@@ -945,6 +950,7 @@ typedef struct _UDFData {
     ULONG MaxDelayedCloseCount;
     ULONG MinDelayedCloseCount;
     WORK_QUEUE_ITEM CloseItem;
+#endif //UDF_DELAYED_CLOSE
 
     // Fast mutex used to lock the fields of this structure.
 

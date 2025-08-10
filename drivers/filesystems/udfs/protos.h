@@ -151,6 +151,7 @@ UDFTeardownStructures(
     _Out_ PBOOLEAN RemovedStartingFcb
     );
 
+#ifdef UDF_DELAYED_CLOSE
 VOID
 NTAPI
 UDFFspClose(
@@ -179,6 +180,7 @@ UDFQueueClose(
 
 #define UDFRemoveFromSystemDelayedQueue(Fcb) \
     UDFCloseAllSystemDelayedInDir((Fcb)->Vcb, (Fcb)->FileInfo)
+#endif //UDF_DELAYED_CLOSE
 
 /*************************************************************************
 * Prototypes for the file dircntrl.cpp

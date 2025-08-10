@@ -391,9 +391,8 @@ UDFCommonRead(
                 UDFPrint(("  UDF_IRP_CONTEXT_FLUSH2_REQUIRED\n"));
                 IrpContext->Flags &= ~UDF_IRP_CONTEXT_FLUSH2_REQUIRED;
 
-                UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
-
 #ifdef UDF_DELAYED_CLOSE
+                UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
                 UDFFspClose(Vcb);
 #endif //UDF_DELAYED_CLOSE
 

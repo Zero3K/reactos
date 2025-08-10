@@ -46,6 +46,7 @@ UDFInitializeZones(VOID)
     _SEH2_TRY {
 
         // determine memory requirements
+#ifdef UDF_DELAYED_CLOSE
         switch (MmQuerySystemSize()) {
         case MmMediumSystem:
             UdfData.MaxDelayedCloseCount = 32;
@@ -60,6 +61,7 @@ UDFInitializeZones(VOID)
             UdfData.MaxDelayedCloseCount = 10;
             UdfData.MinDelayedCloseCount = 2;
         }
+#endif //UDF_DELAYED_CLOSE
 
         ExInitializeNPagedLookasideList(&UdfData.IrpContextLookasideList,
                                         NULL,

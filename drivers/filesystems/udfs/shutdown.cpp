@@ -191,7 +191,6 @@ UDFCommonShutdown(
             UDFPrint(("    UDFCommonShutdown:     set UDF_VCB_FLAGS_NO_DELAYED_CLOSE\n"));
             Vcb->VcbState |= UDF_VCB_FLAGS_NO_DELAYED_CLOSE;
             UDFReleaseResource(&(Vcb->VcbResource));
-#endif //UDF_DELAYED_CLOSE
 
             if (Vcb->RootIndexFcb && Vcb->RootIndexFcb->FileInfo) {
                 UDFPrint(("    UDFCommonShutdown:     UDFCloseAllSystemDelayedInDir\n"));
@@ -199,7 +198,6 @@ UDFCommonShutdown(
                 ASSERT(NT_SUCCESS(Status));
             }
 
-#ifdef UDF_DELAYED_CLOSE
             UDFFspClose(Vcb);
 #endif //UDF_DELAYED_CLOSE
 

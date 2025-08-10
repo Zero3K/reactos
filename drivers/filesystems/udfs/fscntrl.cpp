@@ -957,9 +957,8 @@ UDFLockVolume(
 
     _SEH2_TRY {
 
-        UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
-
 #ifdef UDF_DELAYED_CLOSE
+        UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
         UDFFspClose(Vcb);
 #endif //UDF_DELAYED_CLOSE
 
@@ -1123,10 +1122,9 @@ Return Value:
         return Status;
     }
 
-    UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
-
 #ifdef UDF_DELAYED_CLOSE
-        UDFFspClose(Vcb);
+    UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
+    UDFFspClose(Vcb);
 #endif //UDF_DELAYED_CLOSE
     //FspClose( Vcb );
 
@@ -1284,9 +1282,8 @@ UDFDismountVolume(
 
     FsRtlNotifyVolumeEvent(IrpSp->FileObject, FSRTL_VOLUME_DISMOUNT);
 
-    UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
-
 #ifdef UDF_DELAYED_CLOSE
+    UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
     UDFFspClose(Vcb);
 #endif //UDF_DELAYED_CLOSE
 
@@ -1907,12 +1904,12 @@ UDFInvalidateVolumes(
             UDFReleaseResource(&(Vcb->VcbResource));
 #endif //UDF_DELAYED_CLOSE
 
+#ifdef UDF_DELAYED_CLOSE
             if (Vcb->RootIndexFcb && Vcb->RootIndexFcb->FileInfo) {
                 UDFPrint(("    UDFInvalidateVolumes:     UDFCloseAllSystemDelayedInDir\n"));
                 RC = UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
                 ASSERT(NT_SUCCESS(RC));
             }
-#ifdef UDF_DELAYED_CLOSE
             UDFPrint(("    UDFInvalidateVolumes:     UDFCloseAllDelayed\n"));
             UDFFspClose(Vcb);
             //ASSERT(NT_SUCCESS(RC));
