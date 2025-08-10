@@ -1884,15 +1884,10 @@ AlreadyOpened:
            (TmpFileAttributes & FILE_ATTRIBUTE_READONLY)) {
             ASSERT(Res1 != NULL);
             ASSERT(Res2 != NULL);
-            
-            // For removable media (like UDF drives), allow deletion of user-created content
-            // even if it has readonly attribute set, to match expected behavior
-            if (!(Vcb->VcbState & VCB_STATE_REMOVABLE_MEDIA)) {
-                RC = UDFCheckAccessRights(NULL, NULL, OldRelatedFileInfo->Fcb, RelatedCcb, FILE_DELETE_CHILD, 0);
-                if (!NT_SUCCESS(RC)) {
-                    AdPrint(("    Read-only. DeleteOnClose attempt failed\n"));
-                    try_return (RC = STATUS_CANNOT_DELETE);
-                }
+            RC = UDFCheckAccessRights(NULL, NULL, OldRelatedFileInfo->Fcb, RelatedCcb, FILE_DELETE_CHILD, 0);
+            if (!NT_SUCCESS(RC)) {
+                AdPrint(("    Read-only. DeleteOnClose attempt failed\n"));
+                try_return (RC = STATUS_CANNOT_DELETE);
             }
         }
 

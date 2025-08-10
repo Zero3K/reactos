@@ -1578,13 +1578,9 @@ UDFSetDispositionInformation(
         }
 
         if (Fcb->FcbState & UDF_FCB_READ_ONLY) {
-            // For removable media (like UDF drives), allow deletion of user-created content
-            // even if it's marked as read-only, to match expected behavior
-            if (!(Vcb->VcbState & VCB_STATE_REMOVABLE_MEDIA)) {
-                RC = UDFCheckAccessRights(NULL, NULL, Fcb->ParentFcb, NULL, FILE_DELETE_CHILD, 0);
-                if (!NT_SUCCESS(RC)) {
-                    try_return (RC = STATUS_CANNOT_DELETE);
-                }
+            RC = UDFCheckAccessRights(NULL, NULL, Fcb->ParentFcb, NULL, FILE_DELETE_CHILD, 0);
+            if (!NT_SUCCESS(RC)) {
+                try_return (RC = STATUS_CANNOT_DELETE);
             }
         }
 

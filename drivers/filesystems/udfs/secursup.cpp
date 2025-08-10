@@ -123,3 +123,237 @@ UDFSetAccessRights(
 
 } // end UDFSetAccessRights()
 
+/*************************************************************************
+*
+* Function: UDFQuerySecurity()
+*
+* Description:
+*   The I/O Manager will invoke this routine to handle a query security
+*   request
+*
+* Expected Interrupt Level (for execution) :
+*
+*  IRQL_PASSIVE_LEVEL (invocation at higher IRQL will cause execution
+*   to be deferred to a worker thread context)
+*
+* Return Value: STATUS_SUCCESS/Error
+*
+*************************************************************************/
+NTSTATUS
+NTAPI
+UDFQuerySecurity(
+    PDEVICE_OBJECT DeviceObject,       // the logical volume device object
+    PIRP           Irp)                // I/O Request Packet
+{
+    NTSTATUS            RC = STATUS_SUCCESS;
+    PIRP_CONTEXT IrpContext = NULL;
+    BOOLEAN             AreWeTopLevel = FALSE;
+
+    FsRtlEnterFileSystem();
+    ASSERT(DeviceObject);
+    ASSERT(Irp);
+
+    // set the top level context
+    AreWeTopLevel = UDFIsIrpTopLevel(Irp);
+
+    _SEH2_TRY {
+
+        // get an IRP context structure and issue the request
+        IrpContext = UDFCreateIrpContext(Irp, DeviceObject);
+        if (IrpContext) {
+            RC = UDFCommonQuerySecurity(IrpContext, Irp);
+        } else {
+            UDFCompleteRequest(IrpContext, Irp, STATUS_INSUFFICIENT_RESOURCES);
+            RC = STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+    } _SEH2_EXCEPT(UDFExceptionFilter(IrpContext, _SEH2_GetExceptionInformation())) {
+
+        RC = UDFProcessException(IrpContext, Irp);
+        UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
+    } _SEH2_END;
+
+    if (AreWeTopLevel) {
+        IoSetTopLevelIrp(NULL);
+    }
+
+    FsRtlExitFileSystem();
+
+    return(RC);
+} // end UDFQuerySecurity()
+
+/*************************************************************************
+*
+* Function: UDFSetSecurity()
+*
+* Description:
+*   The I/O Manager will invoke this routine to handle a set security
+*   request
+*
+* Expected Interrupt Level (for execution) :
+*
+*  IRQL_PASSIVE_LEVEL (invocation at higher IRQL will cause execution
+*   to be deferred to a worker thread context)
+*
+* Return Value: STATUS_SUCCESS/Error
+*
+*************************************************************************/
+NTSTATUS
+NTAPI
+UDFSetSecurity(
+    PDEVICE_OBJECT DeviceObject,       // the logical volume device object
+    PIRP           Irp)                // I/O Request Packet
+{
+    NTSTATUS            RC = STATUS_SUCCESS;
+    PIRP_CONTEXT IrpContext = NULL;
+    BOOLEAN             AreWeTopLevel = FALSE;
+
+    FsRtlEnterFileSystem();
+    ASSERT(DeviceObject);
+    ASSERT(Irp);
+
+    // set the top level context
+    AreWeTopLevel = UDFIsIrpTopLevel(Irp);
+
+    _SEH2_TRY {
+
+        // get an IRP context structure and issue the request
+        IrpContext = UDFCreateIrpContext(Irp, DeviceObject);
+        if (IrpContext) {
+            RC = UDFCommonSetSecurity(IrpContext, Irp);
+        } else {
+            UDFCompleteRequest(IrpContext, Irp, STATUS_INSUFFICIENT_RESOURCES);
+            RC = STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+    } _SEH2_EXCEPT(UDFExceptionFilter(IrpContext, _SEH2_GetExceptionInformation())) {
+
+        RC = UDFProcessException(IrpContext, Irp);
+        UDFLogEvent(UDF_ERROR_INTERNAL_ERROR, RC);
+    } _SEH2_END;
+
+    if (AreWeTopLevel) {
+        IoSetTopLevelIrp(NULL);
+    }
+
+    FsRtlExitFileSystem();
+
+    return(RC);
+} // end UDFSetSecurity()
+
+/*************************************************************************
+*
+* Function: UDFCommonQuerySecurity()
+*
+* Description:
+*   The actual work for query security is performed here. This routine
+*   returns a default security descriptor for UDF files/directories.
+*
+* Expected Interrupt Level (for execution) :
+*
+*  IRQL_PASSIVE_LEVEL
+*
+* Return Value: STATUS_SUCCESS/Error
+*
+*************************************************************************/
+NTSTATUS
+UDFCommonQuerySecurity(
+    PIRP_CONTEXT IrpContext,
+    PIRP         Irp)
+{
+    NTSTATUS RC;
+    PIO_STACK_LOCATION IrpSp = IoGetCurrentIrpStackLocation(Irp);
+    PFILE_OBJECT FileObject = IrpSp->FileObject;
+    PFCB Fcb;
+    PCCB Ccb;
+    TYPE_OF_OPEN TypeOfOpen;
+    ULONG SecurityInformation;
+    ULONG BufferLength;
+    PVOID Buffer;
+    
+    // Decode the file object
+    TypeOfOpen = UDFDecodeFileObject(FileObject, &Fcb, &Ccb);
+    
+    // Check for invalid file object
+    if (TypeOfOpen == UnopenedFileObject) {
+        UDFCompleteRequest(IrpContext, Irp, STATUS_INVALID_PARAMETER);
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Check if this is a volume open - we don't support security on volumes
+    if (TypeOfOpen == UserVolumeOpen) {
+        UDFCompleteRequest(IrpContext, Irp, STATUS_INVALID_DEVICE_REQUEST);
+        return STATUS_INVALID_DEVICE_REQUEST;
+    }
+
+    SecurityInformation = IrpSp->Parameters.QuerySecurity.SecurityInformation;
+    BufferLength = IrpSp->Parameters.QuerySecurity.Length;
+    Buffer = Irp->UserBuffer;
+
+    // Use the file system's built-in default security descriptor functionality
+    // This will create an appropriate default security descriptor based on the request
+    RC = SeQuerySecurityDescriptorInfo(&SecurityInformation,
+                                       (PSECURITY_DESCRIPTOR)Buffer,
+                                       &BufferLength,
+                                       NULL);  // No security descriptor stored - use defaults
+
+    if (RC == STATUS_BUFFER_TOO_SMALL) {
+        Irp->IoStatus.Information = BufferLength;
+    } else if (NT_SUCCESS(RC)) {
+        Irp->IoStatus.Information = BufferLength;
+    } else {
+        Irp->IoStatus.Information = 0;
+    }
+
+    UDFCompleteRequest(IrpContext, Irp, RC);
+    return RC;
+} // end UDFCommonQuerySecurity()
+
+/*************************************************************************
+*
+* Function: UDFCommonSetSecurity()
+*
+* Description:
+*   The actual work for set security is performed here. For UDF file
+*   systems, we don't support modifying security information.
+*
+* Expected Interrupt Level (for execution) :
+*
+*  IRQL_PASSIVE_LEVEL
+*
+* Return Value: STATUS_NOT_SUPPORTED
+*
+*************************************************************************/
+NTSTATUS
+UDFCommonSetSecurity(
+    PIRP_CONTEXT IrpContext,
+    PIRP         Irp)
+{
+    PIO_STACK_LOCATION IrpSp = IoGetCurrentIrpStackLocation(Irp);
+    PFILE_OBJECT FileObject = IrpSp->FileObject;
+    PFCB Fcb;
+    PCCB Ccb;
+    TYPE_OF_OPEN TypeOfOpen;
+    
+    // Decode the file object
+    TypeOfOpen = UDFDecodeFileObject(FileObject, &Fcb, &Ccb);
+    
+    // Check for invalid file object
+    if (TypeOfOpen == UnopenedFileObject) {
+        UDFCompleteRequest(IrpContext, Irp, STATUS_INVALID_PARAMETER);
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Check if this is a volume open
+    if (TypeOfOpen == UserVolumeOpen) {
+        UDFCompleteRequest(IrpContext, Irp, STATUS_INVALID_DEVICE_REQUEST);
+        return STATUS_INVALID_DEVICE_REQUEST;
+    }
+
+    // UDF file systems typically don't support modifying security information
+    // Return not supported rather than invalid device request
+    Irp->IoStatus.Information = 0;
+    UDFCompleteRequest(IrpContext, Irp, STATUS_NOT_SUPPORTED);
+    return STATUS_NOT_SUPPORTED;
+} // end UDFCommonSetSecurity()
+
