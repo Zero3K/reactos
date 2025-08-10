@@ -46,6 +46,7 @@ UDFInitializeZones(VOID)
     _SEH2_TRY {
 
         // determine memory requirements
+#ifdef UDF_DELAYED_CLOSE
         switch (MmQuerySystemSize()) {
         case MmMediumSystem:
             UdfData.MaxDelayedCloseCount = 32;
@@ -60,6 +61,7 @@ UDFInitializeZones(VOID)
             UdfData.MaxDelayedCloseCount = 10;
             UdfData.MinDelayedCloseCount = 2;
         }
+#endif //UDF_DELAYED_CLOSE
 
         ExInitializeNPagedLookasideList(&UdfData.IrpContextLookasideList,
                                         NULL,
@@ -1793,6 +1795,7 @@ Return Value:
     None
 
 */
+#ifdef UDF_DELAYED_CLOSE
 VOID
 UDFInitializeStackIrpContextFromLite(
     OUT PIRP_CONTEXT IrpContext,
@@ -1823,6 +1826,7 @@ UDFInitializeStackIrpContextFromLite(
     SetFlag(IrpContext->Flags, IRP_CONTEXT_FLAG_WAIT);
 
 } // end UDFInitializeStackIrpContextFromLite()
+#endif //UDF_DELAYED_CLOSE
 
 /*
 Routine Description:
@@ -1841,6 +1845,7 @@ Return Value:
     None
 
 */
+#ifdef UDF_DELAYED_CLOSE
 NTSTATUS
 UDFInitializeIrpContextLite(
     OUT PIRP_CONTEXT_LITE *IrpContextLite,
@@ -1865,6 +1870,7 @@ UDFInitializeIrpContextLite(
 
     return STATUS_SUCCESS;
 } // end UDFInitializeIrpContextLite()
+#endif //UDF_DELAYED_CLOSE
 
 ULONG
 UDFIsResourceAcquired(

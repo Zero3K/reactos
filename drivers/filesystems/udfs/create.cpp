@@ -599,9 +599,8 @@ UDFCommonCreate(
                     UDFReleaseResource(&(Vcb->VcbResource));
                     AcquiredVcb = FALSE;
 
-                    UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootDirFCB->FileInfo);
-
 #ifdef UDF_DELAYED_CLOSE
+                    UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootDirFCB->FileInfo);
                     UDFCloseAllDelayed(Vcb);
 #endif //UDF_DELAYED_CLOSE
 
@@ -631,9 +630,8 @@ UDFCommonCreate(
                     UDFReleaseResource(&(Vcb->VcbResource));
                     AcquiredVcb = FALSE;
 
-                    UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
-
 #ifdef UDF_DELAYED_CLOSE
+                    UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
                     UDFFspClose(Vcb);
 #endif //UDF_DELAYED_CLOSE
 

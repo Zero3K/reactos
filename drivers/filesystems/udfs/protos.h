@@ -151,6 +151,7 @@ UDFTeardownStructures(
     _Out_ PBOOLEAN RemovedStartingFcb
     );
 
+#ifdef UDF_DELAYED_CLOSE
 VOID
 NTAPI
 UDFFspClose(
@@ -179,6 +180,7 @@ UDFQueueClose(
 
 #define UDFRemoveFromSystemDelayedQueue(Fcb) \
     UDFCloseAllSystemDelayedInDir((Fcb)->Vcb, (Fcb)->FileInfo)
+#endif //UDF_DELAYED_CLOSE
 
 /*************************************************************************
 * Prototypes for the file dircntrl.cpp
@@ -778,6 +780,7 @@ extern ULONG UDFRegCheckParameterValue(
     IN PCWSTR DefaultPath,
     IN ULONG DefValue = 0);
 
+#ifdef UDF_DELAYED_CLOSE
 extern VOID UDFInitializeStackIrpContextFromLite(
     OUT PIRP_CONTEXT IrpContext,
     IN PIRP_CONTEXT_LITE IrpContextLite);
@@ -786,6 +789,7 @@ extern NTSTATUS UDFInitializeIrpContextLite (
     OUT PIRP_CONTEXT_LITE *IrpContextLite,
     IN PIRP_CONTEXT IrpContext,
     IN PFCB                Fcb);
+#endif //UDF_DELAYED_CLOSE
 
 extern ULONG
 UDFIsResourceAcquired(

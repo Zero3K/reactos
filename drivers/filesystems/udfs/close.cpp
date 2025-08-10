@@ -42,9 +42,11 @@ UDFBuildTreeItemsList(
     IN PULONG             FoundListSize);
 
 // callbacks, can't be __fastcall
+#ifdef UDF_DELAYED_CLOSE
 BOOLEAN
 UDFIsInDelayedCloseQueue(
     PUDF_FILE_INFO FileInfo);
+#endif //UDF_DELAYED_CLOSE
 
 BOOLEAN
 UDFIsLastClose(
@@ -609,6 +611,7 @@ UDFTeardownStructures(
 
 } // end UDFCleanUpFcbChain()
 
+#ifdef UDF_DELAYED_CLOSE
 VOID
 UDFDoDelayedClose(
     IN PIRP_CONTEXT_LITE NextIrpContextLite
@@ -623,7 +626,9 @@ UDFDoDelayedClose(
     StackIrpContext.Fcb->FcbState &= ~UDF_FCB_DELAY_CLOSE;
     UDFCommonClose(&StackIrpContext, NULL, TRUE);
 } // end UDFDoDelayedClose()
+#endif //UDF_DELAYED_CLOSE
 
+#ifdef UDF_DELAYED_CLOSE
 PIRP_CONTEXT
 UDFRemoveClose(
     _In_opt_ PVCB Vcb
@@ -749,6 +754,7 @@ Return Value:
 
     return IrpContext;
 }
+#endif //UDF_DELAYED_CLOSE
 
 VOID
 UDFInitializeStackIrpContext(
@@ -916,6 +922,7 @@ Return Value:
 }
 
 
+#ifdef UDF_DELAYED_CLOSE
 VOID
 NTAPI
 UDFFspClose(
@@ -1112,6 +1119,7 @@ Return Value:
 #pragma prefast(suppress:26165, "Esp:1153")
     FsRtlExitFileSystem();
 }
+#endif //UDF_DELAYED_CLOSE
 
 NTSTATUS
 UDFBuildTreeItemsList(
@@ -1202,6 +1210,7 @@ UDFBuildTreeItemsList(
     return STATUS_SUCCESS;
 } // end UDFBuildTreeItemsList()
 
+#ifdef UDF_DELAYED_CLOSE
 BOOLEAN
 UDFIsInDelayedCloseQueue(
     PUDF_FILE_INFO FileInfo)
@@ -1209,6 +1218,7 @@ UDFIsInDelayedCloseQueue(
     ASSERT(FileInfo);
     return (FileInfo->Fcb && FileInfo->Fcb->IrpContextLite);
 } // end UDFIsInDelayedCloseQueue()
+#endif //UDF_DELAYED_CLOSE
 
 BOOLEAN
 UDFIsLastClose(
@@ -1225,6 +1235,7 @@ UDFIsLastClose(
     return FALSE;
 } // UDFIsLastClose()
 
+#ifdef UDF_DELAYED_CLOSE
 NTSTATUS
 UDFCloseAllXXXDelayedInDir(
     IN PVCB             Vcb,
@@ -1403,8 +1414,10 @@ try_exit: NOTHING;
 
     return RC;
 } // end UDFCloseAllXXXDelayedInDir(
+#endif //UDF_DELAYED_CLOSE
 
 
+#ifdef UDF_DELAYED_CLOSE
 /*
     This routine adds request to Delayed Close queue.
     If number of queued requests exceeds higher threshold it fires
@@ -1488,4 +1501,5 @@ try_exit:    NOTHING;
     } _SEH2_END;
     return RC;
 } // end UDFQueueDelayedClose()
+#endif //UDF_DELAYED_CLOSE
 
