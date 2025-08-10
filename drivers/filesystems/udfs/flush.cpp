@@ -516,7 +516,9 @@ UDFFlushVolume(
 
     ASSERT_EXCLUSIVE_VCB(Vcb);
 
+#ifdef UDF_DELAYED_CLOSE
     UDFFspClose(Vcb);
+#endif //UDF_DELAYED_CLOSE
 
     _SEH2_TRY {
         if (Vcb->VcbState & VCB_STATE_VOLUME_READ_ONLY)
