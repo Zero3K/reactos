@@ -2095,6 +2095,7 @@ UDFPrepareForRenameMoveLink(
     _SEH2_TRY {
         // Do actual close for all "delayed close" calls
 
+#ifdef UDF_DELAYED_CLOSE
         // ... and now remove the rest from our queue
         if (!HardLink) {
             UDFCloseAllDelayedInDir(Vcb, Dir1);
@@ -2103,6 +2104,7 @@ UDFPrepareForRenameMoveLink(
         } else {
             UDFCloseAllDelayedInDir(Vcb, Dir2);
         }
+#endif //UDF_DELAYED_CLOSE
 
     } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
         BrutePoint();

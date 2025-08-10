@@ -1795,6 +1795,7 @@ Return Value:
     None
 
 */
+#ifdef UDF_DELAYED_CLOSE
 VOID
 UDFInitializeStackIrpContextFromLite(
     OUT PIRP_CONTEXT IrpContext,
@@ -1825,6 +1826,7 @@ UDFInitializeStackIrpContextFromLite(
     SetFlag(IrpContext->Flags, IRP_CONTEXT_FLAG_WAIT);
 
 } // end UDFInitializeStackIrpContextFromLite()
+#endif //UDF_DELAYED_CLOSE
 
 /*
 Routine Description:
@@ -1843,6 +1845,7 @@ Return Value:
     None
 
 */
+#ifdef UDF_DELAYED_CLOSE
 NTSTATUS
 UDFInitializeIrpContextLite(
     OUT PIRP_CONTEXT_LITE *IrpContextLite,
@@ -1867,6 +1870,7 @@ UDFInitializeIrpContextLite(
 
     return STATUS_SUCCESS;
 } // end UDFInitializeIrpContextLite()
+#endif //UDF_DELAYED_CLOSE
 
 ULONG
 UDFIsResourceAcquired(
