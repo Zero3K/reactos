@@ -123,3 +123,72 @@ UDFSetAccessRights(
 
 } // end UDFSetAccessRights()
 
+/*************************************************************************
+*
+* Function: UDFSetSecurity()
+*
+* Description:
+*   Handles IRP_MJ_SET_SECURITY requests. For UDF drives, permissions
+*   cannot be set as UDF file systems don't support NTFS-style security
+*   descriptors. This function always returns STATUS_ACCESS_DENIED to
+*   prevent any permission setting operations.
+*
+* Expected Interrupt Level (for execution) :
+*
+*  IRQL_PASSIVE_LEVEL
+*
+* Return Value: STATUS_ACCESS_DENIED
+*
+*************************************************************************/
+NTSTATUS
+NTAPI
+UDFSetSecurity(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP           Irp
+    )
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+    
+    // Complete the IRP with ACCESS_DENIED status
+    // UDF file systems do not support setting security descriptors
+    Irp->IoStatus.Status = STATUS_ACCESS_DENIED;
+    Irp->IoStatus.Information = 0;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+    
+    return STATUS_ACCESS_DENIED;
+} // end UDFSetSecurity()
+
+/*************************************************************************
+*
+* Function: UDFQuerySecurity()
+*
+* Description:
+*   Handles IRP_MJ_QUERY_SECURITY requests. For UDF drives, we return
+*   STATUS_NOT_SUPPORTED since UDF file systems don't support NTFS-style 
+*   security descriptors.
+*
+* Expected Interrupt Level (for execution) :
+*
+*  IRQL_PASSIVE_LEVEL
+*
+* Return Value: STATUS_NOT_SUPPORTED
+*
+*************************************************************************/
+NTSTATUS
+NTAPI
+UDFQuerySecurity(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP           Irp
+    )
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+    
+    // Complete the IRP with NOT_SUPPORTED status
+    // UDF file systems do not support security descriptors
+    Irp->IoStatus.Status = STATUS_NOT_SUPPORTED;
+    Irp->IoStatus.Information = 0;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+    
+    return STATUS_NOT_SUPPORTED;
+} // end UDFQuerySecurity()
+
