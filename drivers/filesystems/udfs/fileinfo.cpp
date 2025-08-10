@@ -2087,9 +2087,11 @@ UDFPrepareForRenameMoveLink(
     // At first, make system to issue last Close request
     // for our Source & Target ...
     // we needn't flush/purge for Source on HLink
+#ifdef UDF_DELAYED_CLOSE
     UDFRemoveFromSystemDelayedQueue(Dir2->Fcb);
     if (!HardLink && (Dir2 != Dir1))
         UDFRemoveFromSystemDelayedQueue(File1->Fcb);
+#endif //UDF_DELAYED_CLOSE
 
 #ifdef UDF_DELAYED_CLOSE
     _SEH2_TRY {

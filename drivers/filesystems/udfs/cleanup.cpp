@@ -336,7 +336,9 @@ UDFCommonCleanup(
 
             // Make system to issue last Close request
             // for our Target ...
+#ifdef UDF_DELAYED_CLOSE
             UDFRemoveFromSystemDelayedQueue(Fcb);
+#endif //UDF_DELAYED_CLOSE
 
 #ifdef UDF_DELAYED_CLOSE
             // remove file from our DelayedClose queue
