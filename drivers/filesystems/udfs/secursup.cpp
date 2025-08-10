@@ -31,10 +31,18 @@ UDFCheckAccessRights(
 {
     NTSTATUS RC;
     BOOLEAN ROCheck = FALSE;
+    BOOLEAN HasBackupPrivilege = FALSE;
+    BOOLEAN HasRestorePrivilege = FALSE;
 
     // Check attr compatibility
     ASSERT(Fcb);
     ASSERT(Fcb->Vcb);
+
+    // Check if the caller has backup/restore privileges which can override ACL restrictions
+    if (AccessState && AccessState->SubjectSecurityContext.PrimaryToken) {
+        HasBackupPrivilege = SeSinglePrivilegeCheck(SeExports->SeBackupPrivilege, UserMode);
+        HasRestorePrivilege = SeSinglePrivilegeCheck(SeExports->SeRestorePrivilege, UserMode);
+    }
 
     if (Fcb->FcbState & UDF_FCB_READ_ONLY) {
         ROCheck = TRUE;
@@ -71,11 +79,17 @@ UDFCheckAccessRights(
             AccessMask |= FILE_ADD_SUBDIRECTORY | FILE_ADD_FILE | FILE_DELETE_CHILD;
         }
 
+        // If the operation would normally be denied but caller has backup/restore privileges
+        // and this is a deletion operation, allow it to proceed
         if (FlagOn(DesiredAccess, ~AccessMask)) {
-
-            AdPrint(("Cannot open readonly\n"));
-
-            return STATUS_ACCESS_DENIED;
+            if ((DesiredAccess & (DELETE | FILE_DELETE_CHILD)) && 
+                (HasBackupPrivilege || HasRestorePrivilege)) {
+                AdPrint(("Allowing deletion with backup/restore privilege\n"));
+                // Allow the deletion to proceed despite read-only status
+            } else {
+                AdPrint(("Cannot open readonly\n"));
+                return STATUS_ACCESS_DENIED;
+            }
         }
     }
 
