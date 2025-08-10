@@ -1762,12 +1762,17 @@ UDFFreeFESpace(
             goto clean_caller;
         }
     }
-#endif // UDF_FE_ALLOCATION_CHARGE
     UDFMarkSpaceAsXXX(Vcb, 0, FEExtInfo->Mapping, AS_DISCARDED); // free
 clean_caller:
     FEExtInfo->Mapping[0].extLocation = 0;
     FEExtInfo->Mapping[0].extLength = (EXTENT_NOT_RECORDED_NOT_ALLOCATED << 30);
     return;
+#else // UDF_FE_ALLOCATION_CHARGE
+    UDFMarkSpaceAsXXX(Vcb, 0, FEExtInfo->Mapping, AS_DISCARDED); // free
+    FEExtInfo->Mapping[0].extLocation = 0;
+    FEExtInfo->Mapping[0].extLength = (EXTENT_NOT_RECORDED_NOT_ALLOCATED << 30);
+    return;
+#endif // UDF_FE_ALLOCATION_CHARGE
 } // end UDFFreeFESpace()
 
 /*
