@@ -137,6 +137,7 @@ UDFCommonWrite(
 
     BOOLEAN                 MainResourceAcquiredExclusive = FALSE;
     BOOLEAN                 MainResourceCanDemoteToShared = FALSE;
+    BOOLEAN                 AcquiredParentFcb = FALSE;
 
     BOOLEAN                 CacheLocked = FALSE;
 
@@ -582,6 +583,13 @@ UDFCommonWrite(
                     MainResourceAcquired = TRUE;
                 }
 
+                // Acquire parent FCB resource when extending file to prevent data corruption
+                if (ExtendFS && Fcb->FileInfo->ParentFile && Fcb->FileInfo->ParentFile->Fcb) {
+                    UDF_CHECK_PAGING_IO_RESOURCE(Fcb->FileInfo->ParentFile->Fcb);
+                    UDFAcquireResourceExclusive(&Fcb->FileInfo->ParentFile->Fcb->FcbNonpaged->FcbResource, TRUE);
+                    AcquiredParentFcb = TRUE;
+                }
+
                 UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbPagingIoResource, TRUE);
                 PagingIoResourceAcquired = TRUE;
 
@@ -792,6 +800,11 @@ try_exit:   NOTHING;
                 UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
             }
 
+            if (AcquiredParentFcb) {
+                UDF_CHECK_PAGING_IO_RESOURCE(Fcb->FileInfo->ParentFile->Fcb);
+                UDFReleaseResource(&Fcb->FileInfo->ParentFile->Fcb->FcbNonpaged->FcbResource);
+            }
+
             if (VcbAcquired) {
                 UDFReleaseResource(&Vcb->VcbResource);
             }
@@ -868,6 +881,11 @@ try_exit:   NOTHING;
             if (MainResourceAcquired) {
                 UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
                 UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
+            }
+
+            if (AcquiredParentFcb) {
+                UDF_CHECK_PAGING_IO_RESOURCE(Fcb->FileInfo->ParentFile->Fcb);
+                UDFReleaseResource(&Fcb->FileInfo->ParentFile->Fcb->FcbNonpaged->FcbResource);
             }
 
             if (VcbAcquired) {
