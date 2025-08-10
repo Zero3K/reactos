@@ -1578,9 +1578,13 @@ UDFSetDispositionInformation(
         }
 
         if (Fcb->FcbState & UDF_FCB_READ_ONLY) {
-            RC = UDFCheckAccessRights(NULL, NULL, Fcb->ParentFcb, NULL, FILE_DELETE_CHILD, 0);
-            if (!NT_SUCCESS(RC)) {
-                try_return (RC = STATUS_CANNOT_DELETE);
+            // For removable media (like UDF drives), allow deletion of user-created content
+            // even if it's marked as read-only, to match expected behavior
+            if (!(Vcb->VcbState & VCB_STATE_REMOVABLE_MEDIA)) {
+                RC = UDFCheckAccessRights(NULL, NULL, Fcb->ParentFcb, NULL, FILE_DELETE_CHILD, 0);
+                if (!NT_SUCCESS(RC)) {
+                    try_return (RC = STATUS_CANNOT_DELETE);
+                }
             }
         }
 
@@ -2276,19 +2280,29 @@ post_rename:
         if (UDFIsDirOpened__(FileInfo)) {
             // We can't rename file because of unclean references.
             // UDF_INFO package can safely do it, but NT side cannot.
-            // In this case NT requires STATUS_OBJECT_NAME_COLLISION
-            // rather than STATUS_ACCESS_DENIED
-            if (NT_SUCCESS(UDFFindFile__(Vcb, ic, &NewName, TargetDirInfo)))
-                try_return(RC = STATUS_OBJECT_NAME_COLLISION);
-            try_return (RC = STATUS_ACCESS_DENIED);
+            // However, for removable media (like UDF drives), allow users to 
+            // delete their own content even if directories have open references
+            // (e.g., when Explorer is accessing them)
+            if (!(Vcb->VcbState & VCB_STATE_REMOVABLE_MEDIA)) {
+                // In this case NT requires STATUS_OBJECT_NAME_COLLISION
+                // rather than STATUS_ACCESS_DENIED
+                if (NT_SUCCESS(UDFFindFile__(Vcb, ic, &NewName, TargetDirInfo)))
+                    try_return(RC = STATUS_OBJECT_NAME_COLLISION);
+                try_return (RC = STATUS_ACCESS_DENIED);
+            }
         } else {
             // Last check before Moving.
             // We can't move across Dir referenced (even internally) file
             if (!SingleDir) {
                 RC = UDFDoesOSAllowFileToBeMoved__(FileInfo);
                 if (!NT_SUCCESS(RC)) {
-//                    try_return(RC);
-                    goto post_rename;
+                    // For removable media, allow deletion even if directory contains
+                    // files that appear to be open, to match user expectations
+                    if (!(Vcb->VcbState & VCB_STATE_REMOVABLE_MEDIA)) {
+//                        try_return(RC);
+                        goto post_rename;
+                    }
+                    // On removable media, continue with the operation
                 }
             }
 

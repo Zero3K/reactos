@@ -997,6 +997,25 @@ UDFSetAccessRights(
     USHORT       ShareAccess);
 
 /*************************************************************************
+* Prototypes for the file SecurSup.cpp
+*************************************************************************/
+extern NTSTATUS NTAPI UDFQuerySecurity(
+    PDEVICE_OBJECT              DeviceObject,       // the logical volume device object
+    PIRP                        Irp);               // I/O Request Packet
+
+extern NTSTATUS NTAPI UDFSetSecurity(
+    PDEVICE_OBJECT              DeviceObject,       // the logical volume device object
+    PIRP                        Irp);               // I/O Request Packet
+
+extern NTSTATUS UDFCommonQuerySecurity(
+    PIRP_CONTEXT IrpContext,
+    PIRP                        Irp);
+
+extern NTSTATUS UDFCommonSetSecurity(
+    PIRP_CONTEXT IrpContext,
+    PIRP                        Irp);
+
+/*************************************************************************
 * Prototypes for the file Shutdown.cpp
 *************************************************************************/
 extern NTSTATUS NTAPI UDFShutdown(

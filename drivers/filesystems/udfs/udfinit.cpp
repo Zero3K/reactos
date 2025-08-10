@@ -297,6 +297,8 @@ UDFInitializeFunctionPointers(
     // function pointer and implement appropriate support.
     DriverObject->MajorFunction[IRP_MJ_LOCK_CONTROL]        = UDFLockControl;
     DriverObject->MajorFunction[IRP_MJ_CLEANUP]             = UDFCleanup;
+    DriverObject->MajorFunction[IRP_MJ_QUERY_SECURITY]      = UDFQuerySecurity;
+    DriverObject->MajorFunction[IRP_MJ_SET_SECURITY]        = UDFSetSecurity;
 
     DriverObject->MajorFunction[IRP_MJ_PNP]                 = UDFPnp;
 
