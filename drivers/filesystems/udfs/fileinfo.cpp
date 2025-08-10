@@ -2296,8 +2296,13 @@ post_rename:
             if (!SingleDir) {
                 RC = UDFDoesOSAllowFileToBeMoved__(FileInfo);
                 if (!NT_SUCCESS(RC)) {
-//                    try_return(RC);
-                    goto post_rename;
+                    // For removable media, allow deletion even if directory contains
+                    // files that appear to be open, to match user expectations
+                    if (!(Vcb->VcbState & VCB_STATE_REMOVABLE_MEDIA)) {
+//                        try_return(RC);
+                        goto post_rename;
+                    }
+                    // On removable media, continue with the operation
                 }
             }
 
