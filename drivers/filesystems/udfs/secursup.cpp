@@ -42,9 +42,14 @@ UDFCheckAccessRights(
     if ((Fcb->Vcb->origIntegrityType == INTEGRITY_TYPE_OPEN) &&
         Ccb && !(Ccb->Flags & UDF_CCB_VOLUME_OPEN) &&
        (Fcb->Vcb->CompatFlags & UDF_VCB_IC_DIRTY_RO)) {
-        AdPrint(("force R/O on dirty\n"));
-        ROCheck = TRUE;
-    } if (ROCheck) {
+        // Check if this is a deletion operation - allow these even on dirty volumes
+        // since they don't compromise volume integrity further
+        if (!(DesiredAccess & (DELETE | FILE_DELETE_CHILD))) {
+            AdPrint(("force R/O on dirty\n"));
+            ROCheck = TRUE;
+        }
+    }
+    if (ROCheck) {
 
         //
         //  Check the desired access for a read-only dirent.  AccessMask will contain
