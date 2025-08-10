@@ -996,6 +996,18 @@ UDFSetAccessRights(
     ACCESS_MASK  DesiredAccess,
     USHORT       ShareAccess);
 
+extern NTSTATUS NTAPI
+UDFSetSecurity(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP           Irp
+    );
+
+extern NTSTATUS NTAPI
+UDFQuerySecurity(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP           Irp
+    );
+
 /*************************************************************************
 * Prototypes for the file Shutdown.cpp
 *************************************************************************/

@@ -300,6 +300,10 @@ UDFInitializeFunctionPointers(
 
     DriverObject->MajorFunction[IRP_MJ_PNP]                 = UDFPnp;
 
+    // Prevent permission setting operations on UDF drives
+    DriverObject->MajorFunction[IRP_MJ_SET_SECURITY]        = UDFSetSecurity;
+    DriverObject->MajorFunction[IRP_MJ_QUERY_SECURITY]      = UDFQuerySecurity;
+
     // Now, it is time to initialize the fast-io stuff ...
     PtrFastIoDispatch = DriverObject->FastIoDispatch = &UdfData.UDFFastIoDispatch;
 

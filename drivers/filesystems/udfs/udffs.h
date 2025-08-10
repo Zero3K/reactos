@@ -222,7 +222,7 @@ UDFFreePool(
     !(Vcb->WriteSecurity) &&            \
      (FlagOn( (DesiredAccess),          \
             WRITE_OWNER             |   \
-            0 /*WRITE_DAC*/ ))                \
+            WRITE_DAC ))                \
 ))
 
 
