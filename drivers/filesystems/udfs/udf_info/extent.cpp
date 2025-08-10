@@ -1352,7 +1352,9 @@ UDFDiscardFESpace(
 
     MyFreePool__(Mapping2);
 #else // UDF_FE_ALLOCATION_CHARGE
+#ifdef UDF_DELAYED_CLOSE
     ASSERT(!Dloc->DirIndex->FECharge.Mapping);
+#endif // UDF_DELAYED_CLOSE
     return;
 #endif // UDF_FE_ALLOCATION_CHARGE
 } // end UDFDiscardFESpace()
@@ -1800,7 +1802,9 @@ UDFFlushFESpace(
     Dloc->DirIndex->FECharge.Mapping = NULL;
     UDFDiscardFESpace(Vcb, Mapping, lim);
 #else // UDF_FE_ALLOCATION_CHARGE
+#ifdef UDF_DELAYED_CLOSE
     ASSERT(!Dloc->DirIndex->FECharge.Mapping);
+#endif // UDF_DELAYED_CLOSE
     return;
 #endif // UDF_FE_ALLOCATION_CHARGE
 } // end UDFFlushFESpace()
