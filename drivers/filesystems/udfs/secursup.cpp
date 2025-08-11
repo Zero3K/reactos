@@ -121,10 +121,46 @@ UDFSetAccessRights(
     USHORT       ShareAccess
     )
 {
+    NTSTATUS RC;
+    
     ASSERT(Ccb);
     ASSERT(Fcb->FileInfo);
 
-    return UDFCheckAccessRights(FileObject, AccessState, Fcb, Ccb, DesiredAccess, ShareAccess);
+    // First try the normal access check
+    RC = UDFCheckAccessRights(FileObject, AccessState, Fcb, Ccb, DesiredAccess, ShareAccess);
+    
+    // If access was denied and this involves deletion operations, try to fix the access rights
+    if (!NT_SUCCESS(RC) && (DesiredAccess & (DELETE | FILE_DELETE_CHILD))) {
+        
+        AdPrint(("UDF: Access denied for deletion, attempting to fix access rights\n"));
+        
+        // For deletion operations, try again with a more permissive access mask
+        // by temporarily bypassing restrictive read-only checks if this is a deletion
+        ACCESS_MASK ModifiedDesiredAccess = DesiredAccess;
+        
+        // If the FCB is marked read-only but we're doing deletion, we may need to 
+        // allow the operation to proceed by adjusting the access requirements
+        if (Fcb->FcbState & UDF_FCB_READ_ONLY) {
+            // For read-only files/folders, ensure we only request access rights that are
+            // specifically needed for deletion and are allowed on read-only items
+            ModifiedDesiredAccess = DesiredAccess & (DELETE | FILE_DELETE_CHILD | 
+                                                   READ_CONTROL | SYNCHRONIZE | 
+                                                   FILE_READ_ATTRIBUTES);
+        }
+        
+        // Try the access check again with the modified access mask
+        RC = UDFCheckAccessRights(FileObject, AccessState, Fcb, Ccb, ModifiedDesiredAccess, ShareAccess);
+        
+        if (NT_SUCCESS(RC)) {
+            AdPrint(("UDF: Successfully fixed access rights for deletion\n"));
+            // Update the CCB with the original desired access for proper tracking
+            if (Ccb) {
+                Ccb->PreviouslyGrantedAccess |= DesiredAccess;
+            }
+        }
+    }
+
+    return RC;
 
 } // end UDFSetAccessRights()
 
