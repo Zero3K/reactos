@@ -996,6 +996,21 @@ UDFSetAccessRights(
     ACCESS_MASK  DesiredAccess,
     USHORT       ShareAccess);
 
+extern BOOLEAN
+UDFCanBypassAclForDeletion(
+    VOID
+    );
+
+extern NTSTATUS
+UDFCheckAccessRightsForDeletion(
+    PFILE_OBJECT FileObject,
+    PACCESS_STATE AccessState,
+    PFCB Fcb,
+    PCCB Ccb,
+    ACCESS_MASK DesiredAccess,
+    USHORT ShareAccess
+    );
+
 /*************************************************************************
 * Prototypes for the file Shutdown.cpp
 *************************************************************************/
