@@ -989,9 +989,7 @@ UDFBuildFileEntry(
         ((PFILE_ENTRY)FileEntry)->checkpoint = 1;
     }
 
-#if 0
     UDFSetEntityID_imp(eID, UDF_ID_DEVELOPER);
-#endif
 
     /*RtlCopyMemory((int8*)&(eID->ident), UDF_ID_DEVELOPER, sizeof(UDF_ID_DEVELOPER) );
     iis = (impIdentSuffix*)&(eID->identSuffix);
@@ -4928,9 +4926,7 @@ UDFRecordVAT(
         eID = &(((PFILE_ENTRY)(VatFileInfo->Dloc->FileEntry))->impIdent);
     }
 
-#if 0
     UDFSetEntityID_imp(eID, UDF_ID_DEVELOPER);
-#endif
 
 /*    RtlCopyMemory((int8*)&(eID->ident), UDF_ID_DEVELOPER, sizeof(UDF_ID_DEVELOPER) );
     iis = (impIdentSuffix*)&(eID->identSuffix);

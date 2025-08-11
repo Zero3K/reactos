@@ -922,20 +922,17 @@ Return Value:
 
     //  Lock the Fcb and check if there is really any work to do.
 
-    //TODO: impl
-    //UDFLockFcb( IrpContext, Fcb );
+    UDFLockFcb( IrpContext, Fcb );
 
     if (Fcb->FileLock != NULL) {
 
-        //TODO: impl
-        //UDFUnlockFcb( IrpContext, Fcb );
+        UDFUnlockFcb( IrpContext, Fcb );
         return TRUE;
     }
 
     Fcb->FileLock = FileLock = FsRtlAllocateFileLock(NULL, NULL);
 
-    //TODO: impl
-    //UDFUnlockFcb( IrpContext, Fcb );
+    UDFUnlockFcb( IrpContext, Fcb );
 
     //  Return or raise as appropriate.
     if (FileLock == NULL) {
@@ -951,6 +948,58 @@ Return Value:
     }
 
     return Result;
+}
+
+/*************************************************************************
+*
+* Function: UDFLockFcb()
+*
+* Description:
+*   Acquire FCB resource exclusively for synchronization
+*
+* Expected Interrupt Level (for execution) :
+*
+*  IRQL_PASSIVE_LEVEL
+*
+* Return Value: None
+*
+*************************************************************************/
+VOID
+UDFLockFcb(
+    _In_opt_ PIRP_CONTEXT IrpContext,
+    _Inout_ PFCB Fcb
+)
+{
+    PAGED_CODE();
+
+    UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+    UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbResource, TRUE);
+}
+
+/*************************************************************************
+*
+* Function: UDFUnlockFcb()
+*
+* Description:
+*   Release FCB resource
+*
+* Expected Interrupt Level (for execution) :
+*
+*  IRQL_PASSIVE_LEVEL
+*
+* Return Value: None
+*
+*************************************************************************/
+VOID
+UDFUnlockFcb(
+    _In_opt_ PIRP_CONTEXT IrpContext,
+    _Inout_ PFCB Fcb
+)
+{
+    PAGED_CODE();
+
+    UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+    UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
 }
 
 /*************************************************************************

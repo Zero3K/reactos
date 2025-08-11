@@ -2429,7 +2429,7 @@ UDFOpenFile(
         // Set the file object type.
         UDFSetFileObject(IrpSp->FileObject, TypeOfOpen, Fcb, Ccb);
 
-        //UDFLockFcb(IrpContext, Fcb);
+        UDFLockFcb(IrpContext, Fcb);
 
         if (TypeOfOpen == UserFileOpen) {
 
@@ -2440,7 +2440,7 @@ UDFOpenFile(
             Fcb->Header.IsFastIoPossible = FastIoIsNotPossible;
         }
 
-        //UDFUnlockFcb(IrpContext, Fcb);
+        UDFUnlockFcb(IrpContext, Fcb);
 
         // Point to the section object pointer in the non-paged Fcb.
         IrpSp->FileObject->SectionObjectPointer = &Fcb->FcbNonpaged->SegmentObject;
