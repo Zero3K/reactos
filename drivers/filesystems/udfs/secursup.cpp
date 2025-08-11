@@ -128,3 +128,58 @@ UDFSetAccessRights(
 
 } // end UDFSetAccessRights()
 
+/*
+ * Helper function to check if the current user has privileges to bypass ACL restrictions
+ * for deletion operations. This allows users with backup/restore or take ownership
+ * privileges to delete files even when normal ACL checks would deny access.
+ */
+BOOLEAN
+UDFCanBypassAclForDeletion(
+    VOID
+    )
+{
+    // Check for privileges that typically allow bypassing file ACLs for deletion
+    if (SeSinglePrivilegeCheck(SeExports->SeTakeOwnershipPrivilege, UserMode) ||
+        SeSinglePrivilegeCheck(SeExports->SeRestorePrivilege, UserMode) ||
+        SeSinglePrivilegeCheck(SeExports->SeBackupPrivilege, UserMode)) {
+        return TRUE;
+    }
+
+    return FALSE;
+} // end UDFCanBypassAclForDeletion()
+
+/*
+ * Enhanced access rights check for deletion that attempts to allow deletion
+ * when the user has appropriate privileges, even if normal ACL checks would deny it.
+ */
+NTSTATUS
+UDFCheckAccessRightsForDeletion(
+    PFILE_OBJECT FileObject,
+    PACCESS_STATE AccessState,
+    PFCB Fcb,
+    PCCB Ccb,
+    ACCESS_MASK DesiredAccess,
+    USHORT ShareAccess
+    )
+{
+    NTSTATUS RC;
+
+    // First try the normal access check
+    RC = UDFCheckAccessRights(FileObject, AccessState, Fcb, Ccb, DesiredAccess, ShareAccess);
+
+    // If access was denied and this is a deletion operation, check if we can bypass ACL restrictions
+    if (!NT_SUCCESS(RC) &&
+        (DesiredAccess & (DELETE | FILE_DELETE_CHILD)) &&
+        UDFCanBypassAclForDeletion()) {
+
+        AdPrint(("UDF: Allowing deletion with privilege bypass\n"));
+
+        // Allow the operation to proceed if the user has appropriate privileges
+        // This mimics Windows behavior where users with backup/restore privileges
+        // can delete files even with restrictive ACLs
+        RC = STATUS_SUCCESS;
+    }
+
+    return RC;
+} // end UDFCheckAccessRightsForDeletion()
+
