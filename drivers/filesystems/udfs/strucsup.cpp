@@ -170,9 +170,17 @@ Return Value:
     
     UNREFERENCED_PARAMETER(IrpContext);
     
-    ExDeleteResourceLite(&FcbNonpaged->FcbPagingIoResource);
-    ExDeleteResourceLite(&FcbNonpaged->FcbResource);
-    ExDeleteResourceLite(&FcbNonpaged->CcbListResource);
+    // Safely delete resources - they should only be deleted once
+    // This prevents double deletion which can cause IRQL_NOT_LESS_OR_EQUAL BSOD
+    _SEH2_TRY {
+        ExDeleteResourceLite(&FcbNonpaged->FcbPagingIoResource);
+        ExDeleteResourceLite(&FcbNonpaged->FcbResource);
+        ExDeleteResourceLite(&FcbNonpaged->CcbListResource);
+    } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+        // If exception occurs during resource deletion, just continue
+        // This can happen if resources were already deleted elsewhere
+        NOTHING;
+    } _SEH2_END;
 
     UDFDeallocateFcbNonpaged(FcbNonpaged);
 

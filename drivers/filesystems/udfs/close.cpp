@@ -529,11 +529,9 @@ UDFTeardownStructures(
                 // Remove resources
                 UDF_CHECK_PAGING_IO_RESOURCE(CurrentFcb);
                 UDFReleaseResource(&CurrentFcb->FcbNonpaged->FcbResource);
-                if (CurrentFcb->Header.Resource) {
-                    UDFDeleteResource(&CurrentFcb->FcbNonpaged->FcbResource);
-                    UDFDeleteResource(&CurrentFcb->FcbNonpaged->FcbPagingIoResource);
-                }
-
+                
+                // Don't manually delete FCB resources here - let UDFDeleteFcbNonpaged handle it
+                // to avoid double deletion which can cause IRQL_NOT_LESS_OR_EQUAL BSOD
                 CurrentFcb->Header.Resource =
                 CurrentFcb->Header.PagingIoResource = NULL;
 
