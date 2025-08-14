@@ -2397,7 +2397,7 @@ post_rename:
         // Look through Ccb list & decrement OpenHandleCounter(s)
         // acquire CcbList
         if (!SingleDir) {
-            UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->CcbListResource, TRUE);
+            UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbResource, TRUE);
             Link = Fcb->NextCCB.Flink;
             DirRefCount = 0;
             FileInfoRefCount = 0;
@@ -2439,7 +2439,7 @@ post_rename:
 #endif // UDF_DBG
                 }
             }
-            UDFReleaseResource(&Fcb->FcbNonpaged->CcbListResource);
+            UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
 
             ASSERT(DirRefCount >= FileInfoRefCount);
             // update counters & pointers

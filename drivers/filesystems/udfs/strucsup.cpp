@@ -138,7 +138,6 @@ Return Value:
     ExInitializeResourceLite(&FcbNonpaged->FcbResource);
     ExInitializeFastMutex(&FcbNonpaged->FcbMutex);
     ExInitializeFastMutex(&FcbNonpaged->AdvancedFcbHeaderMutex);
-    ExInitializeResourceLite(&FcbNonpaged->CcbListResource);
 
     return FcbNonpaged;
 }
@@ -172,7 +171,6 @@ Return Value:
     
     ExDeleteResourceLite(&FcbNonpaged->FcbPagingIoResource);
     ExDeleteResourceLite(&FcbNonpaged->FcbResource);
-    ExDeleteResourceLite(&FcbNonpaged->CcbListResource);
 
     UDFDeallocateFcbNonpaged(FcbNonpaged);
 
