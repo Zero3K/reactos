@@ -941,13 +941,27 @@ UDFDeferredWriteCallBack(
     IN PVOID Context2           // Should be Irp
     )
 {
+    PIRP_CONTEXT IrpContext = (PIRP_CONTEXT)Context1;
+    
     UDFPrint(("UDFDeferredWriteCallBack\n"));
+    
+    // Validate that Context1 is actually a valid IRP_CONTEXT before proceeding
+    // This prevents crashes when Cache Manager passes invalid context
+    if (!IrpContext ||
+        (IrpContext->NodeIdentifier.NodeTypeCode != UDF_NODE_TYPE_IRP_CONTEXT) ||
+        (IrpContext->NodeIdentifier.NodeByteSize != sizeof(IRP_CONTEXT))) {
+        UDFPrint(("UDFDeferredWriteCallBack: Invalid IRP_CONTEXT (NodeType=%x, NodeSize=%x)\n",
+            IrpContext ? IrpContext->NodeIdentifier.NodeTypeCode : 0,
+            IrpContext ? IrpContext->NodeIdentifier.NodeByteSize : 0));
+        return;
+    }
+    
     // We should typically simply post the request to our internal
     // queue of posted requests (just as we would if the original write
     // could not be completed because the caller could not block).
     // Once we post the request, return from this routine. The write
     // will then be retried in the context of a system worker thread
-    UDFPostRequest((PIRP_CONTEXT)Context1, (PIRP)Context2);
+    UDFPostRequest(IrpContext, (PIRP)Context2);
 
 } // end UDFDeferredWriteCallBack()
 
