@@ -703,13 +703,14 @@ UDFCloseFileInfoChain(
     PFCB ParentFcb = NULL;
     NTSTATUS RC = STATUS_SUCCESS;
     NTSTATUS RC2;
+    ULONG MaxDepth = 1024; // Safety limit to prevent infinite loops
 
     // we can't process Tree until we can acquire Vcb
     if (!VcbAcquired)
         UDFAcquireResourceShared(&(Vcb->VcbResource),TRUE);
 
     AdPrint(("UDFCloseFileInfoChain\n"));
-    for(; fi; ) {
+    for(; fi && MaxDepth; MaxDepth--) {
 
         // close parent chain (if any)
         // if we started path parsing not from RootDir on Create,
@@ -754,6 +755,12 @@ UDFCloseFileInfoChain(
             UDFReleaseResource(&Vcb->VcbResource);
         }
         fi = ParentFI;
+    }
+
+    // Check if we hit the safety limit
+    if (fi && MaxDepth == 0) {
+        AdPrint(("UDFCloseFileInfoChain: Hit maximum depth limit, possible circular reference\n"));
+        RC = STATUS_FILE_CORRUPT_ERROR;
     }
 
     if (!VcbAcquired)

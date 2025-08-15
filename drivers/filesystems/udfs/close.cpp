@@ -150,6 +150,7 @@ UDFCommonClose(
     PUDF_FILE_INFO          fi;
     ULONG                   i = 0;
     BOOLEAN                 PostRequest = FALSE;
+    BOOLEAN                 RemovedStartingFcb = FALSE;
     TYPE_OF_OPEN            TypeOfOpen;
     ULONG UserReference = 0;
 
@@ -338,7 +339,7 @@ UDFCommonClose(
         AdPrint(("UDF: ReferenceCount:  %x\n",Fcb->FcbReference));
 #endif // UDF_DBG
         // try to clean up as long chain as it is possible
-        UDFTeardownStructures(IrpContext, fi->Fcb, NULL);
+        UDFTeardownStructures(IrpContext, fi->Fcb, &RemovedStartingFcb);
 
 try_exit: NOTHING;
 
