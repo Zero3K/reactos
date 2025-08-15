@@ -15,3 +15,8 @@ modules/[Aa][Hh][Kk]_[Tt]ests
 .settings
 .vscode
 sdk/tools/winesync/winesync.cfg
+*.gch
+CMakeFiles/
+CMakeCache.txt
+Makefile
+cmake_install.cmake

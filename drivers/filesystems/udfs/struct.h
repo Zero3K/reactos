@@ -82,8 +82,6 @@ struct CCB {
     UDFIdentifier                       NodeIdentifier;
     // ptr to the associated FCB
     FCB*                                Fcb;
-    // all CCB structures for a FCB are linked together
-    LIST_ENTRY                          NextCCB;
     // each CCB is associated with a file object
     PFILE_OBJECT                        FileObject;
     // flags (see below) associated with this CCB
@@ -94,7 +92,6 @@ struct CCB {
     //  need to maintain a search pattern
     PUNICODE_STRING                     DirectorySearchPattern;
     HASH_ENTRY                          hashes;
-    ULONG                               TreeLength;
     // Acces rights previously granted to caller's thread
     ACCESS_MASK                         PreviouslyGrantedAccess;
 };
@@ -175,10 +172,6 @@ struct FCB_NONPAGED {
 
     FAST_MUTEX AdvancedFcbHeaderMutex;
 
-    // Resource for protecting the CCB list for this FCB
-
-    ERESOURCE CcbListResource;
-
 };
 using PFCB_NONPAGED = FCB_NONPAGED*;
 
@@ -247,9 +240,6 @@ struct FCB {
 
     FILE_ID FileId;
 
-    // all CCB's for this particular FCB are linked off the following
-    //  list head.
-    LIST_ENTRY                          NextCCB;
     // whenever a file stream has a create/open operation performed,
     //  the Reference count below is incremented AND the OpenHandle count
     //  below is also incremented.
@@ -337,7 +327,6 @@ using PFCB = FCB*;
 #define     UDF_FCB_DELAY_CLOSE                         (0x00002000)
 #define     UDF_FCB_DELETED                             (0x00004000)
 
-#define     UDF_FCB_INITIALIZED_CCB_LIST_RESOURCE       (0x00008000)
 #define     UDF_FCB_POSTED_RENAME                       (0x00010000)
 
 #define     FCB_STATE_INITIALIZED                       (0x00020000)
@@ -802,7 +791,6 @@ struct IRP_CONTEXT {
     NTSTATUS                        ExceptionStatus;
     // For queued close operation we save Fcb
     FCB*                            Fcb;
-    ULONG                           TreeLength;
 
     // Io context for a read request.
     // Address of Fcb for teardown oplock in create case.
@@ -888,7 +876,6 @@ struct IRP_CONTEXT_LITE {
     ULONG                           UserReference;
     //  Real device object.  This represents the physical device closest to the media.
     PDEVICE_OBJECT                  RealDevice;
-    ULONG                           TreeLength;
 };
 using PIRP_CONTEXT_LITE = IRP_CONTEXT_LITE*;
 
