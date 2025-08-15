@@ -203,7 +203,6 @@ UDFCommonClose(
         // If this is a queued call (for our dispatch)
         // Get saved Fcb address
         Fcb = IrpContext->Fcb;
-        i = IrpContext->TreeLength;
     }
 
     Vcb = Fcb->Vcb;
@@ -233,8 +232,6 @@ UDFCommonClose(
         if (Irp) {
 
             UserReference = 1;
-            IrpContext->TreeLength =
-            i = Ccb->TreeLength;
             // remember the number of incomplete Close requests
             InterlockedIncrement((PLONG)&(Fcb->CcbCount));
             // we can release CCB in any case
@@ -341,7 +338,7 @@ UDFCommonClose(
         AdPrint(("UDF: ReferenceCount:  %x\n",Fcb->FcbReference));
 #endif // UDF_DBG
         // try to clean up as long chain as it is possible
-        UDFTeardownStructures(IrpContext, fi->Fcb, i, NULL);
+        UDFTeardownStructures(IrpContext, fi->Fcb, NULL);
 
 try_exit: NOTHING;
 
@@ -391,7 +388,6 @@ VOID
 UDFTeardownStructures(
     _In_ PIRP_CONTEXT IrpContext,
     _Inout_ PFCB StartingFcb,
-    _In_ ULONG TreeLength,
     _Out_ PBOOLEAN RemovedStartingFcb
     )
 {
@@ -406,7 +402,6 @@ UDFTeardownStructures(
     ValidateFileInfo(CurrentFcb->FileInfo);
     AdPrint(("UDFCleanUpFcbChain\n"));
 
-    ASSERT(TreeLength);
     //TODO:
     //ASSERT_EXCLUSIVE_FCB(StartingFcb);
     //ASSERT_SHARED_VCB(Vcb);
@@ -450,28 +445,18 @@ UDFTeardownStructures(
             break;
         } _SEH2_END;
 #endif // UDF_DBG
-        ASSERT((CurrentFcb->FcbReference > fi->RefCount) || !TreeLength);
-        // If we haven't pass through all files opened
-        // in UDFCommonCreate before target file (TreeLength specfies
-        // the number of such files) dereference them.
-        // Otherwise we'll just check if the file has no references.
+        ASSERT(CurrentFcb->FcbReference > fi->RefCount);
+        // Decrement the reference count for this FCB
 #ifdef UDF_DBG
         if (CurrentFcb) {
-            if (TreeLength) {
-                ASSERT(CurrentFcb->FcbReference);
-                RefCount = UDFInterlockedDecrement((PLONG)&CurrentFcb->FcbReference);
-            }
+            ASSERT(CurrentFcb->FcbReference);
+            RefCount = UDFInterlockedDecrement((PLONG)&CurrentFcb->FcbReference);
         } else {
             BrutePoint();
         }
-        if (TreeLength)
-            TreeLength--;
         ASSERT(CurrentFcb->FcbCleanup <= CurrentFcb->FcbReference);
 #else
-        if (TreeLength) {
-            RefCount = UDFInterlockedDecrement((PLONG)&CurrentFcb->FcbReference);
-            TreeLength--;
-        }
+        RefCount = UDFInterlockedDecrement((PLONG)&CurrentFcb->FcbReference);
 #endif
 
         // ...and delete if it has gone
@@ -565,12 +550,10 @@ UDFTeardownStructures(
                     UDF_CHECK_PAGING_IO_RESOURCE(ParentFcb);
                     UDFReleaseResource(&ParentFcb->FcbNonpaged->FcbResource);
                 }
-                // If we have dereferenced all parents 'associated'
-                // with input file & current file is still in use
+                // If we have dereferenced the current file & it is still in use
                 // then it isn't worth walking down the tree
                 // 'cause in this case all the rest files are also used
-                if (!TreeLength)
-                    break;
+                break;
 //                AdPrint(("Stop on referenced File/Dir\n"));
             }
         } else {
@@ -582,8 +565,7 @@ UDFTeardownStructures(
                 UDFReleaseResource(&ParentFcb->FcbNonpaged->FcbResource);
             }
             Delete = FALSE;
-            if (!TreeLength)
-                break;
+            break;
             fi = ParentFI;
         }
     }
@@ -903,7 +885,7 @@ Return Value:
     //  Call our teardown routine to see if this object can go away.
     //  If we don't remove the Fcb then release it.
 
-    UDFTeardownStructures(IrpContext, Fcb, IrpContext->TreeLength, &RemovedFcb);
+    UDFTeardownStructures(IrpContext, Fcb, &RemovedFcb);
 
     if (!RemovedFcb) {
 

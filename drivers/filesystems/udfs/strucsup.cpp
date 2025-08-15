@@ -620,9 +620,6 @@ UDFInitializeFCB(
     UDFInsertFcbTable(IrpContext, Fcb);
     SetFlag(Fcb->FcbState, FCB_STATE_IN_FCB_TABLE);
 
-    // initialize the various list heads
-    InitializeListHead(&Fcb->NextCCB);
-
     Fcb->FcbReference = 0;
     Fcb->FcbCleanup = 0;
 
@@ -1291,8 +1288,6 @@ UDFCompleteMount(
         UnlockVcb = TRUE;
 
         Vcb->VolumeDasdFcb = UDFCreateFcb(IrpContext, FileId, UDF_NODE_TYPE_DATA, NULL);
-
-        InitializeListHead(&Vcb->VolumeDasdFcb->NextCCB);
 
         UDFIncrementReferenceCounts(IrpContext, Vcb->VolumeDasdFcb, 1, 1);
         UDFUnlockVcb(IrpContext, Vcb);
