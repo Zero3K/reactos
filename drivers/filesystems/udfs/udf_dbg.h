@@ -179,11 +179,7 @@ DbgWaitForSingleObject_(
 
 #ifdef UDF_DBG
 
-#ifdef UDF_DBG
-  #define BrutePoint() DbgBreakPoint()
-#else
-  #define BrutePoint() {}
-#endif // UDF_DBG
+  #define BrutePoint() do { if (KdDebuggerEnabled) DbgBreakPoint(); } while(0)
 
 #ifdef TRACK_SYS_ALLOCS
 

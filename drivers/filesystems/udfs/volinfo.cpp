@@ -348,6 +348,15 @@ UDFQueryFsSizeInfo(
 
     UDFPrint(("  UDFQueryFsSizeInfo: \n"));
     //  Fill in the output buffer.
+#ifdef UDF_ASYNC_IO
+    // When async I/O is enabled, always recalculate space to ensure accuracy
+    // since bitmap operations may complete asynchronously after mount
+    Vcb->TotalAllocUnits =
+    Buffer->TotalAllocationUnits.QuadPart = UDFGetTotalSpace(Vcb);
+    Vcb->FreeAllocUnits =
+    Buffer->AvailableAllocationUnits.QuadPart = UDFGetFreeSpace(Vcb);
+    Vcb->BitmapModified = FALSE;
+#else
     if (Vcb->BitmapModified) {
         Vcb->TotalAllocUnits =
         Buffer->TotalAllocationUnits.QuadPart = UDFGetTotalSpace(Vcb);
@@ -358,6 +367,7 @@ UDFQueryFsSizeInfo(
         Buffer->TotalAllocationUnits.QuadPart = Vcb->TotalAllocUnits;
         Buffer->AvailableAllocationUnits.QuadPart = Vcb->FreeAllocUnits;
     }
+#endif
     Vcb->LowFreeSpace = (Vcb->FreeAllocUnits < max(Vcb->FECharge,UDF_DEFAULT_FE_CHARGE)*128);
     if (!Buffer->TotalAllocationUnits.QuadPart)
         Buffer->TotalAllocationUnits.QuadPart = max(1, Vcb->LastPossibleLBA);
@@ -400,6 +410,16 @@ UDFQueryFsFullSizeInfo(
 
     UDFPrint(("  UDFQueryFsFullSizeInfo: \n"));
     //  Fill in the output buffer.
+#ifdef UDF_ASYNC_IO
+    // When async I/O is enabled, always recalculate space to ensure accuracy
+    // since bitmap operations may complete asynchronously after mount
+    Vcb->TotalAllocUnits =
+    Buffer->TotalAllocationUnits.QuadPart = UDFGetTotalSpace(Vcb);
+    Vcb->FreeAllocUnits =
+    Buffer->CallerAvailableAllocationUnits.QuadPart =
+    Buffer->ActualAvailableAllocationUnits.QuadPart = UDFGetFreeSpace(Vcb);
+    Vcb->BitmapModified = FALSE;
+#else
     if (Vcb->BitmapModified) {
         Vcb->TotalAllocUnits =
         Buffer->TotalAllocationUnits.QuadPart = UDFGetTotalSpace(Vcb);
@@ -412,6 +432,7 @@ UDFQueryFsFullSizeInfo(
         Buffer->CallerAvailableAllocationUnits.QuadPart =
         Buffer->ActualAvailableAllocationUnits.QuadPart = Vcb->FreeAllocUnits;
     }
+#endif
     if (!Buffer->TotalAllocationUnits.QuadPart)
         Buffer->TotalAllocationUnits.QuadPart = max(1, Vcb->LastPossibleLBA);
     Buffer->SectorsPerAllocationUnit = Vcb->LBlockSize / Vcb->BlockSize;

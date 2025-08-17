@@ -1622,10 +1622,32 @@ err_addxsbm_1:
         if (!NT_SUCCESS(status = UDFReadData(IrpContext, Vcb, FALSE, ((uint64)lba)<<Vcb->BlockSizeBits, Length, FALSE, tmp, &ReadBytes)))
             goto err_addxsbm_1;
 
-        lim = min(i + ((lim2 = ((PSPACE_BITMAP_DESC)tmp)->numOfBits) << Vcb->LB2B_Bits), Vcb->FSBM_BitCount);
+        lim2 = ((PSPACE_BITMAP_DESC)tmp)->numOfBits;
         tmp_bm = tmp + sizeof(SPACE_BITMAP_DESC);
+        
+        // Calculate the maximum number of bits that can be safely accessed from the available buffer
+        // This prevents memory corruption while handling legitimate UDF structures where numOfBits
+        // may be larger than the data actually stored in this extent
+        // UDFGetBitmapLen accesses bitmap data in uint32 chunks using array indices, and uses 
+        // while(i<=Lim) where Lim = safe_bitmap_bits>>5, so we must ensure Lim < available_uint32_elements
+        uint32 available_bitmap_bytes = (uint32)(Length > sizeof(SPACE_BITMAP_DESC) ? 
+                                                 Length - sizeof(SPACE_BITMAP_DESC) : 0);
+        uint32 available_uint32_elements = available_bitmap_bytes / sizeof(uint32);
+        
+        // Ensure UDFGetBitmapLen won't access beyond available uint32 elements
+        // Since UDFGetBitmapLen uses while(i<=Lim) followed by i++ and Bitmap[i] access,
+        // the function can access Bitmap[Lim + 1], so we need Lim + 1 < available_uint32_elements
+        // This means safe_bitmap_bits>>5 <= available_uint32_elements - 2
+        uint32 max_safe_bits = available_uint32_elements > 1 ? 
+                               (available_uint32_elements - 2) * 32 + 31 : 0;
+        uint32 safe_bitmap_bits = min(lim2, max_safe_bits);
+        
+        UDFPrint(("UDFAddXSpaceBitmap: numOfBits=%u, available_bytes=%u, available_uint32s=%u, max_safe_bits=%u, using safe_bits=%u\n", 
+                 lim2, available_bitmap_bytes, available_uint32_elements, max_safe_bits, safe_bitmap_bits));
+        
+        lim = min(i + (safe_bitmap_bits << Vcb->LB2B_Bits), Vcb->FSBM_BitCount);
         j = 0;
-        for(;(l = UDFGetBitmapLen((uint32*)tmp_bm, j, lim2)) && (i<lim);) {
+        for(;(l = UDFGetBitmapLen((uint32*)tmp_bm, j, safe_bitmap_bits)) && (i<lim);) {
             // expand LBlocks to Sectors...
             l2 = l << Vcb->LB2B_Bits;
             // ...and mark them

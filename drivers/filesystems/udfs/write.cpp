@@ -311,9 +311,15 @@ UDFCommonWrite(
             // It is very important for ChkUdf utility.
             Vcb->SerialNumber--;
             // Perform actual Write
+#ifdef UDF_ASYNC_IO
+            RC = UDFTWriteAsync(IrpContext, Vcb, SystemBuffer, WriteLength,
+                           (ULONG)(ByteOffset.QuadPart >> Vcb->BlockSizeBits),
+                           &NumberBytesWritten, FALSE);
+#else
             RC = UDFTWrite(IrpContext, Vcb, SystemBuffer, WriteLength,
                            (ULONG)(ByteOffset.QuadPart >> Vcb->BlockSizeBits),
                            &NumberBytesWritten);
+#endif
             UDFUnlockCallersBuffer(IrpContext, Irp, SystemBuffer);
             try_return(RC);
         }
