@@ -1800,6 +1800,10 @@ AlreadyOpened:
         // Check if caller wanted a directory only and target object
         //  is not a directory, or caller wanted a file only and target
         //  object is not a file ...
+        //
+        // This is defensive error handling that prevents bugs by rejecting
+        // invalid operations on directories (supersede/overwrite operations
+        // or when NonDirectoryFile flag is explicitly set)
         if ((PtrNewFcb->FcbState & UDF_FCB_DIRECTORY) && ((CreateDisposition == FILE_SUPERSEDE) ||
               (CreateDisposition == FILE_OVERWRITE) || (CreateDisposition == FILE_OVERWRITE_IF) ||
               NonDirectoryFile)) {
