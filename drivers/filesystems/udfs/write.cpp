@@ -345,6 +345,7 @@ UDFCommonWrite(
 
         IsThisADeferredWrite = BooleanFlagOn(IrpContext->Flags, IRP_CONTEXT_FLAG_DEFERRED_WRITE);
 
+#ifdef UDF_ENABLE_DEFERRED_WRITES
         if (!NonCachedIo &&
             !CcCanIWrite(FileObject, WriteLength, CanWait, IsThisADeferredWrite)) {
 
@@ -356,6 +357,7 @@ UDFCommonWrite(
             CcDeferWrite(FileObject, UDFDeferredWriteCallBack, IrpContext, Irp, WriteLength, IsThisADeferredWrite);
             try_return(RC = STATUS_PENDING);
         }
+#endif // UDF_ENABLE_DEFERRED_WRITES
 
         // If the write request is directed to a page file,
         // send the request directly to the disk
@@ -917,6 +919,7 @@ try_exit:   NOTHING;
     return(RC);
 } // end UDFCommonWrite()
 
+#ifdef UDF_ENABLE_DEFERRED_WRITES
 /*************************************************************************
 *
 * Function: UDFDeferredWriteCallBack()
@@ -950,6 +953,7 @@ UDFDeferredWriteCallBack(
     UDFPostRequest((PIRP_CONTEXT)Context1, (PIRP)Context2);
 
 } // end UDFDeferredWriteCallBack()
+#endif // UDF_ENABLE_DEFERRED_WRITES
 
 /*************************************************************************
 *
