@@ -138,6 +138,15 @@ DriverEntry(
             // Initialize cache manager callbacks
             init_cache();
 
+            UDFPrint(("UDF: Validate SGL configuration\n"));
+            // Validate SGL enhancement configuration
+            RC = UDFValidateSGLConfiguration();
+            if (!NT_SUCCESS(RC)) {
+                UDFPrint(("UDF: SGL validation failed, but continuing with synchronous IO\n"));
+                // Don't fail initialization - just log the issue and continue
+                RC = STATUS_SUCCESS;
+            }
+
             UDFPrint(("UDF: Init pointers\n"));
             // initialize the IRP major function table, and the fast I/O table
             UDFInitializeFunctionPointers(DriverObject);
