@@ -110,15 +110,15 @@
 // strictly enforces this. We redefine the problematic struct names to be
 // anonymous before including scsi.h, which maintains API compatibility
 // while allowing C++ compilation.
-#define _LBA
-#define _MSF
-#define _THRESHOLD_RESOURCE_COUNT
-#define _TEMPERATURE
-#define _DATE_OF_MANUFACTURE
-#define _SELF_TEST_RESULTS
-#define _SOLID_STATE_MEDIA
-#define _BACKGROUND_SCAN_STATUS
-#define _INFORMATIONAL_EXCEPTIONS
+#define _LBA                            // struct in _CDB::_PLAY_CD union
+#define _MSF                            // struct in _CDB::_PLAY_CD union
+#define _THRESHOLD_RESOURCE_COUNT       // struct in _LOG_PARAMETER union
+#define _TEMPERATURE                    // struct in _LOG_PARAMETER union
+#define _DATE_OF_MANUFACTURE            // struct in _LOG_PARAMETER union
+#define _SELF_TEST_RESULTS              // struct in _LOG_PARAMETER union
+#define _SOLID_STATE_MEDIA              // struct in _LOG_PARAMETER union
+#define _BACKGROUND_SCAN_STATUS         // struct in _LOG_PARAMETER union
+#define _INFORMATIONAL_EXCEPTIONS       // struct in _LOG_PARAMETER union
 #endif
 
 #include <scsi.h>
