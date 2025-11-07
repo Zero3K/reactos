@@ -102,7 +102,40 @@
 #pragma warning(disable : 4995)
 #include <ntifs.h>
 #include <ntddscsi.h>
+
+#if defined(__cplusplus) && defined(__GNUC__)
+// HACK: Work around the issue of using named structures in anonymous unions
+// in scsi.h when compiling with MinGW/GCC in C++ mode. The C++ standard
+// prohibits declaring named structures within anonymous unions, and GCC
+// strictly enforces this. We redefine the problematic struct names to be
+// anonymous before including scsi.h, which maintains API compatibility
+// while allowing C++ compilation.
+#define _LBA                            // struct in _CDB::_PLAY_CD union
+#define _MSF                            // struct in _CDB::_PLAY_CD union
+#define _THRESHOLD_RESOURCE_COUNT       // struct in _LOG_PARAMETER union
+#define _TEMPERATURE                    // struct in _LOG_PARAMETER union
+#define _DATE_OF_MANUFACTURE            // struct in _LOG_PARAMETER union
+#define _SELF_TEST_RESULTS              // struct in _LOG_PARAMETER union
+#define _SOLID_STATE_MEDIA              // struct in _LOG_PARAMETER union
+#define _BACKGROUND_SCAN_STATUS         // struct in _LOG_PARAMETER union
+#define _INFORMATIONAL_EXCEPTIONS       // struct in _LOG_PARAMETER union
+#endif
+
 #include <scsi.h>
+
+#if defined(__cplusplus) && defined(__GNUC__)
+// Restore the original struct names
+#undef _LBA
+#undef _MSF
+#undef _THRESHOLD_RESOURCE_COUNT
+#undef _TEMPERATURE
+#undef _DATE_OF_MANUFACTURE
+#undef _SELF_TEST_RESULTS
+#undef _SOLID_STATE_MEDIA
+#undef _BACKGROUND_SCAN_STATUS
+#undef _INFORMATIONAL_EXCEPTIONS
+#endif
+
 #include <ntddcdrm.h>
 #include <ntddcdvd.h>
 #include "ntdddisk.h"
