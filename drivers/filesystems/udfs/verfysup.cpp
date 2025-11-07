@@ -210,6 +210,12 @@ UDFVerifyVcb(
 
     switch (Vcb->VcbCondition) {
 
+    case VcbMounted:
+    case VcbMountInProgress:
+
+        // Volume is mounted or being mounted - no error
+        break;
+
     case VcbNotMounted:
 
         IoSetHardErrorOrVerifyDevice(IrpContext->Irp, Vcb->Vpb->RealDevice);
