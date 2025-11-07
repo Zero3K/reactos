@@ -102,13 +102,40 @@
 #pragma warning(disable : 4995)
 #include <ntifs.h>
 #include <ntddscsi.h>
-#ifdef __cplusplus
-extern "C" {
+
+#if defined(__cplusplus) && defined(__GNUC__)
+// HACK: Work around the issue of using named structures in anonymous unions
+// in scsi.h when compiling with MinGW/GCC in C++ mode. The C++ standard
+// prohibits declaring named structures within anonymous unions, and GCC
+// strictly enforces this. We redefine the problematic struct names to be
+// anonymous before including scsi.h, which maintains API compatibility
+// while allowing C++ compilation.
+#define _LBA
+#define _MSF
+#define _THRESHOLD_RESOURCE_COUNT
+#define _TEMPERATURE
+#define _DATE_OF_MANUFACTURE
+#define _SELF_TEST_RESULTS
+#define _SOLID_STATE_MEDIA
+#define _BACKGROUND_SCAN_STATUS
+#define _INFORMATIONAL_EXCEPTIONS
 #endif
+
 #include <scsi.h>
-#ifdef __cplusplus
-}
+
+#if defined(__cplusplus) && defined(__GNUC__)
+// Restore the original struct names
+#undef _LBA
+#undef _MSF
+#undef _THRESHOLD_RESOURCE_COUNT
+#undef _TEMPERATURE
+#undef _DATE_OF_MANUFACTURE
+#undef _SELF_TEST_RESULTS
+#undef _SOLID_STATE_MEDIA
+#undef _BACKGROUND_SCAN_STATUS
+#undef _INFORMATIONAL_EXCEPTIONS
 #endif
+
 #include <ntddcdrm.h>
 #include <ntddcdvd.h>
 #include "ntdddisk.h"
