@@ -13,13 +13,10 @@ extern BOOLEAN opt_invalidate_volume;
 extern ULONG LockMode;
 #endif //UDF_FORMAT_MEDIA
 
-extern NTSTATUS UDFSyncCache(
-    IN PVCB Vcb
-    );
-
-OSSTATUS
+NTSTATUS
 __fastcall
 UDFTIOVerify(
+    IN PIRP_CONTEXT IrpContext,
     IN void* _Vcb,
     IN void* Buffer,     // Target buffer
     IN SIZE_T Length,
@@ -28,8 +25,9 @@ UDFTIOVerify(
     IN uint32 Flags
     );
 
-extern OSSTATUS
+extern NTSTATUS
 UDFTWriteVerify(
+    IN PIRP_CONTEXT IrpContext,
     IN void* _Vcb,
     IN void* Buffer,     // Target buffer
     IN SIZE_T Length,
@@ -38,8 +36,9 @@ UDFTWriteVerify(
     IN uint32 Flags
     );
 
-extern OSSTATUS
+NTSTATUS
 UDFTReadVerify(
+    IN PIRP_CONTEXT IrpContext,
     IN void* _Vcb,
     IN void* Buffer,     // Target buffer
     IN SIZE_T Length,
@@ -48,19 +47,27 @@ UDFTReadVerify(
     IN uint32 Flags
     );
 
-extern OSSTATUS UDFTRead(PVOID           _Vcb,
-                         PVOID           Buffer,     // Target buffer
-                         SIZE_T          Length,
-                         ULONG           LBA,
-                         PSIZE_T         ReadBytes,
-                         ULONG           Flags = 0);
+NTSTATUS
+UDFTRead(
+    PIRP_CONTEXT IrpContext,
+    PVOID _Vcb,
+    PVOID Buffer,     // Target buffer
+    SIZE_T Length,
+    ULONG LBA,
+    PSIZE_T ReadBytes,
+    ULONG Flags = 0
+    );
 
-extern OSSTATUS UDFTWrite(IN PVOID _Vcb,
-                   IN PVOID Buffer,     // Target buffer
-                   IN SIZE_T Length,
-                   IN ULONG LBA,
-                   OUT PSIZE_T WrittenBytes,
-                   IN ULONG Flags = 0);
+NTSTATUS
+UDFTWrite(
+    IN PIRP_CONTEXT IrpContext,
+    IN PVOID _Vcb,
+    IN PVOID Buffer,     // Target buffer
+    IN SIZE_T Length,
+    IN ULONG LBA,
+    OUT PSIZE_T WrittenBytes,
+    IN ULONG Flags = 0
+    );
 
 #define PH_TMP_BUFFER          1
 #define PH_VCB_IN_RETLEN       2
@@ -69,87 +76,82 @@ extern OSSTATUS UDFTWrite(IN PVOID _Vcb,
 #define PH_EX_WRITE            0x80000000
 #define PH_IO_LOCKED           0x20000000
 
-
-extern
-OSSTATUS
-UDFDoOPC(
-    IN PVCB Vcb
-    );
-
-extern OSSTATUS UDFPrepareForWriteOperation(
+extern NTSTATUS UDFPrepareForWriteOperation(
     IN PVCB Vcb,
     IN ULONG Lba,
     IN ULONG BCount);
 
-extern OSSTATUS UDFReadDiscTrackInfo(PDEVICE_OBJECT DeviceObject, // the target device object
-                                     PVCB           Vcb);         // Volume Control Block for ^ DevObj
+NTSTATUS
+UDFUseStandard(
+    PIRP_CONTEXT IrpContext,
+    PDEVICE_OBJECT DeviceObject, // the target device object
+    PVCB Vcb                     // Volume control block fro this DevObj
+    );
 
-extern OSSTATUS UDFReadAndProcessFullToc(PDEVICE_OBJECT DeviceObject, // the target device object
-                                         PVCB           Vcb);
-
-extern OSSTATUS UDFUseStandard(PDEVICE_OBJECT DeviceObject, // the target device object
-                               PVCB           Vcb);         // Volume control block fro this DevObj
-
-extern OSSTATUS UDFGetBlockSize(PDEVICE_OBJECT DeviceObject, // the target device object
+extern NTSTATUS UDFGetBlockSize(PDEVICE_OBJECT DeviceObject, // the target device object
                                 PVCB           Vcb);         // Volume control block fro this DevObj
 
-extern OSSTATUS UDFGetDiskInfo(IN PDEVICE_OBJECT DeviceObject, // the target device object
-                               IN PVCB           Vcb);         // Volume control block from this DevObj
+NTSTATUS
+UDFGetDiskInfo(
+    IN PIRP_CONTEXT IrpContext,
+    IN PDEVICE_OBJECT DeviceObject, // the target device object
+    IN PVCB Vcb                     // Volume control block from this DevObj
+    ); 
 
-extern VOID NTAPI UDFEjectReqWaiter(IN PVOID Context);
+NTSTATUS
+UDFPrepareForReadOperation(
+    IN PIRP_CONTEXT IrpContext,
+    IN PVCB Vcb,
+    IN uint32 Lba,
+    IN uint32 BCount
+    );
 
-extern VOID     UDFStopEjectWaiter(PVCB Vcb);
-
-extern OSSTATUS UDFPrepareForReadOperation(IN PVCB Vcb,
-                                           IN uint32 Lba,
-                                           IN uint32 BCount
-                                           );
-//#define UDFPrepareForReadOperation(a,b) (STATUS_SUCCESS)
-
-extern VOID     UDFUpdateNWA(PVCB Vcb,
-                             ULONG LBA,
-                             ULONG BCount,
-                             OSSTATUS RC);
-
-extern OSSTATUS UDFDoDismountSequence(IN PVCB Vcb,
-                                      IN PPREVENT_MEDIA_REMOVAL_USER_IN Buf,
+extern NTSTATUS UDFDoDismountSequence(IN PVCB Vcb,
                                       IN BOOLEAN Eject);
 
 // read physical sectors
-/*OSSTATUS UDFReadSectors(IN PVCB Vcb,
-                        IN BOOLEAN Translate,// Translate Logical to Physical
-                        IN ULONG Lba,
-                        IN ULONG BCount,
-                        IN BOOLEAN Direct,
-                        OUT PCHAR Buffer,
-                        OUT PULONG ReadBytes);*/
-#define UDFReadSectors(Vcb, Translate, Lba, BCount, Direct, Buffer, ReadBytes)                 \
-    (( WCacheIsInitialized__(&((Vcb)->FastCache)) && (KeGetCurrentIrql() < DISPATCH_LEVEL)) ?              \
-        (WCacheReadBlocks__(&((Vcb)->FastCache), Vcb, Buffer, Lba, BCount, ReadBytes, Direct)) : \
-        (UDFTRead(Vcb, Buffer, ((SIZE_T)(BCount))<<((Vcb)->BlockSizeBits), Lba, ReadBytes, 0)))
-
+NTSTATUS
+UDFReadSectors(
+    IN PIRP_CONTEXT IrpContext,
+    IN PVCB Vcb,
+    IN BOOLEAN Translate,// Translate Logical to Physical
+    IN ULONG Lba,
+    IN ULONG BCount,
+    IN BOOLEAN Direct,
+    OUT PCHAR Buffer,
+    OUT PSIZE_T ReadBytes
+    );
 
 // read data inside physical sector
-extern OSSTATUS UDFReadInSector(IN PVCB Vcb,
-                         IN BOOLEAN Translate,       // Translate Logical to Physical
-                         IN ULONG Lba,
-                         IN ULONG i,                 // offset in sector
-                         IN ULONG l,                 // transfer length
-                         IN BOOLEAN Direct,
-                         OUT PCHAR Buffer,
-                         OUT PSIZE_T ReadBytes);
-// read unaligned data
-extern OSSTATUS UDFReadData(IN PVCB Vcb,
-                     IN BOOLEAN Translate,   // Translate Logical to Physical
-                     IN LONGLONG Offset,
-                     IN ULONG Length,
-                     IN BOOLEAN Direct,
-                     OUT PCHAR Buffer,
-                     OUT PSIZE_T ReadBytes);
+NTSTATUS
+UDFReadInSector(
+    IN PIRP_CONTEXT IrpContext,
+    IN PVCB Vcb,
+    IN BOOLEAN Translate,       // Translate Logical to Physical
+    IN ULONG Lba,
+    IN ULONG i,                 // offset in sector
+    IN ULONG l,                 // transfer length
+    IN BOOLEAN Direct,
+    OUT PCHAR Buffer,
+    OUT PSIZE_T ReadBytes
+    );
 
-#ifndef UDF_READ_ONLY_BUILD
+// read unaligned data
+NTSTATUS
+UDFReadData(
+    IN PIRP_CONTEXT IrpContext,
+    IN PVCB Vcb,
+    IN BOOLEAN Translate,   // Translate Logical to Physical
+    IN LONGLONG Offset,
+    IN ULONG Length,
+    IN BOOLEAN Direct,
+    OUT PCHAR Buffer,
+    OUT PSIZE_T ReadBytes
+    );
+
 // write physical sectors
-OSSTATUS UDFWriteSectors(IN PVCB Vcb,
+NTSTATUS UDFWriteSectors(IN PIRP_CONTEXT IrpContext,
+                         IN PVCB Vcb,
                          IN BOOLEAN Translate,      // Translate Logical to Physical
                          IN ULONG Lba,
                          IN ULONG WBCount,
@@ -158,28 +160,48 @@ OSSTATUS UDFWriteSectors(IN PVCB Vcb,
                          IN PCHAR Buffer,
                          OUT PSIZE_T WrittenBytes);
 // write directly to cached sector
-OSSTATUS UDFWriteInSector(IN PVCB Vcb,
-                          IN BOOLEAN Translate,       // Translate Logical to Physical
-                          IN ULONG Lba,
-                          IN ULONG i,                 // offset in sector
-                          IN ULONG l,                 // transfer length
-                          IN BOOLEAN Direct,
-                          OUT PCHAR Buffer,
-                          OUT PSIZE_T WrittenBytes);
-// write data at unaligned offset & length
-OSSTATUS UDFWriteData(IN PVCB Vcb,
-                      IN BOOLEAN Translate,      // Translate Logical to Physical
-                      IN LONGLONG Offset,
-                      IN SIZE_T Length,
-                      IN BOOLEAN Direct,         // setting this flag delays flushing of given
-                                                 // data to indefinite term
-                      IN PCHAR Buffer,
-                      OUT PSIZE_T WrittenBytes);
-#endif //UDF_READ_ONLY_BUILD
+NTSTATUS UDFWriteInSector(
+    IN PIRP_CONTEXT IrpContext,
+    IN PVCB Vcb,
+    IN BOOLEAN Translate,       // Translate Logical to Physical
+    IN ULONG Lba,
+    IN ULONG i,                 // offset in sector
+    IN ULONG l,                 // transfer length
+    IN BOOLEAN Direct,
+    OUT PCHAR Buffer,
+    OUT PSIZE_T WrittenBytes);
 
-OSSTATUS UDFResetDeviceDriver(IN PVCB Vcb,
+// write data at unaligned offset & length
+NTSTATUS
+UDFWriteData(
+    IN PIRP_CONTEXT IrpContext,
+    IN PVCB Vcb,
+    IN BOOLEAN Translate,      // Translate Logical to Physical
+    IN LONGLONG Offset,
+    IN SIZE_T Length,
+    IN BOOLEAN Direct,         // setting this flag delays flushing of given
+                               // data to indefinite term
+    IN PCHAR Buffer,
+    OUT PSIZE_T WrittenBytes
+);
+
+NTSTATUS UDFResetDeviceDriver(IN PVCB Vcb,
                               IN PDEVICE_OBJECT TargetDeviceObject,
                               IN BOOLEAN Unlock);
 
+// This macro copies an unaligned src longword to a dst longword,
+// performing an little/big endian swap.
+
+typedef union _UCHAR1 {
+    UCHAR  Uchar[1];
+    UCHAR  ForceAlignment;
+} UCHAR1, *PUCHAR1;
+
+#define SwapCopyUchar4(Dst,Src) {                                        \
+    *((UNALIGNED UCHAR1 *)(Dst)) = *((UNALIGNED UCHAR1 *)(Src) + 3);     \
+    *((UNALIGNED UCHAR1 *)(Dst) + 1) = *((UNALIGNED UCHAR1 *)(Src) + 2); \
+    *((UNALIGNED UCHAR1 *)(Dst) + 2) = *((UNALIGNED UCHAR1 *)(Src) + 1); \
+    *((UNALIGNED UCHAR1 *)(Dst) + 3) = *((UNALIGNED UCHAR1 *)(Src));     \
+}
 
 #endif //__UDF_PHYS_LIB__H__
