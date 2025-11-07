@@ -164,19 +164,25 @@ VOID DebugFreePool(PVOID addr);
 
 #ifdef PROTECTED_MEM_RTL
 
-#define DbgMoveMemory(d, s, l)   \
-_SEH2_TRY {                               \
-    RtlMoveMemory(d, s, l);               \
-} _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {  \
-    BrutePoint();                         \
-} _SEH2_END;
+__inline
+VOID
+DbgMoveMemory(PVOID d, PVOID s, SIZE_T l) {
+    _SEH2_TRY {
+        RtlMoveMemory(d, s, l);
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
+        BrutePoint();
+    } _SEH2_END;
+}
 
-#define DbgCopyMemory(d, s, l)   \
-_SEH2_TRY {                               \
-    RtlCopyMemory(d, s, l);               \
-} _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {  \
-    BrutePoint();                         \
-} _SEH2_END;
+__inline
+VOID
+DbgCopyMemory(PVOID d, PVOID s, SIZE_T l) {
+    _SEH2_TRY {
+        RtlCopyMemory(d, s, l);
+    } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
+        BrutePoint();
+    } _SEH2_END;
+}
 
 __inline
 SIZE_T
