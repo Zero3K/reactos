@@ -7,8 +7,12 @@
 #ifndef __UDF_NAME_SUP__H__
 #define __UDF_NAME_SUP__H__
 
-extern PWCHAR __fastcall UDFDissectName(IN  PWCHAR   Buffer,
-                             OUT PUSHORT  Length);
+PWCHAR
+UDFDissectName(
+    _In_ PIRP_CONTEXT IrpContext,
+    _In_ PWCHAR Buffer,
+    OUT PUSHORT  Length
+    );
 
 extern BOOLEAN UDFIsNameInExpression(IN PVCB Vcb,
                                      IN PUNICODE_STRING FileName,
@@ -21,9 +25,12 @@ extern BOOLEAN UDFIsNameInExpression(IN PVCB Vcb,
 
 extern BOOLEAN UDFDoesNameContainWildCards(IN PUNICODE_STRING SearchPattern);
 
-extern BOOLEAN __fastcall UDFIsNameValid(IN PUNICODE_STRING SearchPattern,
-                              OUT BOOLEAN* StreamOpen,
-                              OUT ULONG* SNameIndex);
+BOOLEAN
+UDFIsNameValid(
+    IN PUNICODE_STRING SearchPattern,
+    OUT BOOLEAN* StreamOpen,
+    OUT ULONG* SNameIndex
+    );
 
 extern BOOLEAN __fastcall UDFIsMatchAllMask(IN PUNICODE_STRING Name,
                                  OUT BOOLEAN* DosOpen);

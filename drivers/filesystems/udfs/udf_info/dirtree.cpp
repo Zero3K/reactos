@@ -48,10 +48,10 @@ UDFDirIndexAlloc(
     PDIR_INDEX_HDR hDirNdx;
     PDIR_INDEX_ITEM* FrameList;
 
-    if(!i)
+    if (!i)
         return NULL;
 #ifdef UDF_LIMIT_DIR_SIZE
-    if(i>UDF_DIR_INDEX_FRAME)
+    if (i>UDF_DIR_INDEX_FRAME)
         return NULL;
 #endif //UDF_LIMIT_DIR_SIZE
 
@@ -59,13 +59,13 @@ UDFDirIndexAlloc(
     i &= (UDF_DIR_INDEX_FRAME-1);
 
     hDirNdx = (PDIR_INDEX_HDR)MyAllocatePoolTag__(UDF_DIR_INDEX_MT, sizeof(DIR_INDEX_HDR)+(j+(i!=0))*sizeof(PDIR_INDEX_ITEM), MEM_DIR_HDR_TAG);
-    if(!hDirNdx) return NULL;
+    if (!hDirNdx) return NULL;
     RtlZeroMemory(hDirNdx, sizeof(DIR_INDEX_HDR));
 
     FrameList = (PDIR_INDEX_ITEM*)(hDirNdx+1);
     for(k=0; k<j; k++, FrameList++) {
         (*FrameList) = (PDIR_INDEX_ITEM)MyAllocatePoolTag__(UDF_DIR_INDEX_MT, UDF_DIR_INDEX_FRAME*sizeof(DIR_INDEX_ITEM), MEM_DIR_NDX_TAG);
-        if(!(*FrameList)) {
+        if (!(*FrameList)) {
 free_hdi:
             // item pointet by FrameList is NULL, it could not be allocated
             while(k) {
@@ -78,9 +78,9 @@ free_hdi:
         }
         RtlZeroMemory((*FrameList), UDF_DIR_INDEX_FRAME*sizeof(DIR_INDEX_ITEM));
     }
-    if(i) {
+    if (i) {
         (*FrameList) = (PDIR_INDEX_ITEM)MyAllocatePoolTag__(UDF_DIR_INDEX_MT, AlignDirIndex(i)*sizeof(DIR_INDEX_ITEM), MEM_DIR_NDX_TAG);
-        if(!(*FrameList))
+        if (!(*FrameList))
             goto free_hdi;
         RtlZeroMemory((*FrameList), i*sizeof(DIR_INDEX_ITEM));
     }
@@ -103,9 +103,9 @@ UDFDirIndexFree(
     PDIR_INDEX_ITEM* FrameList;
 
     FrameList = (PDIR_INDEX_ITEM*)(hDirNdx+1);
-    if(!hDirNdx) return;
+    if (!hDirNdx) return;
     for(k=0; k<hDirNdx->FrameCount; k++, FrameList++) {
-        if(*FrameList) MyFreePool__(*FrameList);
+        if (*FrameList) MyFreePool__(*FrameList);
     }
     MyFreePool__(hDirNdx);
 } // UDFDirIndexFree();
@@ -113,7 +113,7 @@ UDFDirIndexFree(
 /*
     This routine grows DirIndex array
  */
-OSSTATUS
+NTSTATUS
 UDFDirIndexGrow(
     IN PDIR_INDEX_HDR* _hDirNdx,
     IN uint_di d // increment
@@ -123,21 +123,21 @@ UDFDirIndexGrow(
     PDIR_INDEX_HDR hDirNdx = *_hDirNdx;
     PDIR_INDEX_ITEM* FrameList;
 
-    if(d > UDF_DIR_INDEX_FRAME)
+    if (d > UDF_DIR_INDEX_FRAME)
         return STATUS_INVALID_PARAMETER;
 
     j = hDirNdx->LastFrameCount+d;
 
-    if(j > UDF_DIR_INDEX_FRAME) {
+    if (j > UDF_DIR_INDEX_FRAME) {
 #ifndef UDF_LIMIT_DIR_SIZE // release
         // Grow header
         k = hDirNdx->FrameCount;
-        if(!MyReallocPool__((int8*)hDirNdx, sizeof(DIR_INDEX_HDR) + k*sizeof(PDIR_INDEX_ITEM),
+        if (!MyReallocPool__((int8*)hDirNdx, sizeof(DIR_INDEX_HDR) + k*sizeof(PDIR_INDEX_ITEM),
                        (int8**)(&hDirNdx), sizeof(DIR_INDEX_HDR) + (k+1)*sizeof(PDIR_INDEX_ITEM) ) )
             return STATUS_INSUFFICIENT_RESOURCES;
         FrameList = (PDIR_INDEX_ITEM*)(hDirNdx+1);
         // Grow last frame
-        if(!MyReallocPool__((int8*)(FrameList[k-1]), AlignDirIndex(hDirNdx->LastFrameCount)*sizeof(DIR_INDEX_ITEM),
+        if (!MyReallocPool__((int8*)(FrameList[k-1]), AlignDirIndex(hDirNdx->LastFrameCount)*sizeof(DIR_INDEX_ITEM),
                        (int8**)(&(FrameList[k-1])), UDF_DIR_INDEX_FRAME*sizeof(DIR_INDEX_ITEM) ) )
             return STATUS_INSUFFICIENT_RESOURCES;
         RtlZeroMemory(&(FrameList[k-1][hDirNdx->LastFrameCount]),
@@ -145,7 +145,7 @@ UDFDirIndexGrow(
         hDirNdx->LastFrameCount = UDF_DIR_INDEX_FRAME;
         // Allocate new frame
         FrameList[k] = (PDIR_INDEX_ITEM)MyAllocatePoolTag__(UDF_DIR_INDEX_MT, AlignDirIndex(j-UDF_DIR_INDEX_FRAME)*sizeof(DIR_INDEX_ITEM), MEM_DIR_NDX_TAG );
-        if(!FrameList[k])
+        if (!FrameList[k])
             return STATUS_INSUFFICIENT_RESOURCES;
         hDirNdx->FrameCount++;
         RtlZeroMemory(FrameList[k], (j-UDF_DIR_INDEX_FRAME)*sizeof(DIR_INDEX_ITEM));
@@ -157,7 +157,7 @@ UDFDirIndexGrow(
     } else {
         k = hDirNdx->FrameCount;
         FrameList = (PDIR_INDEX_ITEM*)(hDirNdx+1);
-        if(!MyReallocPool__((int8*)(FrameList[k-1]), AlignDirIndex(hDirNdx->LastFrameCount)*sizeof(DIR_INDEX_ITEM),
+        if (!MyReallocPool__((int8*)(FrameList[k-1]), AlignDirIndex(hDirNdx->LastFrameCount)*sizeof(DIR_INDEX_ITEM),
                        (int8**)(&(FrameList[k-1])), AlignDirIndex(j)*sizeof(DIR_INDEX_ITEM) ) )
             return STATUS_INSUFFICIENT_RESOURCES;
         RtlZeroMemory(&(FrameList[k-1][hDirNdx->LastFrameCount]),
@@ -170,7 +170,7 @@ UDFDirIndexGrow(
 /*
     Thisd routine truncates DirIndex array
  */
-OSSTATUS
+NTSTATUS
 UDFDirIndexTrunc(
     IN PDIR_INDEX_HDR* _hDirNdx,
     IN uint_di d // decrement
@@ -178,11 +178,11 @@ UDFDirIndexTrunc(
 {
     uint_di j,k;
 
-    if(d > UDF_DIR_INDEX_FRAME) {
-        OSSTATUS status;
+    if (d > UDF_DIR_INDEX_FRAME) {
+        NTSTATUS status;
         while(d) {
             k = (d > UDF_DIR_INDEX_FRAME) ? UDF_DIR_INDEX_FRAME : d;
-            if(!OS_SUCCESS(status = UDFDirIndexTrunc(_hDirNdx, k))) {
+            if (!NT_SUCCESS(status = UDFDirIndexTrunc(_hDirNdx, k))) {
                 return status;
             }
             d -= k;
@@ -197,9 +197,9 @@ UDFDirIndexTrunc(
     FrameList = (PDIR_INDEX_ITEM*)(hDirNdx+1);
     k = hDirNdx->FrameCount-1;
 
-    if(j <= UDF_DIR_INDEX_FRAME) {
+    if (j <= UDF_DIR_INDEX_FRAME) {
         // free last frame
-        if(!k && (j < 2)) {
+        if (!k && (j < 2)) {
             // someone tries to trunc. residual entries...
             return STATUS_INVALID_PARAMETER;
         }
@@ -208,12 +208,12 @@ UDFDirIndexTrunc(
         hDirNdx->LastFrameCount = UDF_DIR_INDEX_FRAME;
         hDirNdx->FrameCount--;
         // Truncate new last frame
-        if(!MyReallocPool__((int8*)(FrameList[k-1]), UDF_DIR_INDEX_FRAME*sizeof(DIR_INDEX_ITEM),
+        if (!MyReallocPool__((int8*)(FrameList[k-1]), UDF_DIR_INDEX_FRAME*sizeof(DIR_INDEX_ITEM),
                        (int8**)(&(FrameList[k-1])), AlignDirIndex(j)*sizeof(DIR_INDEX_ITEM) ) )
             return STATUS_INSUFFICIENT_RESOURCES;
         hDirNdx->LastFrameCount = j;
         // Truncate header
-        if(!MyReallocPool__((int8*)hDirNdx, sizeof(DIR_INDEX_HDR) + (k+1)*sizeof(PDIR_INDEX_ITEM),
+        if (!MyReallocPool__((int8*)hDirNdx, sizeof(DIR_INDEX_HDR) + (k+1)*sizeof(PDIR_INDEX_ITEM),
                        (int8**)(&hDirNdx), sizeof(DIR_INDEX_HDR) + k*sizeof(PDIR_INDEX_ITEM) ) )
             return STATUS_INSUFFICIENT_RESOURCES;
 
@@ -222,12 +222,12 @@ UDFDirIndexTrunc(
     } else {
 
         j -= UDF_DIR_INDEX_FRAME;
-        if(!k && (j < 2)) {
+        if (!k && (j < 2)) {
             // someone tries to trunc. residual entries...
             return STATUS_INVALID_PARAMETER;
         }
 
-        if(!MyReallocPool__((int8*)(FrameList[k]), AlignDirIndex(hDirNdx->LastFrameCount)*sizeof(DIR_INDEX_ITEM),
+        if (!MyReallocPool__((int8*)(FrameList[k]), AlignDirIndex(hDirNdx->LastFrameCount)*sizeof(DIR_INDEX_ITEM),
                        (int8**)(&(FrameList[k])), AlignDirIndex(j)*sizeof(DIR_INDEX_ITEM) ) )
             return STATUS_INSUFFICIENT_RESOURCES;
         hDirNdx->LastFrameCount = j;
@@ -235,78 +235,28 @@ UDFDirIndexTrunc(
     return STATUS_SUCCESS;
 } // end UDFDirIndexTrunc()
 
-#if defined _X86_ && !defined UDF_LIMIT_DIR_SIZE
-#ifdef _MSC_VER
-#pragma warning(disable:4035)               // re-enable below
-#endif
 /*
     This routine returns pointer to DirIndex item with index i.
  */
-#if defined(_MSC_VER) && !defined(__clang__)
-__declspec (naked)
-#endif
 PDIR_INDEX_ITEM
 __fastcall
 UDFDirIndex(
-    IN PDIR_INDEX_HDR hDirNdx, // ECX
-    IN uint32 i                // EDX
+    IN PDIR_INDEX_HDR hDirNdx,
+    IN uint_di i
     )
 {
-#if defined(_MSC_VER) && !defined(__clang__)
-    __asm {
-        push ebx
-        push ecx
-        push edx
-
-//        mov  ebx,hDirNdx
-        mov  ebx,ecx
-        mov  ecx,edx
-        or   ebx,ebx
-        jz   EO_udi_err
-
-        mov  eax,ecx
-        shr  ecx,UDF_DIR_INDEX_FRAME_SH           ; ecx = j
-        mov  edx,[ebx]hDirNdx.FrameCount          ; edx = k
-        cmp  ecx,edx
-        jae  EO_udi_err
-
-        and  eax,(1 shl UDF_DIR_INDEX_FRAME_SH)-1 ; eax = i
-        dec  edx
-        cmp  ecx,edx
-        jb   No_check
-
-        cmp  eax,[ebx].LastFrameCount
-        jae  EO_udi_err
-No_check:
-        add  ebx,size DIR_INDEX_HDR      ; ((PDIR_INDEX_ITEM*)(hDirNdx+1))...
-        mov  ebx,[ebx+ecx*4]             ; ...[j]...
-        mov  edx,size DIR_INDEX_ITEM
-        mul  edx                         ; ...[i]...
-        add  eax,ebx                     ; &(...)
-        jmp  udi_OK
-EO_udi_err:
-        xor  eax,eax
-udi_OK:
-        pop  edx
-        pop  ecx
-        pop  ebx
-
-        ret
-    }
-#else
-    /* FIXME ReactOS */
+#ifdef UDF_LIMIT_DIR_SIZE
+    if ( hDirNdx && (i < hDirNdx->LastFrameCount))
+        return &( (((PDIR_INDEX_ITEM*)(hDirNdx+1))[0])[i] );
+#else //UDF_LIMIT_DIR_SIZE
     uint_di j, k;
-    if( hDirNdx &&
+    if ( hDirNdx &&
         ((j = (i >> UDF_DIR_INDEX_FRAME_SH)) < (k = hDirNdx->FrameCount) ) &&
         ((i = (i & (UDF_DIR_INDEX_FRAME-1))) < ((j < (k-1)) ? UDF_DIR_INDEX_FRAME : hDirNdx->LastFrameCount)) )
         return &( (((PDIR_INDEX_ITEM*)(hDirNdx+1))[j])[i] );
+#endif // UDF_LIMIT_DIR_SIZE
     return NULL;
-#endif
 }
-#ifdef _MSC_VER
-#pragma warning(default:4035)
-#endif
-#endif // _X86_
 
 /*
     This routine returns pointer to DirIndex'es frame & index inside it
@@ -321,16 +271,16 @@ UDFDirIndexGetFrame(
     IN uint_di Rel
     )
 {
-    if(Frame >= hDirNdx->FrameCount)
+    if (Frame >= hDirNdx->FrameCount)
         return NULL;
-    if(Index) {
+    if (Index) {
 #ifdef UDF_LIMIT_DIR_SIZE
         (*Index) = Rel;
-//    if(FrameLen)
+//    if (FrameLen)
         (*FrameLen) = hDirNdx->LastFrameCount;
 #else //UDF_LIMIT_DIR_SIZE
         (*Index) = Frame*UDF_DIR_INDEX_FRAME+Rel;
-//    if(FrameLen)
+//    if (FrameLen)
         (*FrameLen) = (Frame < (hDirNdx->FrameCount-1)) ? UDF_DIR_INDEX_FRAME :
                                                           hDirNdx->LastFrameCount;
 #endif //UDF_LIMIT_DIR_SIZE
@@ -352,11 +302,11 @@ UDFDirIndexInitScan(
 {
     Context->DirInfo = DirInfo;
     Context->hDirNdx = DirInfo->Dloc->DirIndex;
-    if( (Context->frame = (Index >> UDF_DIR_INDEX_FRAME_SH)) >=
+    if ( (Context->frame = (Index >> UDF_DIR_INDEX_FRAME_SH)) >=
                                                  Context->hDirNdx->FrameCount) {
         return FALSE;
     }
-    if( (Context->j = Index & (UDF_DIR_INDEX_FRAME-1)) >=
+    if ( (Context->j = Index & (UDF_DIR_INDEX_FRAME-1)) >=
                ((Context->frame < (Context->hDirNdx->FrameCount-1))
                                     ?
                                  UDF_DIR_INDEX_FRAME : Context->hDirNdx->LastFrameCount) ) {
@@ -387,7 +337,7 @@ UDFDirIndexScan(
     Context->j++;
     Context->DirNdx++;
 
-    if(Context->j >= Context->d) {
+    if (Context->j >= Context->d) {
         Context->j=0;
         Context->frame++;
         Context->DirNdx = UDFDirIndexGetFrame(Context->hDirNdx,
@@ -396,20 +346,20 @@ UDFDirIndexScan(
                                               &(Context->i),
                                               Context->j);
     }
-    if(!Context->DirNdx) {
-        if(_FileInfo)
+    if (!Context->DirNdx) {
+        if (_FileInfo)
             (*_FileInfo) = NULL;
         return NULL;
     }
 
-    if(_FileInfo) {
-        if((FileInfo = Context->DirNdx->FileInfo)) {
-            if(FileInfo->ParentFile != Context->DirInfo) {
+    if (_FileInfo) {
+        if ((FileInfo = Context->DirNdx->FileInfo)) {
+            if (FileInfo->ParentFile != Context->DirInfo) {
                 ParFileInfo = UDFLocateParallelFI(Context->DirInfo,
                                                   Context->i,
                                                   FileInfo);
 #ifdef UDF_DBG
-                if(ParFileInfo->ParentFile != Context->DirInfo) {
+                if (ParFileInfo->ParentFile != Context->DirInfo) {
                     BrutePoint();
                 }
 #endif // UDF_DBG
@@ -437,17 +387,17 @@ UDFBuildHashEntry(
     WCHAR ShortNameBuffer[13];
     uint8 RetFlags = 0;
 
-    if(!Name->Buffer) return 0;
+    if (!Name->Buffer) return 0;
 
-    if(Mask & HASH_POSIX)
+    if (Mask & HASH_POSIX)
         hashes->hPosix = crc32((uint8*)(Name->Buffer), Name->Length);
 
-    if(Mask & HASH_ULFN) {
-/*        if(OS_SUCCESS(MyInitUnicodeString(&UName, L"")) &&
-           OS_SUCCESS(MyAppendUnicodeStringToStringTag(&UName, Name, MEM_USDIRHASH_TAG))) {*/
-        if(OS_SUCCESS(MyCloneUnicodeString(&UName, Name))) {
+    if (Mask & HASH_ULFN) {
+/*        if (NT_SUCCESS(MyInitUnicodeString(&UName, L"")) &&
+           NT_SUCCESS(MyAppendUnicodeStringToStringTag(&UName, Name, MEM_USDIRHASH_TAG))) {*/
+        if (NT_SUCCESS(MyCloneUnicodeString(&UName, Name))) {
             RtlUpcaseUnicodeString(&UName, &UName, FALSE);
-    /*        if(!RtlCompareUnicodeString(Name, &UName, FALSE)) {
+    /*        if (!RtlCompareUnicodeString(Name, &UName, FALSE)) {
                 RetFlags |= UDF_FI_FLAG_LFN;
             }*/
             hashes->hLfn = crc32((uint8*)(UName.Buffer), UName.Length);
@@ -457,11 +407,11 @@ UDFBuildHashEntry(
         MyFreePool__(UName.Buffer);
     }
 
-    if(Mask & HASH_DOS) {
+    if (Mask & HASH_DOS) {
         UName.Buffer = (PWCHAR)(&ShortNameBuffer);
         UName.MaximumLength = 13*sizeof(WCHAR);
         UDFDOSName(Vcb, &UName, Name, (Mask & HASH_KEEP_NAME) ? TRUE : FALSE);
-        if(!RtlCompareUnicodeString(Name, &UName, TRUE)) {
+        if (!RtlCompareUnicodeString(Name, &UName, TRUE)) {
             RetFlags |= UDF_FI_FLAG_DOS;
         }
         hashes->hDos = crc32((uint8*)(UName.Buffer), UName.Length);
@@ -481,15 +431,15 @@ UDFFindNextFI(
     while(prevOffset+sizeof(FILE_IDENT_DESC) < Length) {
         prevOffset++;
         FileId = (PFILE_IDENT_DESC)(buff+prevOffset);
-        if(FileId->descTag.tagIdent != TID_FILE_IDENT_DESC)
+        if (FileId->descTag.tagIdent != TID_FILE_IDENT_DESC)
             continue;
-        if(FileId->descTag.descVersion != 2 && FileId->descTag.descVersion != 3)
+        if (FileId->descTag.descVersion != 2 && FileId->descTag.descVersion != 3)
             continue;
-        if(FileId->fileVersionNum != 1)
+        if (FileId->fileVersionNum != 1)
             continue;
-        if(FileId->fileCharacteristics & (~0x1f))
+        if (FileId->fileCharacteristics & (~0x1f))
             continue;
-        if(prevOffset + ((FileId->lengthFileIdent + FileId->lengthOfImpUse + sizeof(FILE_IDENT_DESC) + 3) & (~((uint32)3))) <= Length) {
+        if (prevOffset + ((FileId->lengthFileIdent + FileId->lengthOfImpUse + sizeof(FILE_IDENT_DESC) + 3) & (~((uint32)3))) <= Length) {
             UDFPrint(("UDFFindNextFI OK: %x\n", prevOffset));
             return prevOffset;
         }
@@ -503,10 +453,11 @@ UDFFindNextFI(
 /*
     This routine scans directory extent & builds index table for FileIdents
  */
-OSSTATUS
+NTSTATUS
 UDFIndexDirectory(
+    IN PIRP_CONTEXT IrpContext,
     IN PVCB Vcb,
- IN OUT PUDF_FILE_INFO FileInfo
+    IN OUT PUDF_FILE_INFO FileInfo
     )
 {
     PDIR_INDEX_HDR hDirNdx;
@@ -514,15 +465,16 @@ UDFIndexDirectory(
     PFILE_IDENT_DESC FileId;
     uint32 Offset = 0;
 //    uint32 prevOffset = 0;
+    uint32 DelCount = 0;
     uint_di Count = 0;
-    OSSTATUS status;
+    NTSTATUS status;
     int8* buff;
     PEXTENT_INFO ExtInfo;  // Extent array for directory
     uint16 PartNum;
     SIZE_T ReadBytes;
     uint16 valueCRC;
 
-    if(!FileInfo) return STATUS_INVALID_PARAMETER;
+    if (!FileInfo) return STATUS_INVALID_PARAMETER;
     ValidateFileInfo(FileInfo);
 
     ExtInfo = &(FileInfo->Dloc->DataLoc);
@@ -530,17 +482,17 @@ UDFIndexDirectory(
     UDFPrint(("UDF: scaning directory\n"));
     // allocate buffer for the whole directory
     ASSERT((uint32)(ExtInfo->Length));
-    if(!ExtInfo->Length)
+    if (!ExtInfo->Length)
         return STATUS_FILE_CORRUPT_ERROR;
     buff = (int8*)DbgAllocatePool(PagedPool, (uint32)(ExtInfo->Length));
-    if(!buff)
+    if (!buff)
         return STATUS_INSUFFICIENT_RESOURCES;
 
     ExtInfo->Flags |= EXTENT_FLAG_ALLOC_SEQUENTIAL;
 
     // read FileIdents
-    status = UDFReadExtent(Vcb, ExtInfo, 0, (uint32)(ExtInfo->Length), FALSE, buff, &ReadBytes);
-    if(!OS_SUCCESS(status)) {
+    status = UDFReadExtent(IrpContext, Vcb, ExtInfo, 0, (uint32)(ExtInfo->Length), FALSE, buff, &ReadBytes);
+    if (!NT_SUCCESS(status)) {
         DbgFreePool(buff);
         return status;
     }
@@ -550,14 +502,14 @@ UDFIndexDirectory(
 //    prevOffset = 0;
     while(Offset<ExtInfo->Length) {
         DirPrint(("  Offset %x\n", Offset));
-        if(!FileId->descTag.tagIdent) {
+        if (!FileId->descTag.tagIdent) {
             DirPrint(("  term item\n"));
             break;
         }
-        if(FileId->descTag.tagIdent != TID_FILE_IDENT_DESC) {
+        if (FileId->descTag.tagIdent != TID_FILE_IDENT_DESC) {
             DirPrint(("  Inv. tag %x\n", FileId->descTag.tagIdent));
             Offset = UDFFindNextFI(buff, prevOffset, (ULONG)(ExtInfo->Length));
-            if(!Offset) {
+            if (!Offset) {
                 DirPrint(("  can't find next\n"));
                 break;
             } else {
@@ -565,19 +517,19 @@ UDFIndexDirectory(
                 FileId = (PFILE_IDENT_DESC)((buff)+Offset);
             }
         }
-        if(((ULONG)Offset & (Vcb->LBlockSize-1)) > (Vcb->LBlockSize-sizeof(FILE_IDENT_DESC))) {
+        if (((ULONG)Offset & (Vcb->LBlockSize-1)) > (Vcb->LBlockSize-sizeof(FILE_IDENT_DESC))) {
             DirPrint(("  badly aligned\n", Offset));
-            if(Vcb->Modified) {
+            if (Vcb->Modified) {
                 DirPrint(("  queue repack request\n"));
-                FileInfo->Dloc->DirIndex->DelCount = Vcb->PackDirThreshold+1;
+                DelCount = Vcb->PackDirThreshold+1;
             }
         }
 //        prevOffset = Offset;
         Offset += (FileId->lengthFileIdent + FileId->lengthOfImpUse + sizeof(FILE_IDENT_DESC) + 3) & (~((uint32)3));
         FileId = (PFILE_IDENT_DESC)((buff)+Offset);
         Count++;
-        if(Offset+sizeof(FILE_IDENT_DESC) > ExtInfo->Length) {
-            if(Offset != ExtInfo->Length) {
+        if (Offset+sizeof(FILE_IDENT_DESC) > ExtInfo->Length) {
+            if (Offset != ExtInfo->Length) {
                 UDFPrint(("  Trash at the end of Dir\n"));
             }
 //            BrutePoint();
@@ -585,7 +537,7 @@ UDFIndexDirectory(
         }
     }
     DirPrint(("  final Offset %x\n", Offset));
-    if(Offset > ExtInfo->Length) {
+    if (Offset > ExtInfo->Length) {
         BrutePoint();
         UDFPrint(("  Unexpected end of Dir\n"));
         DbgFreePool(buff);
@@ -594,10 +546,12 @@ UDFIndexDirectory(
     // allocate buffer for directory index & zero it
     DirPrint(("  Count %x\n", Count));
     hDirNdx = UDFDirIndexAlloc(Count+1);
-    if(!hDirNdx) {
+    if (!hDirNdx) {
         DbgFreePool(buff);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
+
+    hDirNdx->DelCount = DelCount;
 
     Offset = Count = 0;
     hDirNdx->DIFlags |= (ExtInfo->Offset ? UDF_DI_FLAG_INIT_IN_ICB : 0);
@@ -605,11 +559,11 @@ UDFIndexDirectory(
     DirNdx = UDFDirIndex(hDirNdx,0);
     ASSERT(FileInfo->Dloc->FELoc.Mapping[0].extLocation);
     DirNdx->FileEntryLoc.partitionReferenceNum = PartNum =
-        (uint16)UDFGetPartNumByPhysLba(Vcb, FileInfo->Dloc->FELoc.Mapping[0].extLocation);
+        (uint16)UDFGetRefPartNumByPhysLba(Vcb, FileInfo->Dloc->FELoc.Mapping[0].extLocation);
     ASSERT(PartNum != -1);
     DirNdx->FileEntryLoc.logicalBlockNum =
         UDFPhysLbaToPart(Vcb, PartNum, FileInfo->Dloc->FELoc.Mapping[0].extLocation);
-    if(DirNdx->FileEntryLoc.logicalBlockNum == (ULONG)-1) {
+    if (DirNdx->FileEntryLoc.logicalBlockNum == (ULONG)-1) {
         DirPrint(("  err: FileEntryLoc=-1\n"));
         DbgFreePool(buff);
         UDFDirIndexFree(hDirNdx);
@@ -631,14 +585,14 @@ UDFIndexDirectory(
 //    prevOffset = 0;
     while((Offset<ExtInfo->Length) && FileId->descTag.tagIdent) {
         // add new entry to index list
-        if(FileId->descTag.tagIdent != TID_FILE_IDENT_DESC) {
+        if (FileId->descTag.tagIdent != TID_FILE_IDENT_DESC) {
             UDFPrint(("  Invalid tagIdent %x (expected %x) offst %x\n", FileId->descTag.tagIdent, TID_FILE_IDENT_DESC, Offset));
             DirPrint(("    FileId: filen %x, iulen %x, charact %x\n",
                 FileId->lengthFileIdent, FileId->lengthOfImpUse, FileId->fileCharacteristics));
             DirPrint(("    loc: @%x\n", UDFExtentOffsetToLba(Vcb, ExtInfo->Mapping, Offset, NULL, NULL, NULL, NULL)));
             KdDump(FileId, sizeof(FileId->descTag));
             Offset = UDFFindNextFI(buff, prevOffset, (ULONG)(ExtInfo->Length));
-            if(!Offset) {
+            if (!Offset) {
                 DbgFreePool(buff);
                 UDFDirIndexFree(hDirNdx);
                 return STATUS_FILE_CORRUPT_ERROR;
@@ -649,14 +603,14 @@ UDFIndexDirectory(
         }
         DirNdx = UDFDirIndex(hDirNdx,Count);
         // allocate buffer & fill it with decompressed unicode filename
-        if(FileId->fileCharacteristics & FILE_DELETED) {
+        if (FileId->fileCharacteristics & FILE_DELETED) {
             DirPrint(("  FILE_DELETED\n"));
             hDirNdx->DelCount++;
         }
         DirPrint(("  FileId: offs %x, filen %x, iulen %x\n", Offset, FileId->lengthFileIdent, FileId->lengthOfImpUse));
         DirNdx->Length = (FileId->lengthFileIdent + FileId->lengthOfImpUse + sizeof(FILE_IDENT_DESC) + 3) & (~((uint32)3));
         DirPrint(("  DirNdx: Length %x, Charact %x\n", DirNdx->Length, FileId->fileCharacteristics));
-        if(FileId->fileCharacteristics & FILE_PARENT) {
+        if (FileId->fileCharacteristics & FILE_PARENT) {
             DirPrint(("  parent\n"));
             // init 'parent' entry
             // '..' points to Parent Object (if any),
@@ -677,7 +631,7 @@ UDFIndexDirectory(
             UDFNormalizeFileName(&(DirNdx->FName), valueCRC);
             DirNdx->FI_Flags |= UDFBuildHashEntry(Vcb, &(DirNdx->FName), &(DirNdx->hashes), HASH_ALL);
         }
-        if((FileId->fileCharacteristics & FILE_METADATA)
+        if ((FileId->fileCharacteristics & FILE_METADATA)
                        ||
               !DirNdx->FName.Buffer
                        ||
@@ -696,7 +650,7 @@ UDFIndexDirectory(
         DirNdx->FileCharacteristics = FileId->fileCharacteristics;
         DirNdx->Offset = Offset;
 #ifdef UDF_CHECK_DISK_ALLOCATION
-        if(!(FileId->fileCharacteristics & FILE_DELETED) &&
+        if (!(FileId->fileCharacteristics & FILE_DELETED) &&
             (UDFPartLbaToPhys(Vcb, &(DirNdx->FileEntryLoc)) != LBA_OUT_OF_EXTENT) &&
              UDFGetFreeBit(((uint32*)(Vcb->FSBM_Bitmap)), UDFPartLbaToPhys(Vcb, &(DirNdx->FileEntryLoc)) )) {
 
@@ -704,7 +658,7 @@ UDFIndexDirectory(
             BrutePoint();
             FileId->fileCharacteristics |= FILE_DELETED;
         } else
-        if(UDFPartLbaToPhys(Vcb, &(DirNdx->FileEntryLoc)) == LBA_OUT_OF_EXTENT) {
+        if (UDFPartLbaToPhys(Vcb, &(DirNdx->FileEntryLoc)) == LBA_OUT_OF_EXTENT) {
             AdPrint(("Ref to Invalid block %x\n", UDFPartLbaToPhys(Vcb, &(DirNdx->FileEntryLoc)) ));
             BrutePoint();
             FileId->fileCharacteristics |= FILE_DELETED;
@@ -714,8 +668,8 @@ UDFIndexDirectory(
         Offset += DirNdx->Length;
         FileId = (PFILE_IDENT_DESC)(((int8*)FileId)+DirNdx->Length);
         Count++;
-        if(Offset+sizeof(FILE_IDENT_DESC) > ExtInfo->Length) {
-            if(Offset != ExtInfo->Length) {
+        if (Offset+sizeof(FILE_IDENT_DESC) > ExtInfo->Length) {
+            if (Offset != ExtInfo->Length) {
                 UDFPrint(("  Trash at the end of Dir (2)\n"));
             }
 //            BrutePoint();
@@ -724,7 +678,7 @@ UDFIndexDirectory(
     } // while()
     // we needn't writing terminator 'cause the buffer is already zero-filled
     DbgFreePool(buff);
-    if(Count < 2) {
+    if (Count < 2) {
         UDFDirIndexFree(hDirNdx);
         UDFPrint(("  Directory too short\n"));
         return STATUS_FILE_CORRUPT_ERROR;
@@ -734,15 +688,15 @@ UDFIndexDirectory(
     return status;
 } // end UDFIndexDirectory()
 
-#ifndef UDF_READ_ONLY_BUILD
 /*
     This routine removes all DELETED entries from Dir & resizes it.
     It must be called before closing, no files sould be opened.
  */
-OSSTATUS
+NTSTATUS
 UDFPackDirectory__(
+    IN PIRP_CONTEXT IrpContext,
     IN PVCB Vcb,
- IN OUT PUDF_FILE_INFO FileInfo   // source (opened)
+    IN OUT PUDF_FILE_INFO FileInfo   // source (opened)
     )
 {
 #ifdef UDF_PACK_DIRS
@@ -752,11 +706,11 @@ UDFPackDirectory__(
     uint32 DataLocOffset;
     uint32 Offset, curOffset;
     int8* Buf;
-    OSSTATUS status;
+    NTSTATUS status;
     SIZE_T ReadBytes;
     int8* storedFI;
     PUDF_FILE_INFO curFileInfo;
-    PDIR_INDEX_ITEM DirNdx, DirNdx2;
+    PDIR_INDEX_ITEM DirNdx = NULL, DirNdx2;
     UDF_DIR_SCAN_CONTEXT ScanContext;
     uint_di dc=0;
     uint16 PartNum;
@@ -764,52 +718,59 @@ UDFPackDirectory__(
 
     ValidateFileInfo(FileInfo);
     PDIR_INDEX_HDR hDirNdx = FileInfo->Dloc->DirIndex;
-    if(!hDirNdx) return STATUS_NOT_A_DIRECTORY;
+    if (!hDirNdx) return STATUS_NOT_A_DIRECTORY;
 #ifndef UDF_PACK_DIRS
     return STATUS_SUCCESS;
 #else // UDF_PACK_DIRS
 
     // do not pack dirs on unchanged disks
-    if(!Vcb->Modified)
+    if (!Vcb->Modified)
         return STATUS_SUCCESS;
     // start packing
     LBS = Vcb->LBlockSize;
     Buf = (int8*)DbgAllocatePool(PagedPool, LBS*2);
-    if(!Buf) return STATUS_INSUFFICIENT_RESOURCES;
+    if (!Buf) return STATUS_INSUFFICIENT_RESOURCES;
     // we shall never touch 1st entry 'cause it can't be deleted
     Offset = UDFDirIndex(hDirNdx,2)->Offset;
     DataLocOffset = FileInfo->Dloc->DataLoc.Offset;
 
     i=j=2;
 
-    if(!UDFDirIndexInitScan(FileInfo, &ScanContext, i)) {
+    if (!UDFDirIndexInitScan(FileInfo, &ScanContext, i)) {
         DbgFreePool(Buf);
         return STATUS_SUCCESS;
     }
 
     ASSERT(FileInfo->Dloc->FELoc.Mapping[0].extLocation);
-    PartNum = (uint16)UDFGetPartNumByPhysLba(Vcb, FileInfo->Dloc->FELoc.Mapping[0].extLocation);
+    PartNum = (uint16)UDFGetRefPartNumByPhysLba(Vcb, FileInfo->Dloc->FELoc.Mapping[0].extLocation);
     ASSERT(PartNum != -1);
 
     while((DirNdx = UDFDirIndexScan(&ScanContext, NULL))) {
 
-        if(UDFIsDeleted(DirNdx))
+        if (UDFIsDeleted(DirNdx))
             dc++;
 
-        if(!UDFIsDeleted(DirNdx) ||
+        if (!UDFIsDeleted(DirNdx) ||
              DirNdx->FileInfo) {
             // move down valid entry
-            status = UDFReadFile__(Vcb, FileInfo, curOffset = DirNdx->Offset,
+            status = UDFReadFile__(IrpContext, Vcb, FileInfo, curOffset = DirNdx->Offset,
                                                           l = DirNdx->Length, FALSE, Buf, &ReadBytes);
-            if(!OS_SUCCESS(status)) {
+            if (!NT_SUCCESS(status)) {
                 DbgFreePool(Buf);
                 return status;
             }
             // remove ImpUse field
             IUl = ((PFILE_IDENT_DESC)Buf)->lengthOfImpUse;
             curFileInfo = DirNdx->FileInfo;
+
+            // The code below contains an error.
+            // We cannot extend the current FILE_IDENT_DESC to the sector boundary
+            // because the descriptor of the next file is stored there,
+            // and it will be overwritten. This has led to file overwrites, so this feature is disabled.
+
             // align next entry
-            if((d = LBS - ((curOffset + (l - IUl) + DataLocOffset) & (LBS-1)) ) < sizeof(FILE_IDENT_DESC)) {
+            if (FALSE) {
+            // disabled if ((d = LBS - ((curOffset + (l - IUl) + DataLocOffset) & (LBS-1)) ) < sizeof(FILE_IDENT_DESC)) {
 
                 // insufficient space at the end of last sector for
                 // next FileIdent's tag. fill it with ImpUse data
@@ -817,7 +778,7 @@ UDFPackDirectory__(
                 // generally, all data should be DWORD-aligned, but if it is not so
                 // this opearation will help us to avoid glitches
                 d = (d+3) & ~(3);
-                if(d != IUl) {
+                if (d != IUl) {
                     l = l + d - IUl;
                     FIl = ((PFILE_IDENT_DESC)Buf)->lengthFileIdent;
                     // copy filename to upper addr
@@ -826,9 +787,9 @@ UDFPackDirectory__(
                     RtlZeroMemory(Buf+sizeof(FILE_IDENT_DESC), d);
                     ((PFILE_IDENT_DESC)Buf)->lengthOfImpUse = (uint16)d;
 
-                    if(curFileInfo && curFileInfo->FileIdent) {
+                    if (curFileInfo && curFileInfo->FileIdent) {
                         // update stored FI if any
-                        if(!MyReallocPool__((int8*)(curFileInfo->FileIdent), l,
+                        if (!MyReallocPool__((int8*)(curFileInfo->FileIdent), l,
                                      (int8**)&(curFileInfo->FileIdent), (l+IUl-d) )) {
                             DbgFreePool(Buf);
                             return STATUS_INSUFFICIENT_RESOURCES;
@@ -846,16 +807,16 @@ UDFPackDirectory__(
                 d = 0;
             }
             // write modified to new addr
-            if((d != IUl) ||
+            if ((d != IUl) ||
                (curOffset != Offset)) {
 
                 UDFSetUpTag(Vcb, (tag*)Buf, (uint16)l,
                           UDFPhysLbaToPart(Vcb, PartNum,
                                      UDFExtentOffsetToLba(Vcb, FileInfo->Dloc->DataLoc.Mapping,
-                                                Offset, NULL, NULL, NULL, NULL)));
+                                                Offset, NULL, NULL, NULL, NULL)), 0);
 
-                status = UDFWriteFile__(Vcb, FileInfo, Offset, l, FALSE, Buf, &ReadBytes);
-                if(!OS_SUCCESS(status)) {
+                status = UDFWriteFile__(IrpContext, Vcb, FileInfo, Offset, l, FALSE, Buf, &ReadBytes);
+                if (!NT_SUCCESS(status)) {
                     DbgFreePool(Buf);
                     return status;
                 }
@@ -864,7 +825,7 @@ UDFPackDirectory__(
             *DirNdx2 = *DirNdx;
             DirNdx2->Offset = Offset;
             DirNdx2->Length = l;
-            if(curFileInfo) {
+            if (curFileInfo) {
                 curFileInfo->Index = j;
                 DirNdx2->FI_Flags |= UDF_FI_FLAG_FI_MODIFIED;
             }
@@ -874,8 +835,8 @@ UDFPackDirectory__(
     }
     // resize DirIndex
     DbgFreePool(Buf);
-    if(dc) {
-        if(!OS_SUCCESS(status = UDFDirIndexTrunc(&(FileInfo->Dloc->DirIndex), dc))) {
+    if (dc) {
+        if (!NT_SUCCESS(status = UDFDirIndexTrunc(&(FileInfo->Dloc->DirIndex), dc))) {
             return status;
         }
     }
@@ -884,83 +845,84 @@ UDFPackDirectory__(
     ASSERT(FileInfo->Dloc->FELoc.Mapping[0].extLocation);
 
     // now Offset points to EOF. Let's truncate directory
-    return UDFResizeFile__(Vcb, FileInfo, Offset);
+    return UDFResizeFile__(IrpContext, Vcb, FileInfo, Offset);
 #endif // UDF_PACK_DIRS
 } // end UDFPackDirectory__()
 
 /*
     This routine rebuilds tags for all entries from Dir.
  */
-OSSTATUS
+NTSTATUS
 UDFReTagDirectory(
+    IN PIRP_CONTEXT IrpContext,
     IN PVCB Vcb,
- IN OUT PUDF_FILE_INFO FileInfo   // source (opened)
+    IN OUT PUDF_FILE_INFO FileInfo   // source (opened)
     )
 {
     uint32 l;
     uint32 Offset;
     int8* Buf;
-    OSSTATUS status;
+    NTSTATUS status;
     SIZE_T ReadBytes;
     PUDF_FILE_INFO curFileInfo;
     PDIR_INDEX_ITEM DirNdx;
     UDF_DIR_SCAN_CONTEXT ScanContext;
-    uint16 PartNum;
+    uint16 RefPartNum;
 
     ValidateFileInfo(FileInfo);
     PDIR_INDEX_HDR hDirNdx = FileInfo->Dloc->DirIndex;
-    if(!hDirNdx) return STATUS_NOT_A_DIRECTORY;
+    if (!hDirNdx) return STATUS_NOT_A_DIRECTORY;
 
     // do not pack dirs on unchanged disks
-    if(!Vcb->Modified)
+    if (!Vcb->Modified)
         return STATUS_SUCCESS;
 
-    if( ((hDirNdx->DIFlags & UDF_DI_FLAG_INIT_IN_ICB) ? TRUE : FALSE) ==
+    if ( ((hDirNdx->DIFlags & UDF_DI_FLAG_INIT_IN_ICB) ? TRUE : FALSE) ==
         ((FileInfo->Dloc->DataLoc.Offset) ? TRUE : FALSE) ) {
         return STATUS_SUCCESS;
     }
 
     // start packing
     Buf = (int8*)DbgAllocatePool(PagedPool, Vcb->LBlockSize*2);
-    if(!Buf) return STATUS_INSUFFICIENT_RESOURCES;
+    if (!Buf) return STATUS_INSUFFICIENT_RESOURCES;
 
     Offset = UDFDirIndex(hDirNdx,1)->Offset;
 
-    if(!UDFDirIndexInitScan(FileInfo, &ScanContext, 1)) {
+    if (!UDFDirIndexInitScan(FileInfo, &ScanContext, 1)) {
         DbgFreePool(Buf);
         return STATUS_SUCCESS;
     }
 
     ASSERT(FileInfo->Dloc->FELoc.Mapping[0].extLocation);
-    PartNum = (uint16)UDFGetPartNumByPhysLba(Vcb, FileInfo->Dloc->FELoc.Mapping[0].extLocation);
-    ASSERT(PartNum != -1);
+    RefPartNum = (uint16)UDFGetRefPartNumByPhysLba(Vcb, FileInfo->Dloc->FELoc.Mapping[0].extLocation);
+    ASSERT(RefPartNum != -1);
 
     while((DirNdx = UDFDirIndexScan(&ScanContext, NULL))) {
 
-        status = UDFReadFile__(Vcb, FileInfo, Offset = DirNdx->Offset,
+        status = UDFReadFile__(IrpContext, Vcb, FileInfo, Offset = DirNdx->Offset,
                                                    l = DirNdx->Length, FALSE, Buf, &ReadBytes);
-        if(!OS_SUCCESS(status)) {
+        if (!NT_SUCCESS(status)) {
             DbgFreePool(Buf);
             return status;
         }
         curFileInfo = DirNdx->FileInfo;
         // write modified
         UDFSetUpTag(Vcb, (tag*)Buf, (uint16)l,
-                  UDFPhysLbaToPart(Vcb, PartNum,
+                  UDFPhysLbaToPart(Vcb, RefPartNum,
                              UDFExtentOffsetToLba(Vcb, FileInfo->Dloc->DataLoc.Mapping,
-                                        Offset, NULL, NULL, NULL, NULL)));
+                                        Offset, NULL, NULL, NULL, NULL)), 0);
 
-        if(curFileInfo && curFileInfo->FileIdent) {
+        if (curFileInfo && curFileInfo->FileIdent) {
             FileInfo->Dloc->FELoc.Modified = TRUE;
             FileInfo->Dloc->FE_Flags |= UDF_FE_FLAG_FE_MODIFIED;
         }
 
-        status = UDFWriteFile__(Vcb, FileInfo, Offset, l, FALSE, Buf, &ReadBytes);
-        if(!OS_SUCCESS(status)) {
+        status = UDFWriteFile__(IrpContext, Vcb, FileInfo, Offset, l, FALSE, Buf, &ReadBytes);
+        if (!NT_SUCCESS(status)) {
             DbgFreePool(Buf);
             return status;
         }
-        if(curFileInfo) {
+        if (curFileInfo) {
             DirNdx->FI_Flags |= UDF_FI_FLAG_FI_MODIFIED;
         }
     }
@@ -972,13 +934,12 @@ UDFReTagDirectory(
     return status;
 
 } // end UDFReTagDirectory()
-#endif //UDF_READ_ONLY_BUILD
 
 /*
     This routine performs search for specified file in specified directory &
     returns corresponding offset in extent if found.
  */
-OSSTATUS
+NTSTATUS
 UDFFindFile(
     IN PVCB Vcb,
     IN BOOLEAN IgnoreCase,
@@ -999,19 +960,19 @@ UDFFindFile(
 
     UDFBuildHashEntry(Vcb, Name, &hashes, HASH_POSIX | HASH_ULFN);
 
-    if((CanBe8d3 = UDFCanNameBeA8dot3(Name))) {
+    if ((CanBe8d3 = UDFCanNameBeA8dot3(Name))) {
         ShortName.MaximumLength = 13 * sizeof(WCHAR);
         ShortName.Buffer = (PWCHAR)&ShortNameBuffer;
     }
 
-    if(!UDFDirIndexInitScan(DirInfo, &ScanContext, (*Index)))
+    if (!UDFDirIndexInitScan(DirInfo, &ScanContext, (*Index)))
         return STATUS_OBJECT_NAME_NOT_FOUND;
 
-    if(!IgnoreCase && !CanBe8d3) {
+    if (!IgnoreCase && !CanBe8d3) {
         // perform case sensetive sequential directory scan
 
         while((DirNdx = UDFDirIndexScan(&ScanContext, NULL))) {
-            if( (DirNdx->hashes.hPosix == hashes.hPosix) &&
+            if ( (DirNdx->hashes.hPosix == hashes.hPosix) &&
                  DirNdx->FName.Buffer &&
                 (!RtlCompareUnicodeString(&(DirNdx->FName), Name, FALSE)) &&
                ( (!UDFIsDeleted(DirNdx)) || (!NotDeleted) ) ) {
@@ -1022,23 +983,23 @@ UDFFindFile(
         return STATUS_OBJECT_NAME_NOT_FOUND;
     }
 
-    if(hashes.hPosix == hashes.hLfn) {
+    if (hashes.hPosix == hashes.hLfn) {
 
         while((DirNdx = UDFDirIndexScan(&ScanContext, NULL))) {
-            if(!DirNdx->FName.Buffer ||
+            if (!DirNdx->FName.Buffer ||
                (NotDeleted && UDFIsDeleted(DirNdx)) )
                 continue;
-            if( (DirNdx->hashes.hLfn == hashes.hLfn) &&
+            if ( (DirNdx->hashes.hLfn == hashes.hLfn) &&
                 (!RtlCompareUnicodeString(&(DirNdx->FName), Name, IgnoreCase)) ) {
                 (*Index) = ScanContext.i;
                 return STATUS_SUCCESS;
             } else
-            if( CanBe8d3 &&
+            if ( CanBe8d3 &&
                 !(DirNdx->FI_Flags & UDF_FI_FLAG_DOS) &&
                 (DirNdx->hashes.hDos == hashes.hLfn) &&
                 (k == (uint_di)(-1))) {
                 UDFDOSName(Vcb, &ShortName, &(DirNdx->FName), ScanContext.i < 2) ;
-                if(!RtlCompareUnicodeString(&ShortName, Name, IgnoreCase))
+                if (!RtlCompareUnicodeString(&ShortName, Name, IgnoreCase))
                     k = ScanContext.i;
             }
         }
@@ -1047,36 +1008,36 @@ UDFFindFile(
 
         while((DirNdx = UDFDirIndexScan(&ScanContext, NULL))) {
             // perform sequential directory scan
-            if(!DirNdx->FName.Buffer ||
+            if (!DirNdx->FName.Buffer ||
                (NotDeleted && UDFIsDeleted(DirNdx)) )
                 continue;
-            if( (DirNdx->hashes.hPosix == hashes.hPosix) &&
+            if ( (DirNdx->hashes.hPosix == hashes.hPosix) &&
                 (!RtlCompareUnicodeString(&(DirNdx->FName), Name, FALSE)) ) {
                 (*Index) = ScanContext.i;
                 return STATUS_SUCCESS;
             } else
-            if( (DirNdx->hashes.hLfn == hashes.hLfn) &&
+            if ( (DirNdx->hashes.hLfn == hashes.hLfn) &&
                 (j == (uint_di)(-1)) &&
                 (!RtlCompareUnicodeString(&(DirNdx->FName), Name, IgnoreCase)) ) {
                 j = ScanContext.i;
             } else
-            if( CanBe8d3 &&
+            if ( CanBe8d3 &&
                 !(DirNdx->FI_Flags & UDF_FI_FLAG_DOS) &&
                 (DirNdx->hashes.hDos == hashes.hLfn) &&
                 (k == (uint_di)(-1))) {
                 UDFDOSName(Vcb, &ShortName, &(DirNdx->FName), ScanContext.i < 2 );
-                if(!RtlCompareUnicodeString(&ShortName, Name, IgnoreCase)) {
+                if (!RtlCompareUnicodeString(&ShortName, Name, IgnoreCase)) {
                     k = ScanContext.i;
                 }
             }
         }
     }
 
-    if(j != (uint_di)(-1)) {
+    if (j != (uint_di)(-1)) {
         (*Index) = j;
         return STATUS_SUCCESS;
     } else
-    if(k != (uint_di)(-1)) {
+    if (k != (uint_di)(-1)) {
         (*Index) = k;
         return STATUS_SUCCESS;
     }
@@ -1095,20 +1056,20 @@ UDFGetDirIndexByFileInfo(
 {
     ValidateFileInfo(FileInfo);
 
-    if(!FileInfo) {
+    if (!FileInfo) {
         BrutePoint();
         return NULL;
     }
     if (FileInfo->ParentFile) {
         ValidateFileInfo(FileInfo->ParentFile);
 
-        if(UDFIsAStreamDir(FileInfo))
+        if (UDFIsAStreamDir(FileInfo))
             return NULL;
-        if(FileInfo->ParentFile->Dloc)
+        if (FileInfo->ParentFile->Dloc)
             return FileInfo->ParentFile->Dloc->DirIndex;
         return NULL;
     }
-    if(FileInfo->Dloc)
+    if (FileInfo->Dloc)
         return FileInfo->Dloc->DirIndex;
     return NULL;
 }
@@ -1132,11 +1093,11 @@ UDFFindDloc(
     PUDF_DATALOC_INDEX DlocList;
     uint32 l;
 
-    if(!(DlocList = Vcb->DlocList) || !Lba) return (-1);
+    if (!(DlocList = Vcb->DlocList) || !Lba) return (-1);
     // scan FE location cache
     l = Vcb->DlocCount;
     for(uint32 i=0; i<l; i++, DlocList++) {
-        if(DlocList->Lba == Lba)
+        if (DlocList->Lba == Lba)
             return i;
     }
     return (-1);
@@ -1154,11 +1115,11 @@ UDFFindDlocInMem(
     PUDF_DATALOC_INDEX DlocList;
     uint32 l;
 
-    if(!(DlocList = Vcb->DlocList) || !Dloc) return (-1);
+    if (!(DlocList = Vcb->DlocList) || !Dloc) return (-1);
     // scan FE location cache
     l = Vcb->DlocCount;
     for(uint32 i=0; i<l; i++, DlocList++) {
-        if(DlocList->Dloc == Dloc)
+        if (DlocList->Dloc == Dloc)
             return i;
     }
     return (-1);
@@ -1176,9 +1137,9 @@ UDFFindFreeDloc(
     PUDF_DATALOC_INDEX DlocList;
     uint32 l;
 
-    if(!Vcb->DlocList) {
+    if (!Vcb->DlocList) {
         // init FE location cache
-        if(!(Vcb->DlocList = (PUDF_DATALOC_INDEX)MyAllocatePoolTag__(NonPagedPool, sizeof(UDF_DATALOC_INDEX)*DLOC_LIST_GRANULARITY, MEM_DLOC_NDX_TAG)))
+        if (!(Vcb->DlocList = (PUDF_DATALOC_INDEX)MyAllocatePoolTag__(NonPagedPool, sizeof(UDF_DATALOC_INDEX)*DLOC_LIST_GRANULARITY, MEM_DLOC_NDX_TAG)))
             return (-1);
         RtlZeroMemory(Vcb->DlocList, DLOC_LIST_GRANULARITY*sizeof(UDF_DATALOC_INDEX));
         Vcb->DlocCount = DLOC_LIST_GRANULARITY;
@@ -1187,11 +1148,11 @@ UDFFindFreeDloc(
     DlocList = Vcb->DlocList;
     l = Vcb->DlocCount;
     for(uint32 i=0; i<l; i++, DlocList++) {
-        if(!DlocList->Dloc)
+        if (!DlocList->Dloc)
             return i;
     }
     // alloc some free entries
-    if(!MyReallocPool__((int8*)(Vcb->DlocList), Vcb->DlocCount*sizeof(UDF_DATALOC_INDEX),
+    if (!MyReallocPool__((int8*)(Vcb->DlocList), Vcb->DlocCount*sizeof(UDF_DATALOC_INDEX),
                      (int8**)&(Vcb->DlocList), (Vcb->DlocCount+DLOC_LIST_GRANULARITY)*sizeof(UDF_DATALOC_INDEX))) {
         return (-1);
     }
@@ -1202,14 +1163,14 @@ UDFFindFreeDloc(
 
 /*
  */
-OSSTATUS
+NTSTATUS
 UDFAcquireDloc(
     IN PVCB Vcb,
     IN PUDF_DATALOC_INFO Dloc
     )
 {
     UDFAcquireResourceExclusive(&(Vcb->DlocResource2),TRUE);
-    if(Dloc->FE_Flags & UDF_FE_FLAG_UNDER_INIT) {
+    if (Dloc->FE_Flags & UDF_FE_FLAG_UNDER_INIT) {
         UDFReleaseResource(&(Vcb->DlocResource2));
         return STATUS_SHARING_PAUSED;
     }
@@ -1220,7 +1181,7 @@ UDFAcquireDloc(
 
 /*
  */
-OSSTATUS
+NTSTATUS
 UDFReleaseDloc(
     IN PVCB Vcb,
     IN PUDF_DATALOC_INFO Dloc
@@ -1236,7 +1197,7 @@ UDFReleaseDloc(
     Try to store FE location in cache
     If it is already in use, caller will be informed about it
  */
-OSSTATUS
+NTSTATUS
 UDFStoreDloc(
     IN PVCB Vcb,
     IN PUDF_FILE_INFO fi,
@@ -1246,30 +1207,30 @@ UDFStoreDloc(
     LONG i;
     PUDF_DATALOC_INFO Dloc;
 
-    if(!Lba) return STATUS_INVALID_PARAMETER;
-    if(Lba == (ULONG)-1) return STATUS_INVALID_PARAMETER;
+    if (!Lba) return STATUS_INVALID_PARAMETER;
+    if (Lba == (ULONG)-1) return STATUS_INVALID_PARAMETER;
 
     UDFAcquireResourceExclusive(&(Vcb->DlocResource),TRUE);
 
     // check if FE specified is already in use
-    if((i = UDFFindDloc(Vcb, Lba)) == (-1)) {
+    if ((i = UDFFindDloc(Vcb, Lba)) == (-1)) {
         // not used
-        if((i = UDFFindFreeDloc(Vcb, Lba)) == (-1)) {
+        if ((i = UDFFindFreeDloc(Vcb, Lba)) == (-1)) {
             UDFReleaseResource(&(Vcb->DlocResource));
             return STATUS_INSUFFICIENT_RESOURCES;
         }
     } else {
-        if(!OS_SUCCESS(UDFAcquireDloc(Vcb, Dloc = Vcb->DlocList[i].Dloc))) {
+        if (!NT_SUCCESS(UDFAcquireDloc(Vcb, Dloc = Vcb->DlocList[i].Dloc))) {
             UDFReleaseResource(&(Vcb->DlocResource));
             return STATUS_SHARING_PAUSED;
         }
         // update caller's structures & exit
         fi->Dloc = Dloc;
         UDFReleaseDloc(Vcb, Dloc);
-#if defined UDF_DBG && !defined _CONSOLE
-        if(fi->Dloc->CommonFcb) {
-            ASSERT((uint32)(fi->Dloc->CommonFcb) != 0xDEADDA7A);
-            ASSERT(fi->Dloc->CommonFcb->CommonFCBHeader.NodeTypeCode == UDF_NODE_TYPE_NT_REQ_FCB);
+#if defined UDF_DBG
+        if (fi->Dloc->CommonFcb) {
+            ASSERT((uintptr_t)(fi->Dloc->CommonFcb) != 0xDEADDA7A);
+            ASSERT_FCB(fi->Dloc->CommonFcb);
         }
 #endif // UDF_DBG
         UDFReleaseResource(&(Vcb->DlocResource));
@@ -1277,7 +1238,7 @@ UDFStoreDloc(
     }
     // allocate common DataLocation (Dloc) descriptor
     Dloc = fi->Dloc = (PUDF_DATALOC_INFO)MyAllocatePoolTag__(UDF_DATALOC_INFO_MT, sizeof(UDF_DATALOC_INFO), MEM_DLOC_INF_TAG);
-    if(!Dloc) {
+    if (!Dloc) {
         UDFReleaseResource(&(Vcb->DlocResource));
         return STATUS_INSUFFICIENT_RESOURCES;
     }
@@ -1295,7 +1256,7 @@ UDFStoreDloc(
     This routine must be invoked when there are no more opened files
     associated with given FE
  */
-OSSTATUS
+NTSTATUS
 UDFRemoveDloc(
     IN PVCB Vcb,
     IN PUDF_DATALOC_INFO Dloc
@@ -1305,7 +1266,7 @@ UDFRemoveDloc(
 
     UDFAcquireResourceExclusive(&(Vcb->DlocResource),TRUE);
 
-    if((i = UDFFindDlocInMem(Vcb, Dloc)) == (-1)) {
+    if ((i = UDFFindDlocInMem(Vcb, Dloc)) == (-1)) {
         // FE specified is not in cache. exit
         UDFReleaseResource(&(Vcb->DlocResource));
         return STATUS_INVALID_PARAMETER;
@@ -1323,7 +1284,7 @@ UDFRemoveDloc(
     This routine must be invoked when there are no more opened files
     associated with given FE
  */
-OSSTATUS
+NTSTATUS
 UDFUnlinkDloc(
     IN PVCB Vcb,
     IN PUDF_DATALOC_INFO Dloc
@@ -1333,7 +1294,7 @@ UDFUnlinkDloc(
 
     UDFAcquireResourceExclusive(&(Vcb->DlocResource),TRUE);
 
-    if((i = UDFFindDlocInMem(Vcb, Dloc)) == (-1)) {
+    if ((i = UDFFindDlocInMem(Vcb, Dloc)) == (-1)) {
         // FE specified is not in cache. exit
         UDFReleaseResource(&(Vcb->DlocResource));
         return STATUS_INVALID_PARAMETER;
@@ -1359,7 +1320,7 @@ UDFFreeDloc(
 
     UDFAcquireResourceExclusive(&(Vcb->DlocResource),TRUE);
 
-    if((i = UDFFindDlocInMem(Vcb, Dloc)) != (-1)) {
+    if ((i = UDFFindDlocInMem(Vcb, Dloc)) != (-1)) {
         ASSERT(Vcb->DlocList);
         RtlZeroMemory(&(Vcb->DlocList[i]), sizeof(UDF_DATALOC_INDEX));
     }
@@ -1381,7 +1342,7 @@ UDFRelocateDloc(
 
     UDFAcquireResourceExclusive(&(Vcb->DlocResource),TRUE);
 
-    if((i = UDFFindDlocInMem(Vcb, Dloc)) != (-1)) {
+    if ((i = UDFFindDlocInMem(Vcb, Dloc)) != (-1)) {
         ASSERT(Vcb->DlocList);
         Vcb->DlocList[i].Lba = NewLba;
     }
@@ -1397,10 +1358,10 @@ UDFReleaseDlocList(
     IN PVCB Vcb
     )
 {
-    if(!Vcb->DlocList) return;
+    if (!Vcb->DlocList) return;
     UDFAcquireResourceExclusive(&(Vcb->DlocResource),TRUE);
     for(uint32 i=0; i<Vcb->DlocCount; i++) {
-        if(Vcb->DlocList[i].Dloc)
+        if (Vcb->DlocList[i].Dloc)
             MyFreePool__(Vcb->DlocList[i].Dloc);
     }
     MyFreePool__(Vcb->DlocList);
@@ -1440,8 +1401,8 @@ UDFLocateAnyParallelFI(
     PUDF_FILE_INFO fi   // FileInfo to start search from
     )
 {
-    if(!fi->ParentFile) {
-        if(fi->NextLinkedFile == fi)
+    if (!fi->ParentFile) {
+        if (fi->NextLinkedFile == fi)
             return NULL;
         return fi->NextLinkedFile;
     }
@@ -1455,8 +1416,8 @@ UDFLocateAnyParallelFI(
             (ParFileInfo->ParentFile->Dloc != Dloc))) ) {
         ParFileInfo = ParFileInfo->NextLinkedFile;
     }
-/*    if(NotFound) {
-        if((ParFileInfo->Index == i) &&
+/*    if (NotFound) {
+        if ((ParFileInfo->Index == i) &&
            (ParFileInfo->ParentFile->Dloc == Dloc))
             return ParFileInfo;
         return NULL;
