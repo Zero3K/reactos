@@ -1494,7 +1494,7 @@ UDFDeleteVCB(
 
     delay.QuadPart = -500000; // 0.05 sec
     while(Vdo->PostedRequestCount) {
-        UDFPrint(("UDFDeleteVCB: PostedRequestCount = %d\n", Vcb->PostedRequestCount));
+        UDFPrint(("UDFDeleteVCB: PostedRequestCount = %d\n", Vdo->PostedRequestCount));
         // spin until all queues IRPs are processed
         KeDelayExecutionThread(KernelMode, FALSE, &delay);
         delay.QuadPart -= 500000; // grow delay 0.05 sec
