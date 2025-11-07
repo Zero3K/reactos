@@ -102,7 +102,13 @@
 #pragma warning(disable : 4995)
 #include <ntifs.h>
 #include <ntddscsi.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <scsi.h>
+#ifdef __cplusplus
+}
+#endif
 #include <ntddcdrm.h>
 #include <ntddcdvd.h>
 #include "ntdddisk.h"
