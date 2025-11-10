@@ -993,6 +993,16 @@ UDFPostRequest(
     if (Irp)
         IoMarkIrpPending(Irp);
 
+    //
+    // Initialize the work queue item before potentially inserting it into
+    // the overflow queue. This prevents list corruption when InsertTailList
+    // validates the list entry.
+    //
+#pragma prefast(suppress:28155, "the function prototype is correct")
+    ExInitializeWorkItem(&IrpContext->WorkQueueItem,
+                         UDFFspDispatch,
+                         IrpContext);
+
     // Check if this request has an associated file object, and thus volume
     // device object.
 
@@ -1034,11 +1044,6 @@ UDFPostRequest(
     }
 
     // Send it off.....
-
-#pragma prefast(suppress:28155, "the function prototype is correct")
-    ExInitializeWorkItem(&IrpContext->WorkQueueItem,
-                         UDFFspDispatch,
-                         IrpContext);
 
 #pragma prefast(suppress: 28159, "prefast believes this routine is obsolete, but it is ok for CDFS to continue using it")
     ExQueueWorkItem(&IrpContext->WorkQueueItem, CriticalWorkQueue);
@@ -1245,9 +1250,30 @@ UDFFspDispatch(
                 //  the Event
                 //
 
-                VolDo->OverflowQueueCount -= 1;
+                //
+                //  Verify the list is not empty before attempting to remove an entry.
+                //  This prevents a race condition where multiple threads could
+                //  decrement the count and attempt to remove from an empty list,
+                //  causing list corruption and BSOD.
+                //
+                if (!IsListEmpty(&VolDo->OverflowQueue)) {
 
-                Entry = RemoveHeadList(&VolDo->OverflowQueue);
+                    VolDo->OverflowQueueCount -= 1;
+
+                    Entry = RemoveHeadList(&VolDo->OverflowQueue);
+
+                } else {
+
+                    //
+                    //  The list is empty even though the count indicated otherwise.
+                    //  This can happen due to a race condition. Decrement the count
+                    //  and treat this as if there were no entries.
+                    //
+                    VolDo->OverflowQueueCount -= 1;
+                    VolDo->PostedRequestCount -= 1;
+
+                    Entry = NULL;
+                }
 
             }
             else {
