@@ -993,6 +993,16 @@ UDFPostRequest(
     if (Irp)
         IoMarkIrpPending(Irp);
 
+    //
+    // Initialize the work queue item before potentially inserting it into
+    // the overflow queue. This prevents list corruption when InsertTailList
+    // validates the list entry.
+    //
+#pragma prefast(suppress:28155, "the function prototype is correct")
+    ExInitializeWorkItem(&IrpContext->WorkQueueItem,
+                         UDFFspDispatch,
+                         IrpContext);
+
     // Check if this request has an associated file object, and thus volume
     // device object.
 
@@ -1034,11 +1044,6 @@ UDFPostRequest(
     }
 
     // Send it off.....
-
-#pragma prefast(suppress:28155, "the function prototype is correct")
-    ExInitializeWorkItem(&IrpContext->WorkQueueItem,
-                         UDFFspDispatch,
-                         IrpContext);
 
 #pragma prefast(suppress: 28159, "prefast believes this routine is obsolete, but it is ok for CDFS to continue using it")
     ExQueueWorkItem(&IrpContext->WorkQueueItem, CriticalWorkQueue);
