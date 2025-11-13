@@ -84,7 +84,7 @@ NTSTATUS __fastcall WCacheDecodeFlags(IN PW_CACHE Cache,
 #define ASYNC_CMD_READ        1
 #define ASYNC_CMD_UPDATE      2
 
-#define WCACHE_MAX_CHAIN      (0x10)
+#define WCACHE_MAX_CHAIN      (0x40)
 
 #define MEM_WCCTX_TAG         'xtCW'
 #define MEM_WCFRM_TAG         'rfCW'

@@ -96,7 +96,7 @@ typedef struct _SPARABLE_PARTITION_MAP
 #define UDF_METADATA_MAP25      0x2522U
 
 #ifndef PACKETSIZE_UDF
-#define PACKETSIZE_UDF              32
+#define PACKETSIZE_UDF              128
 #endif //PACKETSIZE_UDF
 
 /* UDF 2.5 */
