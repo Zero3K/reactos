@@ -52,7 +52,7 @@
 
 // Read ahead amount used for normal data files
 
-#define READ_AHEAD_GRANULARITY           (0x10000)
+#define READ_AHEAD_GRANULARITY           (0x40000)
 
 #define UDF_DEFAULT_SPARSE_THRESHOLD (256*PACKETSIZE_UDF)
 
